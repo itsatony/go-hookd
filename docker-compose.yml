@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  # PostgreSQL database for go-hookd development
+  # Port: 5433 (non-standard to avoid conflicts)
+  postgres-hookd-dev:
+    image: postgres:16-alpine
+    container_name: go-hookd-postgres-dev
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_USER: hookd_dev
+      POSTGRES_PASSWORD: hookd_dev_password_change_in_production
+      POSTGRES_DB: hookd_dev
+      PGDATA: /var/lib/postgresql/data/pgdata
+
+    ports:
+      - "5433:5432"  # Host:Container - using non-standard port 5433
+
+    volumes:
+      - go-hookd-postgres-data:/var/lib/postgresql/data
+      - ./migrations/postgres:/docker-entrypoint-initdb.d:ro
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hookd_dev -d hookd_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+    networks:
+      - go-hookd-dev-network
+
+volumes:
+  go-hookd-postgres-data:
+    name: go-hookd-postgres-data
+    driver: local
+
+networks:
+  go-hookd-dev-network:
+    name: go-hookd-dev-network
+    driver: bridge

@@ -1,0 +1,56 @@
+# versions.yaml - Multi-dimensional version manifest for go-hookd
+manifest_version: "1.0"
+
+# Project version (semantic versioning)
+project:
+  name: "go-hookd"
+  version: "0.2.0"
+  description: "Enterprise webhook management package"
+
+# Database schema versions (migration numbers)
+schemas:
+  postgres_main: "1"
+
+# Component versions (internal modules)
+components:
+  manager: "0.1.0"
+  delivery_engine: "0.1.0"
+  circuit_breaker: "0.1.0"
+  idempotency_store: "0.1.0"
+
+# External dependencies (mandatory)
+dependencies:
+  go_cuserr:
+    version: "0.3.0"
+    required: true
+    description: "Protocol-agnostic error handling"
+  go_version:
+    version: "1.0.0"
+    required: true
+    description: "Multi-dimensional versioning"
+  go_pubbing:
+    version: "0.5.2"
+    required: true
+    description: "High-performance event bus"
+  lib_pq:
+    version: "1.10.9"
+    required: true
+    description: "PostgreSQL driver"
+  go_nanoid:
+    version: "2.1.0"
+    required: true
+    description: "NanoID generation"
+  uber_zap:
+    version: "1.27.0"
+    required: true
+    description: "Structured logging"
+  testify:
+    version: "1.11.1"
+    required: true
+    description: "Testing toolkit"
+
+# Custom metadata
+custom:
+  min_go_version: "1.24"
+  development_stage: "phase_1_foundation"
+  excellence_standard: "90_percent_coverage"
