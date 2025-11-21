@@ -743,3 +743,870 @@ func TestMockRepository_Close(t *testing.T) {
 	err := repo.Close()
 	assert.NoError(t, err)
 }
+
+// =============================================================================
+// MOCK REPOSITORY TX TESTS (Transaction-specific operations)
+// =============================================================================
+
+func TestMockRepositoryTx_GetSubscriptionByTenantAndURL(t *testing.T) {
+	repo := NewMockRepository()
+	ctx := context.Background()
+
+	// Create subscription in parent repo
+	sub := createTestSubscription(t, "sub_test1", "tenant1", "https://example.com/webhook")
+	require.NoError(t, repo.CreateSubscription(ctx, sub))
+
+	// Begin transaction
+	tx, err := repo.BeginTx(ctx)
+	require.NoError(t, err)
+
+	t.Run("Find existing subscription", func(t *testing.T) {
+		retrieved, err := tx.GetSubscriptionByTenantAndURL(ctx, "tenant1", "https://example.com/webhook")
+		require.NoError(t, err)
+		assert.Equal(t, sub.ID, retrieved.ID)
+	})
+
+	t.Run("Not found - different tenant", func(t *testing.T) {
+		_, err := tx.GetSubscriptionByTenantAndURL(ctx, "tenant2", "https://example.com/webhook")
+		assert.ErrorIs(t, err, ErrSubscriptionNotFound)
+	})
+
+	t.Run("Not found - different URL", func(t *testing.T) {
+		_, err := tx.GetSubscriptionByTenantAndURL(ctx, "tenant1", "https://other.com/webhook")
+		assert.ErrorIs(t, err, ErrSubscriptionNotFound)
+	})
+
+	t.Run("Find subscription created in transaction", func(t *testing.T) {
+		newSub := createTestSubscription(t, "sub_test2", "tenant1", "https://example.com/webhook2")
+		err := tx.CreateSubscription(ctx, newSub)
+		require.NoError(t, err)
+
+		retrieved, err := tx.GetSubscriptionByTenantAndURL(ctx, "tenant1", "https://example.com/webhook2")
+		require.NoError(t, err)
+		assert.Equal(t, newSub.ID, retrieved.ID)
+	})
+
+	require.NoError(t, tx.Rollback())
+}
+
+func TestMockRepositoryTx_DeleteSubscription(t *testing.T) {
+	repo := NewMockRepository()
+	ctx := context.Background()
+
+	t.Run("Delete within transaction - commit", func(t *testing.T) {
+		// Create subscription in parent repo
+		sub := createTestSubscription(t, "sub_test1", "tenant1", "https://example.com/webhook1")
+		require.NoError(t, repo.CreateSubscription(ctx, sub))
+
+		// Begin transaction
+		tx, err := repo.BeginTx(ctx)
+		require.NoError(t, err)
+
+		// Delete in transaction
+		err = tx.DeleteSubscription(ctx, sub.ID)
+		require.NoError(t, err)
+
+		// Verify deleted in transaction
+		_, err = tx.GetSubscription(ctx, sub.ID)
+		assert.ErrorIs(t, err, ErrSubscriptionNotFound)
+
+		// Verify still exists in parent repo
+		_, err = repo.GetSubscription(ctx, sub.ID)
+		require.NoError(t, err)
+
+		// Commit
+		err = tx.Commit()
+		require.NoError(t, err)
+
+		// Verify deleted in parent repo
+		_, err = repo.GetSubscription(ctx, sub.ID)
+		assert.ErrorIs(t, err, ErrSubscriptionNotFound)
+	})
+
+	t.Run("Delete within transaction - rollback", func(t *testing.T) {
+		// Create subscription in parent repo
+		sub := createTestSubscription(t, "sub_test2", "tenant1", "https://example.com/webhook2")
+		require.NoError(t, repo.CreateSubscription(ctx, sub))
+
+		// Begin transaction
+		tx, err := repo.BeginTx(ctx)
+		require.NoError(t, err)
+
+		// Delete in transaction
+		err = tx.DeleteSubscription(ctx, sub.ID)
+		require.NoError(t, err)
+
+		// Rollback
+		err = tx.Rollback()
+		require.NoError(t, err)
+
+		// Verify still exists in parent repo
+		_, err = repo.GetSubscription(ctx, sub.ID)
+		require.NoError(t, err)
+	})
+
+	t.Run("Delete not found", func(t *testing.T) {
+		tx, err := repo.BeginTx(ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+
+		err = tx.DeleteSubscription(ctx, "sub_nonexistent")
+		assert.ErrorIs(t, err, ErrSubscriptionNotFound)
+	})
+
+	t.Run("Cascade delete deliveries", func(t *testing.T) {
+		// Create subscription and delivery in parent repo
+		sub := createTestSubscription(t, "sub_test3", "tenant1", "https://example.com/webhook3")
+		require.NoError(t, repo.CreateSubscription(ctx, sub))
+		dlv := createTestDelivery(t, "dlv_test1", sub.ID, sub.TenantID)
+		require.NoError(t, repo.CreateDelivery(ctx, dlv))
+
+		// Begin transaction and delete subscription
+		tx, err := repo.BeginTx(ctx)
+		require.NoError(t, err)
+
+		err = tx.DeleteSubscription(ctx, sub.ID)
+		require.NoError(t, err)
+
+		// Verify delivery also deleted in transaction
+		_, err = tx.GetDelivery(ctx, dlv.ID)
+		assert.ErrorIs(t, err, ErrDeliveryNotFound)
+
+		// Commit
+		err = tx.Commit()
+		require.NoError(t, err)
+
+		// Verify delivery deleted in parent repo
+		_, err = repo.GetDelivery(ctx, dlv.ID)
+		assert.ErrorIs(t, err, ErrDeliveryNotFound)
+	})
+}
+
+func TestMockRepositoryTx_ListSubscriptions(t *testing.T) {
+	repo := NewMockRepository()
+	ctx := context.Background()
+
+	// Create subscriptions in parent repo
+	sub1 := createTestSubscription(t, "sub_test1", "tenant1", "https://example.com/webhook1")
+	sub2 := createTestSubscription(t, "sub_test2", "tenant1", "https://example.com/webhook2")
+	sub3 := createTestSubscription(t, "sub_test3", "tenant2", "https://example.com/webhook3")
+	require.NoError(t, repo.CreateSubscription(ctx, sub1))
+	time.Sleep(10 * time.Millisecond)
+	require.NoError(t, repo.CreateSubscription(ctx, sub2))
+	time.Sleep(10 * time.Millisecond)
+	require.NoError(t, repo.CreateSubscription(ctx, sub3))
+
+	// Begin transaction
+	tx, err := repo.BeginTx(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	t.Run("List all", func(t *testing.T) {
+		filter := &SubscriptionFilter{Limit: 100}
+		subs, err := tx.ListSubscriptions(ctx, filter)
+		require.NoError(t, err)
+		assert.Len(t, subs, 3)
+	})
+
+	t.Run("Filter by tenant", func(t *testing.T) {
+		filter := &SubscriptionFilter{TenantID: "tenant1", Limit: 100}
+		subs, err := tx.ListSubscriptions(ctx, filter)
+		require.NoError(t, err)
+		assert.Len(t, subs, 2)
+	})
+
+	t.Run("Filter by status", func(t *testing.T) {
+		filter := &SubscriptionFilter{Status: SubscriptionStatusActive, Limit: 100}
+		subs, err := tx.ListSubscriptions(ctx, filter)
+		require.NoError(t, err)
+		assert.Len(t, subs, 3)
+	})
+
+	t.Run("With limit and offset", func(t *testing.T) {
+		filter := &SubscriptionFilter{Limit: 2, Offset: 1}
+		subs, err := tx.ListSubscriptions(ctx, filter)
+		require.NoError(t, err)
+		assert.Len(t, subs, 2)
+	})
+
+	t.Run("See changes in transaction", func(t *testing.T) {
+		// Create new subscription in transaction
+		sub4 := createTestSubscription(t, "sub_test4", "tenant1", "https://example.com/webhook4")
+		err := tx.CreateSubscription(ctx, sub4)
+		require.NoError(t, err)
+
+		// Should see 4 subscriptions in transaction
+		filter := &SubscriptionFilter{Limit: 100}
+		subs, err := tx.ListSubscriptions(ctx, filter)
+		require.NoError(t, err)
+		assert.Len(t, subs, 4)
+
+		// Parent repo should still see 3
+		subs, err = repo.ListSubscriptions(ctx, filter)
+		require.NoError(t, err)
+		assert.Len(t, subs, 3)
+	})
+}
+
+func TestMockRepositoryTx_GetDelivery(t *testing.T) {
+	repo := NewMockRepository()
+	ctx := context.Background()
+
+	// Setup
+	sub := createTestSubscription(t, "sub_test1", "tenant1", "https://example.com/webhook")
+	require.NoError(t, repo.CreateSubscription(ctx, sub))
+	dlv := createTestDelivery(t, "dlv_test1", sub.ID, sub.TenantID)
+	require.NoError(t, repo.CreateDelivery(ctx, dlv))
+
+	// Begin transaction
+	tx, err := repo.BeginTx(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	t.Run("Get existing delivery", func(t *testing.T) {
+		retrieved, err := tx.GetDelivery(ctx, dlv.ID)
+		require.NoError(t, err)
+		assert.Equal(t, dlv.ID, retrieved.ID)
+	})
+
+	t.Run("Get not found", func(t *testing.T) {
+		_, err := tx.GetDelivery(ctx, "dlv_nonexistent")
+		assert.ErrorIs(t, err, ErrDeliveryNotFound)
+	})
+
+	t.Run("Get delivery created in transaction", func(t *testing.T) {
+		newDlv := createTestDelivery(t, "dlv_test2", sub.ID, sub.TenantID)
+		err := tx.CreateDelivery(ctx, newDlv)
+		require.NoError(t, err)
+
+		retrieved, err := tx.GetDelivery(ctx, newDlv.ID)
+		require.NoError(t, err)
+		assert.Equal(t, newDlv.ID, retrieved.ID)
+
+		// Should not exist in parent repo
+		_, err = repo.GetDelivery(ctx, newDlv.ID)
+		assert.ErrorIs(t, err, ErrDeliveryNotFound)
+	})
+}
+
+func TestMockRepositoryTx_UpdateDelivery(t *testing.T) {
+	repo := NewMockRepository()
+	ctx := context.Background()
+
+	// Setup
+	sub := createTestSubscription(t, "sub_test1", "tenant1", "https://example.com/webhook")
+	require.NoError(t, repo.CreateSubscription(ctx, sub))
+	dlv := createTestDelivery(t, "dlv_test1", sub.ID, sub.TenantID)
+	require.NoError(t, repo.CreateDelivery(ctx, dlv))
+
+	t.Run("Update within transaction - commit", func(t *testing.T) {
+		tx, err := repo.BeginTx(ctx)
+		require.NoError(t, err)
+
+		// Update in transaction
+		dlv.Status = DeliveryStatusSuccess
+		err = tx.UpdateDelivery(ctx, dlv)
+		require.NoError(t, err)
+
+		// Verify updated in transaction
+		retrieved, err := tx.GetDelivery(ctx, dlv.ID)
+		require.NoError(t, err)
+		assert.Equal(t, DeliveryStatusSuccess, retrieved.Status)
+
+		// Verify not updated in parent repo yet
+		retrieved, err = repo.GetDelivery(ctx, dlv.ID)
+		require.NoError(t, err)
+		assert.Equal(t, DeliveryStatusPending, retrieved.Status)
+
+		// Commit
+		err = tx.Commit()
+		require.NoError(t, err)
+
+		// Verify updated in parent repo
+		retrieved, err = repo.GetDelivery(ctx, dlv.ID)
+		require.NoError(t, err)
+		assert.Equal(t, DeliveryStatusSuccess, retrieved.Status)
+	})
+
+	t.Run("Update within transaction - rollback", func(t *testing.T) {
+		// Reset delivery status
+		dlv.Status = DeliveryStatusPending
+		require.NoError(t, repo.UpdateDelivery(ctx, dlv))
+
+		tx, err := repo.BeginTx(ctx)
+		require.NoError(t, err)
+
+		// Update in transaction
+		dlv.Status = DeliveryStatusFailed
+		err = tx.UpdateDelivery(ctx, dlv)
+		require.NoError(t, err)
+
+		// Rollback
+		err = tx.Rollback()
+		require.NoError(t, err)
+
+		// Verify not updated in parent repo
+		retrieved, err := repo.GetDelivery(ctx, dlv.ID)
+		require.NoError(t, err)
+		assert.Equal(t, DeliveryStatusPending, retrieved.Status)
+	})
+
+	t.Run("Update not found", func(t *testing.T) {
+		tx, err := repo.BeginTx(ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+
+		nonExistent := createTestDelivery(t, "dlv_nonexistent", sub.ID, sub.TenantID)
+		err = tx.UpdateDelivery(ctx, nonExistent)
+		assert.ErrorIs(t, err, ErrDeliveryNotFound)
+	})
+}
+
+func TestMockRepositoryTx_GetPendingDeliveries(t *testing.T) {
+	repo := NewMockRepository()
+	ctx := context.Background()
+
+	// Setup
+	sub := createTestSubscription(t, "sub_test1", "tenant1", "https://example.com/webhook")
+	require.NoError(t, repo.CreateSubscription(ctx, sub))
+
+	dlv1 := createTestDelivery(t, "dlv_test1", sub.ID, sub.TenantID)
+	dlv2 := createTestDelivery(t, "dlv_test2", sub.ID, sub.TenantID)
+	dlv3 := createTestDelivery(t, "dlv_test3", sub.ID, sub.TenantID)
+	dlv3.Status = DeliveryStatusSuccess
+
+	require.NoError(t, repo.CreateDelivery(ctx, dlv1))
+	time.Sleep(10 * time.Millisecond)
+	require.NoError(t, repo.CreateDelivery(ctx, dlv2))
+	require.NoError(t, repo.CreateDelivery(ctx, dlv3))
+
+	// Begin transaction
+	tx, err := repo.BeginTx(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	t.Run("Get pending deliveries", func(t *testing.T) {
+		// Get pending deliveries
+		deliveries, err := tx.GetPendingDeliveries(ctx, 10)
+		require.NoError(t, err)
+		assert.Len(t, deliveries, 2) // Only dlv1 and dlv2 (dlv3 is success)
+
+		// Verify they are the expected deliveries
+		ids := []string{deliveries[0].ID, deliveries[1].ID}
+		assert.Contains(t, ids, dlv1.ID)
+		assert.Contains(t, ids, dlv2.ID)
+	})
+
+	t.Run("See new pending deliveries created in transaction", func(t *testing.T) {
+		dlv4 := createTestDelivery(t, "dlv_test4", sub.ID, sub.TenantID)
+		err := tx.CreateDelivery(ctx, dlv4)
+		require.NoError(t, err)
+
+		// Should see more deliveries now
+		deliveries, err := tx.GetPendingDeliveries(ctx, 10)
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, len(deliveries), 1)
+	})
+}
+
+func TestMockRepositoryTx_GetPendingDeliveries_Locking(t *testing.T) {
+	repo := NewMockRepository()
+	ctx := context.Background()
+
+	// Setup
+	sub := createTestSubscription(t, "sub_test1", "tenant1", "https://example.com/webhook")
+	require.NoError(t, repo.CreateSubscription(ctx, sub))
+
+	dlv1 := createTestDelivery(t, "dlv_test1", sub.ID, sub.TenantID)
+	dlv2 := createTestDelivery(t, "dlv_test2", sub.ID, sub.TenantID)
+	require.NoError(t, repo.CreateDelivery(ctx, dlv1))
+	time.Sleep(10 * time.Millisecond)
+	require.NoError(t, repo.CreateDelivery(ctx, dlv2))
+
+	t.Run("Limit works", func(t *testing.T) {
+		tx, err := repo.BeginTx(ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+
+		deliveries, err := tx.GetPendingDeliveries(ctx, 1)
+		require.NoError(t, err)
+		assert.Len(t, deliveries, 1)
+	})
+
+	t.Run("Skip locked in transaction", func(t *testing.T) {
+		tx, err := repo.BeginTx(ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+
+		// Get first delivery (locks it in transaction)
+		deliveries, err := tx.GetPendingDeliveries(ctx, 1)
+		require.NoError(t, err)
+		assert.Len(t, deliveries, 1)
+		firstID := deliveries[0].ID
+
+		// Get again (should skip locked one)
+		deliveries, err = tx.GetPendingDeliveries(ctx, 1)
+		require.NoError(t, err)
+		assert.Len(t, deliveries, 1)
+		assert.NotEqual(t, firstID, deliveries[0].ID)
+	})
+
+	t.Run("See new pending deliveries created in transaction", func(t *testing.T) {
+		tx, err := repo.BeginTx(ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+
+		dlv3 := createTestDelivery(t, "dlv_test3", sub.ID, sub.TenantID)
+		err = tx.CreateDelivery(ctx, dlv3)
+		require.NoError(t, err)
+
+		// Should see 3 deliveries now (dlv1, dlv2, dlv3)
+		deliveries, err := tx.GetPendingDeliveries(ctx, 10)
+		require.NoError(t, err)
+		assert.Len(t, deliveries, 3)
+	})
+}
+
+func TestMockRepositoryTx_MoveToDeadLetter(t *testing.T) {
+	repo := NewMockRepository()
+	ctx := context.Background()
+
+	// Setup
+	sub := createTestSubscription(t, "sub_test1", "tenant1", "https://example.com/webhook")
+	require.NoError(t, repo.CreateSubscription(ctx, sub))
+	dlv := createTestDelivery(t, "dlv_test1", sub.ID, sub.TenantID)
+	require.NoError(t, repo.CreateDelivery(ctx, dlv))
+
+	t.Run("Move to dead letter - commit", func(t *testing.T) {
+		tx, err := repo.BeginTx(ctx)
+		require.NoError(t, err)
+
+		err = tx.MoveToDeadLetter(ctx, dlv.ID, "max retries exceeded")
+		require.NoError(t, err)
+
+		// Verify in transaction
+		retrieved, err := tx.GetDelivery(ctx, dlv.ID)
+		require.NoError(t, err)
+		assert.Equal(t, DeliveryStatusDeadLetter, retrieved.Status)
+
+		// Verify not changed in parent repo yet
+		retrieved, err = repo.GetDelivery(ctx, dlv.ID)
+		require.NoError(t, err)
+		assert.Equal(t, DeliveryStatusPending, retrieved.Status)
+
+		// Commit
+		err = tx.Commit()
+		require.NoError(t, err)
+
+		// Verify changed in parent repo
+		retrieved, err = repo.GetDelivery(ctx, dlv.ID)
+		require.NoError(t, err)
+		assert.Equal(t, DeliveryStatusDeadLetter, retrieved.Status)
+		assert.NotNil(t, retrieved.CompletedAt)
+	})
+
+	t.Run("Move to dead letter - rollback", func(t *testing.T) {
+		// Reset delivery
+		dlv.Status = DeliveryStatusPending
+		dlv.CompletedAt = nil
+		require.NoError(t, repo.UpdateDelivery(ctx, dlv))
+
+		tx, err := repo.BeginTx(ctx)
+		require.NoError(t, err)
+
+		err = tx.MoveToDeadLetter(ctx, dlv.ID, "test rollback")
+		require.NoError(t, err)
+
+		// Rollback
+		err = tx.Rollback()
+		require.NoError(t, err)
+
+		// Verify not changed in parent repo
+		retrieved, err := repo.GetDelivery(ctx, dlv.ID)
+		require.NoError(t, err)
+		assert.Equal(t, DeliveryStatusPending, retrieved.Status)
+	})
+
+	t.Run("Move not found", func(t *testing.T) {
+		tx, err := repo.BeginTx(ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+
+		err = tx.MoveToDeadLetter(ctx, "dlv_nonexistent", "test")
+		assert.ErrorIs(t, err, ErrDeliveryNotFound)
+	})
+}
+
+func TestMockRepositoryTx_GetDeliveryAttempts(t *testing.T) {
+	repo := NewMockRepository()
+	ctx := context.Background()
+
+	// Setup
+	sub := createTestSubscription(t, "sub_test1", "tenant1", "https://example.com/webhook")
+	require.NoError(t, repo.CreateSubscription(ctx, sub))
+	dlv := createTestDelivery(t, "dlv_test1", sub.ID, sub.TenantID)
+	require.NoError(t, repo.CreateDelivery(ctx, dlv))
+
+	att1 := createTestDeliveryAttempt(t, "att_test1", dlv.ID, 1)
+	att2 := createTestDeliveryAttempt(t, "att_test2", dlv.ID, 2)
+	require.NoError(t, repo.CreateDeliveryAttempt(ctx, att1))
+	require.NoError(t, repo.CreateDeliveryAttempt(ctx, att2))
+
+	// Begin transaction
+	tx, err := repo.BeginTx(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	t.Run("Get existing attempts", func(t *testing.T) {
+		attempts, err := tx.GetDeliveryAttempts(ctx, dlv.ID)
+		require.NoError(t, err)
+		assert.Len(t, attempts, 2)
+		assert.Equal(t, 1, attempts[0].AttemptNumber)
+		assert.Equal(t, 2, attempts[1].AttemptNumber)
+	})
+
+	t.Run("Get empty attempts", func(t *testing.T) {
+		attempts, err := tx.GetDeliveryAttempts(ctx, "dlv_nonexistent")
+		require.NoError(t, err)
+		assert.Empty(t, attempts)
+	})
+
+	t.Run("See attempts created in transaction", func(t *testing.T) {
+		att3 := createTestDeliveryAttempt(t, "att_test3", dlv.ID, 3)
+		err := tx.CreateDeliveryAttempt(ctx, att3)
+		require.NoError(t, err)
+
+		// Should see 3 attempts in transaction
+		attempts, err := tx.GetDeliveryAttempts(ctx, dlv.ID)
+		require.NoError(t, err)
+		assert.Len(t, attempts, 3)
+
+		// Parent repo should still see 2
+		attempts, err = repo.GetDeliveryAttempts(ctx, dlv.ID)
+		require.NoError(t, err)
+		assert.Len(t, attempts, 2)
+	})
+}
+
+func TestMockRepositoryTx_CheckIdempotency(t *testing.T) {
+	repo := NewMockRepository()
+	ctx := context.Background()
+
+	// Store key in parent repo
+	expiresAt := time.Now().Add(1 * time.Hour)
+	err := repo.StoreIdempotencyKey(ctx, "key1", "sub_test1", expiresAt)
+	require.NoError(t, err)
+
+	// Begin transaction
+	tx, err := repo.BeginTx(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	t.Run("Check existing key", func(t *testing.T) {
+		exists, err := tx.CheckIdempotency(ctx, "key1", "sub_test1")
+		require.NoError(t, err)
+		assert.True(t, exists)
+	})
+
+	t.Run("Check non-existent key", func(t *testing.T) {
+		exists, err := tx.CheckIdempotency(ctx, "key_nonexistent", "sub_test1")
+		require.NoError(t, err)
+		assert.False(t, exists)
+	})
+
+	t.Run("Check expired key", func(t *testing.T) {
+		expiredAt := time.Now().Add(-1 * time.Hour)
+		err := tx.StoreIdempotencyKey(ctx, "key_expired", "sub_test1", expiredAt)
+		require.NoError(t, err)
+
+		exists, err := tx.CheckIdempotency(ctx, "key_expired", "sub_test1")
+		require.NoError(t, err)
+		assert.False(t, exists)
+	})
+
+	t.Run("Check key stored in transaction", func(t *testing.T) {
+		expiresAt := time.Now().Add(1 * time.Hour)
+		err := tx.StoreIdempotencyKey(ctx, "key_tx", "sub_test1", expiresAt)
+		require.NoError(t, err)
+
+		// Should exist in transaction
+		exists, err := tx.CheckIdempotency(ctx, "key_tx", "sub_test1")
+		require.NoError(t, err)
+		assert.True(t, exists)
+
+		// Should not exist in parent repo
+		exists, err = repo.CheckIdempotency(ctx, "key_tx", "sub_test1")
+		require.NoError(t, err)
+		assert.False(t, exists)
+	})
+}
+
+func TestMockRepositoryTx_StoreIdempotencyKey(t *testing.T) {
+	repo := NewMockRepository()
+	ctx := context.Background()
+
+	t.Run("Store and commit", func(t *testing.T) {
+		tx, err := repo.BeginTx(ctx)
+		require.NoError(t, err)
+
+		expiresAt := time.Now().Add(1 * time.Hour)
+		err = tx.StoreIdempotencyKey(ctx, "key1", "sub_test1", expiresAt)
+		require.NoError(t, err)
+
+		// Commit
+		err = tx.Commit()
+		require.NoError(t, err)
+
+		// Verify in parent repo
+		exists, err := repo.CheckIdempotency(ctx, "key1", "sub_test1")
+		require.NoError(t, err)
+		assert.True(t, exists)
+	})
+
+	t.Run("Store and rollback", func(t *testing.T) {
+		tx, err := repo.BeginTx(ctx)
+		require.NoError(t, err)
+
+		expiresAt := time.Now().Add(1 * time.Hour)
+		err = tx.StoreIdempotencyKey(ctx, "key2", "sub_test1", expiresAt)
+		require.NoError(t, err)
+
+		// Rollback
+		err = tx.Rollback()
+		require.NoError(t, err)
+
+		// Verify not in parent repo
+		exists, err := repo.CheckIdempotency(ctx, "key2", "sub_test1")
+		require.NoError(t, err)
+		assert.False(t, exists)
+	})
+}
+
+func TestMockRepositoryTx_GetCircuitBreakerState(t *testing.T) {
+	repo := NewMockRepository()
+	ctx := context.Background()
+
+	endpoint := "https://example.com/webhook"
+
+	// Store state in parent repo
+	state := &CircuitBreakerState{
+		Endpoint:     endpoint,
+		State:        CircuitBreakerStateOpen,
+		FailureCount: 5,
+		SuccessCount: 0,
+		LastFailure:  time.Now(),
+		OpenedAt:     time.Now(),
+		NextRetryAt:  time.Now().Add(1 * time.Minute),
+	}
+	err := repo.UpdateCircuitBreakerState(ctx, state)
+	require.NoError(t, err)
+
+	// Begin transaction
+	tx, err := repo.BeginTx(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	t.Run("Get existing state", func(t *testing.T) {
+		retrieved, err := tx.GetCircuitBreakerState(ctx, endpoint)
+		require.NoError(t, err)
+		assert.Equal(t, CircuitBreakerStateOpen, retrieved.State)
+		assert.Equal(t, 5, retrieved.FailureCount)
+	})
+
+	t.Run("Get default state for new endpoint", func(t *testing.T) {
+		retrieved, err := tx.GetCircuitBreakerState(ctx, "https://new.com/webhook")
+		require.NoError(t, err)
+		assert.Equal(t, CircuitBreakerStateClosed, retrieved.State)
+		assert.Equal(t, 0, retrieved.FailureCount)
+	})
+
+	t.Run("See state updated in transaction", func(t *testing.T) {
+		newState := &CircuitBreakerState{
+			Endpoint:     endpoint,
+			State:        CircuitBreakerStateClosed,
+			FailureCount: 0,
+			SuccessCount: 10,
+		}
+		err := tx.UpdateCircuitBreakerState(ctx, newState)
+		require.NoError(t, err)
+
+		// Should see updated state in transaction
+		retrieved, err := tx.GetCircuitBreakerState(ctx, endpoint)
+		require.NoError(t, err)
+		assert.Equal(t, CircuitBreakerStateClosed, retrieved.State)
+
+		// Parent repo should still see old state
+		retrieved, err = repo.GetCircuitBreakerState(ctx, endpoint)
+		require.NoError(t, err)
+		assert.Equal(t, CircuitBreakerStateOpen, retrieved.State)
+	})
+}
+
+func TestMockRepositoryTx_UpdateCircuitBreakerState(t *testing.T) {
+	repo := NewMockRepository()
+	ctx := context.Background()
+
+	endpoint := "https://example.com/webhook"
+
+	t.Run("Update and commit", func(t *testing.T) {
+		tx, err := repo.BeginTx(ctx)
+		require.NoError(t, err)
+
+		state := &CircuitBreakerState{
+			Endpoint:     endpoint,
+			State:        CircuitBreakerStateOpen,
+			FailureCount: 5,
+			SuccessCount: 0,
+		}
+		err = tx.UpdateCircuitBreakerState(ctx, state)
+		require.NoError(t, err)
+
+		// Commit
+		err = tx.Commit()
+		require.NoError(t, err)
+
+		// Verify in parent repo
+		retrieved, err := repo.GetCircuitBreakerState(ctx, endpoint)
+		require.NoError(t, err)
+		assert.Equal(t, CircuitBreakerStateOpen, retrieved.State)
+		assert.Equal(t, 5, retrieved.FailureCount)
+	})
+
+	t.Run("Update and rollback", func(t *testing.T) {
+		// Reset state in parent repo
+		state := &CircuitBreakerState{
+			Endpoint:     endpoint,
+			State:        CircuitBreakerStateClosed,
+			FailureCount: 0,
+			SuccessCount: 0,
+		}
+		err := repo.UpdateCircuitBreakerState(ctx, state)
+		require.NoError(t, err)
+
+		tx, err := repo.BeginTx(ctx)
+		require.NoError(t, err)
+
+		newState := &CircuitBreakerState{
+			Endpoint:     endpoint,
+			State:        CircuitBreakerStateOpen,
+			FailureCount: 10,
+			SuccessCount: 0,
+		}
+		err = tx.UpdateCircuitBreakerState(ctx, newState)
+		require.NoError(t, err)
+
+		// Rollback
+		err = tx.Rollback()
+		require.NoError(t, err)
+
+		// Verify not changed in parent repo
+		retrieved, err := repo.GetCircuitBreakerState(ctx, endpoint)
+		require.NoError(t, err)
+		assert.Equal(t, CircuitBreakerStateClosed, retrieved.State)
+		assert.Equal(t, 0, retrieved.FailureCount)
+	})
+}
+
+func TestMockRepositoryTx_BeginTx(t *testing.T) {
+	repo := NewMockRepository()
+	ctx := context.Background()
+
+	tx, err := repo.BeginTx(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	t.Run("Nested transactions not supported", func(t *testing.T) {
+		_, err := tx.BeginTx(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "nested transactions are not supported")
+	})
+}
+
+func TestMockRepositoryTx_Ping(t *testing.T) {
+	repo := NewMockRepository()
+	ctx := context.Background()
+
+	tx, err := repo.BeginTx(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	err = tx.Ping(ctx)
+	assert.NoError(t, err)
+}
+
+func TestMockRepositoryTx_Close(t *testing.T) {
+	repo := NewMockRepository()
+	ctx := context.Background()
+
+	tx, err := repo.BeginTx(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	err = tx.Close()
+	assert.NoError(t, err)
+}
+
+func TestMockRepositoryTx_DoubleCommit(t *testing.T) {
+	repo := NewMockRepository()
+	ctx := context.Background()
+
+	tx, err := repo.BeginTx(ctx)
+	require.NoError(t, err)
+
+	// First commit
+	err = tx.Commit()
+	require.NoError(t, err)
+
+	// Second commit should be no-op
+	err = tx.Commit()
+	assert.NoError(t, err)
+}
+
+func TestMockRepositoryTx_DoubleRollback(t *testing.T) {
+	repo := NewMockRepository()
+	ctx := context.Background()
+
+	tx, err := repo.BeginTx(ctx)
+	require.NoError(t, err)
+
+	// First rollback
+	err = tx.Rollback()
+	require.NoError(t, err)
+
+	// Second rollback should be no-op
+	err = tx.Rollback()
+	assert.NoError(t, err)
+}
+
+func TestMockRepositoryTx_CommitAfterRollback(t *testing.T) {
+	repo := NewMockRepository()
+	ctx := context.Background()
+
+	tx, err := repo.BeginTx(ctx)
+	require.NoError(t, err)
+
+	// Rollback first
+	err = tx.Rollback()
+	require.NoError(t, err)
+
+	// Try to commit after rollback
+	err = tx.Commit()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "already rolled back")
+}
+
+func TestMockRepositoryTx_RollbackAfterCommit(t *testing.T) {
+	repo := NewMockRepository()
+	ctx := context.Background()
+
+	tx, err := repo.BeginTx(ctx)
+	require.NoError(t, err)
+
+	// Commit first
+	err = tx.Commit()
+	require.NoError(t, err)
+
+	// Rollback after commit should be no-op
+	err = tx.Rollback()
+	assert.NoError(t, err)
+}

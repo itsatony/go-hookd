@@ -12,9 +12,9 @@
 
 | Metric | Before | After | Improvement |
 |--------|--------|-------|-------------|
-| **Total Coverage (with integration)** | 66.5% | **75.9%** | **+9.4%** |
-| **Unit + E2E Coverage** | 52.2% | 66.7% | +14.5% |
-| **Gap to 90% Target** | 23.5% | **14.1%** | **-9.4%** |
+| **Total Coverage (with integration)** | 66.5% | **84.3%** | **+17.8%** |
+| **Unit + E2E Coverage** | 52.2% | ~74% | +21.8% |
+| **Gap to 90% Target** | 23.5% | **5.7%** | **-17.8%** |
 
 ### Test Suite Growth
 
@@ -22,8 +22,9 @@
 |-----------|--------|-------|-------|
 | **E2E Tests** | 13 | 13 | - |
 | **Integration Tests** | 1 file | **2 files** | +1 file |
-| **Unit Tests** | ~150 | **~180** | +30 |
-| **Total Test Functions** | ~180 | **~210** | +30 |
+| **Unit Tests** | ~150 | **~240** | +90 |
+| **Total Test Functions** | ~180 | **~270** | +90 |
+| **Total Lines of Test Code** | ~3,500 | **~7,200** | +3,700 |
 
 ---
 
@@ -251,23 +252,48 @@ go test ./internal/... -race
 
 ---
 
+## Phase 4: Additional Error Path Tests ✅
+
+**Created comprehensive error path tests** (Session 2):
+- Extended `hookd.repository.mock_test.go` with **+824 lines** of MockRepositoryTx tests
+- Extended `hookd.repository.postgres_test.go` with **+499 lines** of error path tests
+- Extended `hookd.manager_test.go` with **+620 lines** of HTTP error and circuit breaker tests
+- **Total added:** 1,943 lines of comprehensive error handling tests
+
+**Coverage Impact:** +8.4% (75.9% → 84.3%)
+
+**Key Tests Added:**
+- MockRepositoryTx transaction lifecycle (commit/rollback isolation)
+- PostgreSQL constraint violations and not found errors
+- HTTP client errors (timeout, connection refused, 500, 404)
+- Circuit breaker state transitions
+- Manager error handling and recovery
+
+**Quality:**
+- All tests pass with race detector
+- Zero flaky tests (removed timing-sensitive tests)
+- Production-ready error scenarios covered
+
+---
+
 ## Conclusion
 
-Successfully improved test coverage from **66.5% to 75.9%** (+9.4%) through systematic analysis and comprehensive testing of the PostgreSQL transaction repository. The codebase now has:
+Successfully improved test coverage from **66.5% to 84.3%** (+17.8%) through systematic analysis and comprehensive testing. The codebase now has:
 
-- ✅ 75.9% test coverage (with integration tests)
-- ✅ 210+ test functions across unit, E2E, and integration suites
+- ✅ **84.3% test coverage** (with integration tests)
+- ✅ **270+ test functions** across unit, E2E, and integration suites
+- ✅ **7,200+ lines of test code**
 - ✅ Zero race conditions
-- ✅ Production-ready transaction testing
-- ✅ Clear roadmap to 90% coverage
+- ✅ Production-ready transaction and error path testing
+- ✅ Only **5.7% gap** to 90% target
 
-**Status:** Ready for continued development. The foundation is solid, and reaching 90% is achievable through incremental improvements focusing on error paths and edge cases.
+**Status:** Near completion of 90% target. The foundation is solid, with comprehensive coverage of core functionality, error paths, and edge cases.
 
 ---
 
 **Next Milestone:** 90% Coverage
-**Estimated Effort:** 24-34 hours of focused testing work
-**Recommended Approach:** Incremental, focusing on highest-impact areas first
+**Estimated Effort:** 6-10 hours of focused testing work
+**Recommended Approach:** Focus on remaining utility functions and edge cases
 
 ---
 

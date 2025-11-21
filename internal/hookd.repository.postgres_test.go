@@ -611,6 +611,493 @@ func TestPostgresRepository_Health(t *testing.T) {
 }
 
 // =============================================================================
+// ERROR PATH TESTS
+// =============================================================================
+
+func TestPostgresRepository_ErrorPaths(t *testing.T) {
+	repo, cleanup := setupTestDB(t)
+	if repo == nil {
+		return // Skipped
+	}
+	defer cleanup()
+
+	ctx := context.Background()
+
+	t.Run("CreateSubscription - duplicate tenant+URL", func(t *testing.T) {
+		sub := createTestSubscription(t, "sub_err1", "tenant_err", "https://example.com/err1")
+		err := repo.CreateSubscription(ctx, sub)
+		require.NoError(t, err)
+
+		// Try to create duplicate with same tenant_id + url
+		sub2 := createTestSubscription(t, "sub_err2", "tenant_err", "https://example.com/err1")
+		err = repo.CreateSubscription(ctx, sub2)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, ErrDuplicateSubscription)
+	})
+
+	t.Run("UpdateSubscription - not found", func(t *testing.T) {
+		sub := createTestSubscription(t, "sub_nonexistent", "tenant_err", "https://example.com/notfound")
+		err := repo.UpdateSubscription(ctx, sub)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, ErrSubscriptionNotFound)
+	})
+
+	t.Run("DeleteSubscription - not found", func(t *testing.T) {
+		err := repo.DeleteSubscription(ctx, "sub_nonexistent")
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, ErrSubscriptionNotFound)
+	})
+
+	t.Run("GetDelivery - not found", func(t *testing.T) {
+		_, err := repo.GetDelivery(ctx, "dlv_nonexistent")
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, ErrDeliveryNotFound)
+	})
+
+	t.Run("UpdateDelivery - not found", func(t *testing.T) {
+		dlv := createTestDelivery(t, "dlv_nonexistent", "sub_test", "tenant_test")
+		err := repo.UpdateDelivery(ctx, dlv)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, ErrDeliveryNotFound)
+	})
+
+	t.Run("MoveToDeadLetter - not found", func(t *testing.T) {
+		err := repo.MoveToDeadLetter(ctx, "dlv_nonexistent", "test reason")
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, ErrDeliveryNotFound)
+	})
+
+	t.Run("CreateDeliveryAttempt - duplicate attempt number", func(t *testing.T) {
+		// Setup: create subscription and delivery
+		sub := createTestSubscription(t, "sub_err_att", "tenant_err", "https://example.com/err_att")
+		require.NoError(t, repo.CreateSubscription(ctx, sub))
+
+		dlv := createTestDelivery(t, "dlv_err_att", sub.ID, sub.TenantID)
+		require.NoError(t, repo.CreateDelivery(ctx, dlv))
+
+		// Create first attempt
+		att1 := createTestDeliveryAttempt(t, "att_err1", dlv.ID, 1)
+		err := repo.CreateDeliveryAttempt(ctx, att1)
+		require.NoError(t, err)
+
+		// Try to create duplicate attempt with same number
+		att2 := createTestDeliveryAttempt(t, "att_err2", dlv.ID, 1)
+		err = repo.CreateDeliveryAttempt(ctx, att2)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "unique")
+	})
+
+	t.Run("ListSubscriptions - empty filter", func(t *testing.T) {
+		filter := &SubscriptionFilter{Limit: 100}
+		subs, err := repo.ListSubscriptions(ctx, filter)
+		require.NoError(t, err)
+		assert.NotNil(t, subs)
+		// Should return what exists
+	})
+
+	t.Run("ListSubscriptions - no matches", func(t *testing.T) {
+		filter := &SubscriptionFilter{
+			TenantID: "tenant_nonexistent",
+			Limit:    100,
+		}
+		subs, err := repo.ListSubscriptions(ctx, filter)
+		require.NoError(t, err)
+		assert.Empty(t, subs)
+	})
+
+	t.Run("GetDeliveryAttempts - empty results", func(t *testing.T) {
+		attempts, err := repo.GetDeliveryAttempts(ctx, "dlv_nonexistent")
+		require.NoError(t, err)
+		assert.Empty(t, attempts)
+	})
+
+	t.Run("CheckIdempotency - expired key", func(t *testing.T) {
+		expiresAt := time.Now().Add(-1 * time.Hour) // Expired
+		err := repo.StoreIdempotencyKey(ctx, "key_expired", "sub_test", expiresAt)
+		require.NoError(t, err)
+
+		exists, err := repo.CheckIdempotency(ctx, "key_expired", "sub_test")
+		require.NoError(t, err)
+		assert.False(t, exists)
+	})
+
+	t.Run("GetCircuitBreakerState - default for new endpoint", func(t *testing.T) {
+		state, err := repo.GetCircuitBreakerState(ctx, "https://newendpoint.com/webhook")
+		require.NoError(t, err)
+		assert.Equal(t, CircuitBreakerStateClosed, state.State)
+		assert.Equal(t, 0, state.FailureCount)
+	})
+}
+
+func TestPostgresRepository_TransactionErrors(t *testing.T) {
+	repo, cleanup := setupTestDB(t)
+	if repo == nil {
+		return // Skipped
+	}
+	defer cleanup()
+
+	ctx := context.Background()
+
+	t.Run("Operations after commit should fail", func(t *testing.T) {
+		tx, err := repo.BeginTx(ctx)
+		require.NoError(t, err)
+
+		// Commit transaction
+		err = tx.Commit()
+		require.NoError(t, err)
+
+		// Try to create subscription after commit
+		sub := createTestSubscription(t, "sub_after_commit", "tenant_err", "https://example.com/after")
+		err = tx.CreateSubscription(ctx, sub)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "sql: transaction has already been committed")
+	})
+
+	t.Run("Operations after rollback should fail", func(t *testing.T) {
+		tx, err := repo.BeginTx(ctx)
+		require.NoError(t, err)
+
+		// Rollback transaction
+		err = tx.Rollback()
+		require.NoError(t, err)
+
+		// Try to create subscription after rollback
+		sub := createTestSubscription(t, "sub_after_rollback", "tenant_err", "https://example.com/after2")
+		err = tx.CreateSubscription(ctx, sub)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "sql: transaction has already been committed")
+	})
+
+	t.Run("Double commit is safe", func(t *testing.T) {
+		tx, err := repo.BeginTx(ctx)
+		require.NoError(t, err)
+
+		err = tx.Commit()
+		require.NoError(t, err)
+
+		// Second commit should not panic
+		err = tx.Commit()
+		assert.NoError(t, err)
+	})
+
+	t.Run("Double rollback is safe", func(t *testing.T) {
+		tx, err := repo.BeginTx(ctx)
+		require.NoError(t, err)
+
+		err = tx.Rollback()
+		require.NoError(t, err)
+
+		// Second rollback should not panic
+		err = tx.Rollback()
+		assert.NoError(t, err)
+	})
+}
+
+func TestPostgresRepository_ConcurrentUpdates(t *testing.T) {
+	repo, cleanup := setupTestDB(t)
+	if repo == nil {
+		return // Skipped
+	}
+	defer cleanup()
+
+	ctx := context.Background()
+
+	t.Run("Concurrent subscription updates", func(t *testing.T) {
+		// Create subscription
+		sub := createTestSubscription(t, "sub_concurrent", "tenant_conc", "https://example.com/conc")
+		require.NoError(t, repo.CreateSubscription(ctx, sub))
+
+		// Update concurrently from multiple goroutines
+		var wg sync.WaitGroup
+		errorCount := 0
+		mu := sync.Mutex{}
+
+		for i := 0; i < 10; i++ {
+			wg.Add(1)
+			go func(iteration int) {
+				defer wg.Done()
+
+				// Get current subscription
+				current, err := repo.GetSubscription(ctx, sub.ID)
+				if err != nil {
+					mu.Lock()
+					errorCount++
+					mu.Unlock()
+					return
+				}
+
+				// Update status
+				if iteration%2 == 0 {
+					current.Status = SubscriptionStatusActive
+				} else {
+					current.Status = SubscriptionStatusPaused
+				}
+
+				err = repo.UpdateSubscription(ctx, current)
+				if err != nil {
+					mu.Lock()
+					errorCount++
+					mu.Unlock()
+				}
+			}(i)
+		}
+
+		wg.Wait()
+
+		// Some errors are acceptable due to concurrent updates, but not all
+		assert.Less(t, errorCount, 5, "Too many errors in concurrent updates")
+
+		// Subscription should still be retrievable
+		_, err := repo.GetSubscription(ctx, sub.ID)
+		assert.NoError(t, err)
+	})
+
+	t.Run("Concurrent delivery updates", func(t *testing.T) {
+		// Setup
+		sub := createTestSubscription(t, "sub_dlv_conc", "tenant_conc", "https://example.com/dlv_conc")
+		require.NoError(t, repo.CreateSubscription(ctx, sub))
+
+		dlv := createTestDelivery(t, "dlv_concurrent", sub.ID, sub.TenantID)
+		require.NoError(t, repo.CreateDelivery(ctx, dlv))
+
+		// Update concurrently
+		var wg sync.WaitGroup
+		successCount := 0
+		mu := sync.Mutex{}
+
+		for i := 0; i < 10; i++ {
+			wg.Add(1)
+			go func(iteration int) {
+				defer wg.Done()
+
+				current, err := repo.GetDelivery(ctx, dlv.ID)
+				if err != nil {
+					return
+				}
+
+				current.AttemptCount = iteration
+				err = repo.UpdateDelivery(ctx, current)
+				if err == nil {
+					mu.Lock()
+					successCount++
+					mu.Unlock()
+				}
+			}(i)
+		}
+
+		wg.Wait()
+
+		// At least some updates should succeed
+		assert.Greater(t, successCount, 0, "At least some concurrent updates should succeed")
+	})
+}
+
+func TestPostgresRepository_EdgeCases(t *testing.T) {
+	repo, cleanup := setupTestDB(t)
+	if repo == nil {
+		return // Skipped
+	}
+	defer cleanup()
+
+	ctx := context.Background()
+
+	t.Run("Empty event types filter", func(t *testing.T) {
+		filter := &SubscriptionFilter{
+			EventTypes: []string{},
+			Limit:      100,
+		}
+		subs, err := repo.ListSubscriptions(ctx, filter)
+		require.NoError(t, err)
+		assert.NotNil(t, subs)
+	})
+
+	t.Run("Very large offset", func(t *testing.T) {
+		filter := &SubscriptionFilter{
+			Offset: 999999,
+			Limit:  100,
+		}
+		subs, err := repo.ListSubscriptions(ctx, filter)
+		require.NoError(t, err)
+		assert.Empty(t, subs)
+	})
+
+	t.Run("Zero limit", func(t *testing.T) {
+		filter := &SubscriptionFilter{
+			Limit: 0,
+		}
+		subs, err := repo.ListSubscriptions(ctx, filter)
+		require.NoError(t, err)
+		assert.NotNil(t, subs)
+	})
+
+	t.Run("Subscription with nil metadata", func(t *testing.T) {
+		sub := createTestSubscription(t, "sub_nil_meta", "tenant_edge", "https://example.com/nil")
+		sub.Metadata = nil
+		err := repo.CreateSubscription(ctx, sub)
+		require.NoError(t, err)
+
+		retrieved, err := repo.GetSubscription(ctx, sub.ID)
+		require.NoError(t, err)
+		assert.NotNil(t, retrieved)
+	})
+
+	t.Run("Subscription with nil headers", func(t *testing.T) {
+		sub := createTestSubscription(t, "sub_nil_headers", "tenant_edge", "https://example.com/nil2")
+		sub.Headers = nil
+		err := repo.CreateSubscription(ctx, sub)
+		require.NoError(t, err)
+
+		retrieved, err := repo.GetSubscription(ctx, sub.ID)
+		require.NoError(t, err)
+		assert.NotNil(t, retrieved)
+	})
+
+	t.Run("Delivery with nil payload", func(t *testing.T) {
+		sub := createTestSubscription(t, "sub_nil_payload", "tenant_edge", "https://example.com/nil3")
+		require.NoError(t, repo.CreateSubscription(ctx, sub))
+
+		dlv := createTestDelivery(t, "dlv_nil_payload", sub.ID, sub.TenantID)
+		dlv.Payload = nil
+		err := repo.CreateDelivery(ctx, dlv)
+		require.NoError(t, err)
+
+		retrieved, err := repo.GetDelivery(ctx, dlv.ID)
+		require.NoError(t, err)
+		assert.NotNil(t, retrieved)
+	})
+
+	t.Run("GetPendingDeliveries with limit 0", func(t *testing.T) {
+		deliveries, err := repo.GetPendingDeliveries(ctx, 0)
+		require.NoError(t, err)
+		assert.Empty(t, deliveries)
+	})
+
+	t.Run("GetPendingDeliveries with very large limit", func(t *testing.T) {
+		deliveries, err := repo.GetPendingDeliveries(ctx, 999999)
+		require.NoError(t, err)
+		assert.NotNil(t, deliveries)
+	})
+
+	t.Run("Circuit breaker with very old timestamps", func(t *testing.T) {
+		state := &CircuitBreakerState{
+			Endpoint:     "https://old.com/webhook",
+			State:        CircuitBreakerStateOpen,
+			FailureCount: 5,
+			SuccessCount: 0,
+			LastFailure:  time.Now().Add(-24 * time.Hour),
+			OpenedAt:     time.Now().Add(-24 * time.Hour),
+			NextRetryAt:  time.Now().Add(-1 * time.Hour), // In the past
+		}
+		err := repo.UpdateCircuitBreakerState(ctx, state)
+		require.NoError(t, err)
+
+		retrieved, err := repo.GetCircuitBreakerState(ctx, "https://old.com/webhook")
+		require.NoError(t, err)
+		assert.Equal(t, CircuitBreakerStateOpen, retrieved.State)
+	})
+
+	t.Run("Multiple event type filters", func(t *testing.T) {
+		// Create subscription with multiple event types
+		sub := createTestSubscription(t, "sub_multi_events", "tenant_edge", "https://example.com/multi")
+		sub.EventTypes = []string{"user.created", "user.updated", "user.deleted"}
+		require.NoError(t, repo.CreateSubscription(ctx, sub))
+
+		// Filter by multiple event types
+		filter := &SubscriptionFilter{
+			EventTypes: []string{"user.created", "user.updated"},
+			Limit:      100,
+		}
+		subs, err := repo.ListSubscriptions(ctx, filter)
+		require.NoError(t, err)
+		assert.NotEmpty(t, subs)
+
+		// Verify the subscription is in results
+		found := false
+		for _, s := range subs {
+			if s.ID == sub.ID {
+				found = true
+				break
+			}
+		}
+		assert.True(t, found, "Subscription with matching event types should be in results")
+	})
+}
+
+func TestPostgresRepository_ComplexFilters(t *testing.T) {
+	repo, cleanup := setupTestDB(t)
+	if repo == nil {
+		return // Skipped
+	}
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create test data
+	sub1 := createTestSubscription(t, "sub_filter1", "tenant_filter", "https://example.com/filter1")
+	sub1.Status = SubscriptionStatusActive
+	sub1.EventTypes = []string{"user.created", "user.updated"}
+	require.NoError(t, repo.CreateSubscription(ctx, sub1))
+
+	sub2 := createTestSubscription(t, "sub_filter2", "tenant_filter", "https://example.com/filter2")
+	sub2.Status = SubscriptionStatusPaused
+	sub2.EventTypes = []string{"user.deleted"}
+	require.NoError(t, repo.CreateSubscription(ctx, sub2))
+
+	sub3 := createTestSubscription(t, "sub_filter3", "tenant_other", "https://example.com/filter3")
+	sub3.Status = SubscriptionStatusActive
+	sub3.EventTypes = []string{"user.created"}
+	require.NoError(t, repo.CreateSubscription(ctx, sub3))
+
+	t.Run("Filter by tenant and status", func(t *testing.T) {
+		filter := &SubscriptionFilter{
+			TenantID: "tenant_filter",
+			Status:   SubscriptionStatusActive,
+			Limit:    100,
+		}
+		subs, err := repo.ListSubscriptions(ctx, filter)
+		require.NoError(t, err)
+		assert.Len(t, subs, 1)
+		assert.Equal(t, "sub_filter1", subs[0].ID)
+	})
+
+	t.Run("Filter by tenant and event type", func(t *testing.T) {
+		filter := &SubscriptionFilter{
+			TenantID:   "tenant_filter",
+			EventTypes: []string{"user.created"},
+			Limit:      100,
+		}
+		subs, err := repo.ListSubscriptions(ctx, filter)
+		require.NoError(t, err)
+		assert.Len(t, subs, 1)
+		assert.Equal(t, "sub_filter1", subs[0].ID)
+	})
+
+	t.Run("Filter by status and event type", func(t *testing.T) {
+		filter := &SubscriptionFilter{
+			Status:     SubscriptionStatusActive,
+			EventTypes: []string{"user.created"},
+			Limit:      100,
+		}
+		subs, err := repo.ListSubscriptions(ctx, filter)
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, len(subs), 2) // sub_filter1 and sub_filter3
+	})
+
+	t.Run("All filters combined", func(t *testing.T) {
+		filter := &SubscriptionFilter{
+			TenantID:   "tenant_filter",
+			Status:     SubscriptionStatusActive,
+			EventTypes: []string{"user.created"},
+			Limit:      100,
+		}
+		subs, err := repo.ListSubscriptions(ctx, filter)
+		require.NoError(t, err)
+		assert.Len(t, subs, 1)
+		assert.Equal(t, "sub_filter1", subs[0].ID)
+	})
+}
+
+// =============================================================================
 // MIGRATION VERIFICATION TESTS
 // =============================================================================
 
