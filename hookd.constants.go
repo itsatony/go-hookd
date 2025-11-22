@@ -382,6 +382,9 @@ const (
 	// ErrMsgManagerAlreadyStarted is the error message when manager is already started
 	ErrMsgManagerAlreadyStarted = "manager already started"
 
+	// ErrMsgManagerNotStarted is the error message when manager is not started
+	ErrMsgManagerNotStarted = "manager must be started before use - call Start() first"
+
 	// ErrMsgRequestRequired is the error message when request is nil
 	ErrMsgRequestRequired = "request is required"
 

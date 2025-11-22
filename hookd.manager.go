@@ -82,7 +82,10 @@ func NewManager(config *Config, repo Repository, opts ...ManagerOption) (*Manage
 	}
 
 	// Create default logger if not provided
-	logger, _ := zap.NewProduction()
+	logger, err := zap.NewProduction()
+	if err != nil {
+		return nil, NewConfigurationError("logger", "failed to create default logger: "+err.Error())
+	}
 
 	// Create default HTTP client with timeout
 	httpClient := &http.Client{

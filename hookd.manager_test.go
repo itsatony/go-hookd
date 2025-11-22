@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -1310,11 +1311,20 @@ func TestManager_EdgeCases(t *testing.T) {
 
 // testEventBus is a simple event bus for testing
 type testEventBus struct {
+	mu     sync.Mutex
 	events []interface{}
 }
 
 func (t *testEventBus) Publish(topic string, data interface{}) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	t.events = append(t.events, data)
+}
+
+func (t *testEventBus) EventCount() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return len(t.events)
 }
 
 func (t *testEventBus) Subscribe(topic string, handler func(interface{})) func() {

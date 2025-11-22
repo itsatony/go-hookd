@@ -34,6 +34,8 @@ func TestGetDeliveryAttempts_ErrorPaths(t *testing.T) {
 		require.NoError(t, err)
 
 		ctx := context.Background()
+		require.NoError(t, manager.Start(ctx))
+		defer manager.Stop()
 
 		// Create a subscription and delivery
 		sub, _ := manager.CreateSubscription(ctx, &CreateSubscriptionRequest{
@@ -336,6 +338,8 @@ func TestQueueDelivery_ErrorPaths(t *testing.T) {
 		require.NoError(t, err)
 
 		ctx := context.Background()
+		require.NoError(t, manager.Start(ctx))
+		defer manager.Stop()
 
 		// Create subscription
 		sub, _ := manager.CreateSubscription(ctx, &CreateSubscriptionRequest{
@@ -374,6 +378,8 @@ func TestQueueDelivery_ErrorPaths(t *testing.T) {
 		require.NoError(t, err)
 
 		ctx := context.Background()
+		require.NoError(t, manager.Start(ctx))
+		defer manager.Stop()
 
 		// Create subscription
 		sub, _ := manager.CreateSubscription(ctx, &CreateSubscriptionRequest{
@@ -555,15 +561,15 @@ func TestE2E_EventPublishing(t *testing.T) {
 			Secret:     "test_secret",
 		})
 
+		// Start manager before queueing delivery
+		manager.Start(ctx)
+
 		// Queue delivery
 		delivery, _ := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 			SubscriptionID: sub.ID,
 			EventType:      "test.event",
 			Payload:        map[string]interface{}{"test": "data"},
 		})
-
-		// Start manager
-		manager.Start(ctx)
 
 		// Wait for delivery processing
 		time.Sleep(300 * time.Millisecond)
@@ -573,7 +579,7 @@ func TestE2E_EventPublishing(t *testing.T) {
 
 		// Verify events were published
 		// Should have at least: subscription.created, delivery.queued, delivery.started, delivery.success
-		assert.GreaterOrEqual(t, len(eventBus.events), 3, "should have published multiple events")
+		assert.GreaterOrEqual(t, eventBus.EventCount(), 3, "should have published multiple events")
 
 		// Verify delivery succeeded
 		finalDelivery, _ := repo.GetDelivery(ctx, delivery.ID)
@@ -629,6 +635,8 @@ func TestAdditionalEdgeCases_ForCoverage(t *testing.T) {
 		manager, _ := NewManager(config, repo)
 
 		ctx := context.Background()
+		require.NoError(t, manager.Start(ctx))
+		defer manager.Stop()
 
 		sub, _ := manager.CreateSubscription(ctx, &CreateSubscriptionRequest{
 			TenantID:   "tenant_test",

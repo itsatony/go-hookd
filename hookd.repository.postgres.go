@@ -49,7 +49,9 @@ func NewPostgresRepository(connectionString string) (*PostgresRepository, error)
 	defer cancel()
 
 	if err := db.PingContext(ctx); err != nil {
-		db.Close()
+		// Close database connection if ping fails
+		// Ignore close error as we're already returning a connection error
+		_ = db.Close()
 		return nil, cuserr.NewExternalError("database", "postgres", err,
 			cuserr.WithMetadata("operation", "ping"),
 		)

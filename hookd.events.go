@@ -8,6 +8,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/itsatony/go-cuserr"
 	"go.uber.org/zap"
 )
 
@@ -49,6 +50,11 @@ import (
 //	    IdempotencyKey: StringPtr("evt_user_created_123"),
 //	})
 func (m *Manager) QueueDelivery(ctx context.Context, req *QueueDeliveryRequest) (*Delivery, error) {
+	// Check if manager is started
+	if !m.IsStarted() {
+		return nil, cuserr.NewValidationError("manager", ErrMsgManagerNotStarted)
+	}
+
 	// Validate request
 	if err := req.Validate(); err != nil {
 		m.logger.Error("invalid delivery request",

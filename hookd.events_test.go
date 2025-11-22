@@ -20,6 +20,8 @@ func TestQueueDelivery(t *testing.T) {
 		manager, _ := NewManager(config, repo)
 
 		ctx := context.Background()
+		require.NoError(t, manager.Start(ctx))
+		defer manager.Stop()
 
 		// Create subscription
 		sub, _ := manager.CreateSubscription(ctx, &CreateSubscriptionRequest{
@@ -60,7 +62,8 @@ func TestQueueDelivery(t *testing.T) {
 		manager, _ := NewManager(config, repo)
 
 		ctx := context.Background()
-
+		require.NoError(t, manager.Start(ctx))
+		defer manager.Stop()
 		// Create subscription
 		sub, _ := manager.CreateSubscription(ctx, &CreateSubscriptionRequest{
 			TenantID:   "tenant_123",
@@ -89,7 +92,8 @@ func TestQueueDelivery(t *testing.T) {
 		manager, _ := NewManager(config, repo)
 
 		ctx := context.Background()
-
+		require.NoError(t, manager.Start(ctx))
+		defer manager.Stop()
 		// Create subscription
 		sub, _ := manager.CreateSubscription(ctx, &CreateSubscriptionRequest{
 			TenantID:   "tenant_123",
@@ -121,7 +125,8 @@ func TestQueueDelivery(t *testing.T) {
 		manager, _ := NewManager(config, repo)
 
 		ctx := context.Background()
-
+		require.NoError(t, manager.Start(ctx))
+		defer manager.Stop()
 		// Queue delivery with invalid request (missing required fields)
 		req := &QueueDeliveryRequest{
 			SubscriptionID: "", // Missing
@@ -140,7 +145,8 @@ func TestQueueDelivery(t *testing.T) {
 		manager, _ := NewManager(config, repo)
 
 		ctx := context.Background()
-
+		require.NoError(t, manager.Start(ctx))
+		defer manager.Stop()
 		req := &QueueDeliveryRequest{
 			SubscriptionID: "sub_nonexistent",
 			EventType:      "user.created",
@@ -159,7 +165,8 @@ func TestQueueDelivery(t *testing.T) {
 		manager, _ := NewManager(config, repo)
 
 		ctx := context.Background()
-
+		require.NoError(t, manager.Start(ctx))
+		defer manager.Stop()
 		// Create and disable subscription
 		sub, _ := manager.CreateSubscription(ctx, &CreateSubscriptionRequest{
 			TenantID:   "tenant_123",
@@ -195,6 +202,8 @@ func TestGetDelivery(t *testing.T) {
 		manager, _ := NewManager(config, repo)
 
 		ctx := context.Background()
+		require.NoError(t, manager.Start(ctx))
+		defer manager.Stop()
 
 		// Create subscription and queue delivery
 		sub, _ := manager.CreateSubscription(ctx, &CreateSubscriptionRequest{
@@ -257,6 +266,8 @@ func TestGetDeliveryAttempts(t *testing.T) {
 		manager, _ := NewManager(config, repo)
 
 		ctx := context.Background()
+		require.NoError(t, manager.Start(ctx))
+		defer manager.Stop()
 
 		// Create subscription and queue delivery
 		sub, _ := manager.CreateSubscription(ctx, &CreateSubscriptionRequest{
@@ -305,6 +316,8 @@ func TestRetryDelivery(t *testing.T) {
 		manager, _ := NewManager(config, repo)
 
 		ctx := context.Background()
+		require.NoError(t, manager.Start(ctx))
+		defer manager.Stop()
 
 		// Create subscription and queue delivery
 		sub, _ := manager.CreateSubscription(ctx, &CreateSubscriptionRequest{
@@ -364,6 +377,8 @@ func TestRetryDelivery(t *testing.T) {
 		manager, _ := NewManager(config, repo)
 
 		ctx := context.Background()
+		require.NoError(t, manager.Start(ctx))
+		defer manager.Stop()
 
 		// Create subscription and queue delivery
 		sub, _ := manager.CreateSubscription(ctx, &CreateSubscriptionRequest{
@@ -405,6 +420,8 @@ func TestListDeliveries(t *testing.T) {
 		manager, _ := NewManager(config, repo)
 
 		ctx := context.Background()
+		require.NoError(t, manager.Start(ctx))
+		defer manager.Stop()
 
 		// Create subscription and queue deliveries
 		sub, _ := manager.CreateSubscription(ctx, &CreateSubscriptionRequest{
@@ -439,6 +456,8 @@ func TestListDeliveries(t *testing.T) {
 		manager, _ := NewManager(config, repo)
 
 		ctx := context.Background()
+		require.NoError(t, manager.Start(ctx))
+		defer manager.Stop()
 
 		// Create subscriptions for different tenants
 		sub1, _ := manager.CreateSubscription(ctx, &CreateSubscriptionRequest{
@@ -485,6 +504,8 @@ func TestListDeliveries(t *testing.T) {
 		manager, _ := NewManager(config, repo)
 
 		ctx := context.Background()
+		require.NoError(t, manager.Start(ctx))
+		defer manager.Stop()
 
 		// Create multiple subscriptions
 		sub1, _ := manager.CreateSubscription(ctx, &CreateSubscriptionRequest{
@@ -532,6 +553,8 @@ func TestListDeliveries(t *testing.T) {
 		manager, _ := NewManager(config, repo)
 
 		ctx := context.Background()
+		require.NoError(t, manager.Start(ctx))
+		defer manager.Stop()
 
 		// Create subscription
 		sub, _ := manager.CreateSubscription(ctx, &CreateSubscriptionRequest{
@@ -579,6 +602,8 @@ func TestListDeliveries(t *testing.T) {
 		manager, _ := NewManager(config, repo)
 
 		ctx := context.Background()
+		require.NoError(t, manager.Start(ctx))
+		defer manager.Stop()
 
 		// Create subscription
 		sub, _ := manager.CreateSubscription(ctx, &CreateSubscriptionRequest{
@@ -619,6 +644,8 @@ func TestListDeliveries(t *testing.T) {
 		manager, _ := NewManager(config, repo)
 
 		ctx := context.Background()
+		require.NoError(t, manager.Start(ctx))
+		defer manager.Stop()
 
 		// Create subscription
 		sub, _ := manager.CreateSubscription(ctx, &CreateSubscriptionRequest{
@@ -654,6 +681,8 @@ func TestListDeliveries(t *testing.T) {
 		manager, _ := NewManager(config, repo)
 
 		ctx := context.Background()
+		require.NoError(t, manager.Start(ctx))
+		defer manager.Stop()
 
 		// Create subscription
 		sub, _ := manager.CreateSubscription(ctx, &CreateSubscriptionRequest{
@@ -690,6 +719,8 @@ func TestListDeliveries(t *testing.T) {
 		manager, _ := NewManager(config, repo)
 
 		ctx := context.Background()
+		require.NoError(t, manager.Start(ctx))
+		defer manager.Stop()
 
 		// Create multiple subscriptions
 		sub1, _ := manager.CreateSubscription(ctx, &CreateSubscriptionRequest{
@@ -763,6 +794,8 @@ func TestListDeliveries(t *testing.T) {
 		manager, _ := NewManager(config, repo)
 
 		ctx := context.Background()
+		require.NoError(t, manager.Start(ctx))
+		defer manager.Stop()
 
 		// Create subscription
 		sub, _ := manager.CreateSubscription(ctx, &CreateSubscriptionRequest{
@@ -813,6 +846,8 @@ func TestListDeliveries(t *testing.T) {
 		manager, _ := NewManager(config, repo)
 
 		ctx := context.Background()
+		require.NoError(t, manager.Start(ctx))
+		defer manager.Stop()
 
 		deliveries, err := manager.ListDeliveries(ctx, nil)
 
@@ -827,6 +862,8 @@ func TestListDeliveries(t *testing.T) {
 		manager, _ := NewManager(config, repo)
 
 		ctx := context.Background()
+		require.NoError(t, manager.Start(ctx))
+		defer manager.Stop()
 
 		// Inject error in repository
 		repo.injectError = NewDatabaseError("list_deliveries", assert.AnError)
