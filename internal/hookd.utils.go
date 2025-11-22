@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/itsatony/go-cuserr"
 	gonanoid "github.com/matoous/go-nanoid/v2"
 )
 
@@ -32,7 +33,9 @@ import (
 func GenerateSubscriptionID() (string, error) {
 	id, err := gonanoid.New()
 	if err != nil {
-		return "", fmt.Errorf("failed to generate subscription ID: %w", err)
+		return "", cuserr.NewInternalError("id_generator", err,
+			cuserr.WithMetadata("type", "subscription"),
+		)
 	}
 	return fmt.Sprintf("%s_%s", PrefixSubscription, id), nil
 }
@@ -44,7 +47,9 @@ func GenerateSubscriptionID() (string, error) {
 func GenerateDeliveryID() (string, error) {
 	id, err := gonanoid.New()
 	if err != nil {
-		return "", fmt.Errorf("failed to generate delivery ID: %w", err)
+		return "", cuserr.NewInternalError("id_generator", err,
+			cuserr.WithMetadata("type", "delivery"),
+		)
 	}
 	return fmt.Sprintf("%s_%s", PrefixDelivery, id), nil
 }
@@ -56,7 +61,9 @@ func GenerateDeliveryID() (string, error) {
 func GenerateAttemptID() (string, error) {
 	id, err := gonanoid.New()
 	if err != nil {
-		return "", fmt.Errorf("failed to generate attempt ID: %w", err)
+		return "", cuserr.NewInternalError("id_generator", err,
+			cuserr.WithMetadata("type", "attempt"),
+		)
 	}
 	return fmt.Sprintf("%s_%s", PrefixAttempt, id), nil
 }

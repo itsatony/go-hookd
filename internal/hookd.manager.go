@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/itsatony/go-cuserr"
 	"go.uber.org/zap"
 )
 
@@ -166,7 +167,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	defer m.startedMu.Unlock()
 
 	if m.started {
-		return fmt.Errorf("manager already started")
+		return cuserr.NewValidationError("manager", "manager already started")
 	}
 
 	// Create cancellable context
@@ -417,13 +418,17 @@ func (m *Manager) executeWebhookRequest(ctx context.Context, delivery *Delivery,
 	// Marshal payload
 	payloadJSON, err := marshalJSONB(delivery.Payload)
 	if err != nil {
-		return 0, "", nil, fmt.Errorf("failed to marshal payload: %w", err)
+		// marshalJSONB already returns cuserr.InternalError
+		return 0, "", nil, err
 	}
 
 	// Create request with payload body
 	req, err := http.NewRequestWithContext(ctx, "POST", sub.URL, bytes.NewReader(payloadJSON))
 	if err != nil {
-		return 0, "", nil, fmt.Errorf("failed to create request: %w", err)
+		return 0, "", nil, cuserr.NewInternalError("http_client", err,
+			cuserr.WithMetadata("operation", "create_request"),
+			cuserr.WithMetadata("url", sub.URL),
+		)
 	}
 
 	// Set headers
@@ -452,7 +457,9 @@ func (m *Manager) executeWebhookRequest(ctx context.Context, delivery *Delivery,
 	// Read response body
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return resp.StatusCode, "", nil, fmt.Errorf("failed to read response body: %w", err)
+		return resp.StatusCode, "", nil, cuserr.NewInternalError("http_client", err,
+			cuserr.WithMetadata("operation", "read_response_body"),
+		)
 	}
 
 	// Extract response headers

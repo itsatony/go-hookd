@@ -8,6 +8,7 @@
 package internal
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/itsatony/go-cuserr"
@@ -79,7 +80,8 @@ func NewDeliveryExecutionError(url string, statusCode int, err error) error {
 // NewCircuitBreakerError creates an error indicating circuit breaker is open.
 func NewCircuitBreakerError(endpoint string) error {
 	// Circuit breaker open is an external service error (service unavailable)
-	err := cuserr.NewExternalError("webhook-endpoint", "circuit_breaker", fmt.Errorf(ErrMsgCircuitBreakerOpen),
+	baseErr := errors.New(ErrMsgCircuitBreakerOpen)
+	err := cuserr.NewExternalError("webhook-endpoint", "circuit_breaker", baseErr,
 		cuserr.WithMetadata("endpoint", endpoint),
 	)
 	return err
@@ -102,9 +104,10 @@ func NewSubscriptionExistsError(tenantID, url string) error {
 
 // NewDeliveryTimeoutError creates a timeout error for delivery attempts.
 func NewDeliveryTimeoutError(url string, duration string, err error) error {
-	// Wrap the original error with timeout context
-	wrappedErr := fmt.Errorf("webhook delivery timeout after %s to %s: %w", duration, url, err)
-	return cuserr.NewTimeoutError("webhook-delivery", wrappedErr)
+	// Create timeout error and add metadata
+	return cuserr.NewTimeoutError("webhook-delivery", err).
+		WithMetadata("url", url).
+		WithMetadata("duration", duration)
 }
 
 // NewRateLimitError creates a rate limit error.

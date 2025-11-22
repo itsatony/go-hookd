@@ -70,7 +70,9 @@ func marshalJSONB(v interface{}) ([]byte, error) {
 	}
 	data, err := json.Marshal(v)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal JSONB: %w", err)
+		return nil, cuserr.NewInternalError("jsonb_marshaler", err,
+			cuserr.WithMetadata("operation", "marshal"),
+		)
 	}
 	return data, nil
 }
@@ -82,7 +84,9 @@ func unmarshalJSONB(data []byte, target interface{}) error {
 		return nil
 	}
 	if err := json.Unmarshal(data, target); err != nil {
-		return fmt.Errorf("failed to unmarshal JSONB: %w", err)
+		return cuserr.NewInternalError("jsonb_unmarshaler", err,
+			cuserr.WithMetadata("operation", "unmarshal"),
+		)
 	}
 	return nil
 }
