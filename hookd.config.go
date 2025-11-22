@@ -100,72 +100,99 @@ func NewConfig(databaseURL string) *Config {
 //
 // Returns nil if validation succeeds.
 func (c *Config) Validate() error {
-	// Database validation
+	if err := c.validateDatabase(); err != nil {
+		return err
+	}
+	if err := c.validateWorkerPool(); err != nil {
+		return err
+	}
+	if err := c.validateRetryPolicy(); err != nil {
+		return err
+	}
+	if err := c.validateCircuitBreaker(); err != nil {
+		return err
+	}
+	if err := c.validateIdempotency(); err != nil {
+		return err
+	}
+	if err := c.validateShutdown(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateDatabase validates database configuration.
+func (c *Config) validateDatabase() error {
 	if c.DatabaseURL == "" {
 		return NewConfigurationError("database_url", ErrMsgMissingDatabaseURL)
 	}
+	return nil
+}
 
-	// Worker pool validation
+// validateWorkerPool validates worker pool and queue configuration.
+func (c *Config) validateWorkerPool() error {
 	if c.WorkerCount < 1 {
 		return NewConfigurationError("worker_count", ErrMsgInvalidWorkerCount)
 	}
-
 	if c.QueuePollInterval < 1 {
 		return NewConfigurationError("queue_poll_interval", ErrMsgInvalidPollInterval)
 	}
-
 	if c.DeliveryTimeoutMs < 1000 {
 		return NewConfigurationError("delivery_timeout", ErrMsgInvalidDeliveryTimeout)
 	}
-
 	if c.MaxBatchSize < 1 {
 		return NewConfigurationError("max_batch_size", ErrMsgInvalidMaxBatchSize)
 	}
+	return nil
+}
 
-	// Retry policy validation
+// validateRetryPolicy validates retry policy configuration.
+func (c *Config) validateRetryPolicy() error {
 	if c.DefaultMaxRetries < 0 {
 		return NewConfigurationError("max_retries", ErrMsgInvalidMaxRetries)
 	}
-
 	if c.DefaultInitialBackoffMs < 1 {
 		return NewConfigurationError("initial_backoff", ErrMsgInvalidInitialBackoff)
 	}
-
 	if c.DefaultMaxBackoffMs < 1 {
 		return NewConfigurationError("max_backoff", ErrMsgInvalidMaxBackoff)
 	}
-
 	if c.DefaultInitialBackoffMs >= c.DefaultMaxBackoffMs {
 		return NewConfigurationError("backoff", ErrMsgInvalidBackoff)
 	}
-
 	if c.DefaultBackoffFactor < 1.0 {
 		return NewConfigurationError("backoff_factor", ErrMsgInvalidBackoffFactor)
 	}
+	return nil
+}
 
-	// Circuit breaker validation
+// validateCircuitBreaker validates circuit breaker configuration.
+func (c *Config) validateCircuitBreaker() error {
 	if c.CircuitBreakerThreshold < 1 {
 		return NewConfigurationError("circuit_breaker_threshold", ErrMsgInvalidCircuitBreakerThreshold)
 	}
-
 	if c.CircuitBreakerTimeoutMs < 1000 {
 		return NewConfigurationError("circuit_breaker_timeout", ErrMsgInvalidCircuitBreakerTimeout)
 	}
-
 	if c.CircuitBreakerHalfOpenRequests < 1 {
 		return NewConfigurationError("circuit_breaker_half_open_requests", ErrMsgInvalidCircuitBreakerHalfOpen)
 	}
+	return nil
+}
 
-	// Idempotency validation
+// validateIdempotency validates idempotency configuration.
+func (c *Config) validateIdempotency() error {
 	if c.IdempotencyTTLHours < 1 {
 		return NewConfigurationError("idempotency_ttl", ErrMsgInvalidIdempotencyTTL)
 	}
+	return nil
+}
 
-	// Shutdown validation
+// validateShutdown validates shutdown configuration.
+func (c *Config) validateShutdown() error {
 	if c.ShutdownTimeoutSeconds < 1 {
 		return NewConfigurationError("shutdown_timeout", ErrMsgInvalidShutdownTimeout)
 	}
-
 	return nil
 }
 
