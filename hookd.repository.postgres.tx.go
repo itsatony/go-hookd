@@ -248,7 +248,7 @@ func (r *PostgresRepositoryTx) ListSubscriptions(ctx context.Context, filter *Su
 		FROM subscriptions
 		WHERE 1=1`
 
-	args := []interface{}{}
+	args := []any{}
 	argCount := 1
 
 	if filter.TenantID != "" {
@@ -481,7 +481,7 @@ func (r *PostgresRepositoryTx) ListDeliveries(ctx context.Context, filter *Deliv
 		FROM deliveries
 		WHERE 1=1`
 
-	args := []interface{}{}
+	args := []any{}
 	argCount := 1
 
 	// Apply filters

@@ -470,7 +470,7 @@ func (m *Manager) publishAuditEvent(topic string, sub *Subscription) {
 		ResourceID: sub.ID,
 		TenantID:   sub.TenantID,
 		Timestamp:  time.Now(),
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"url":         sub.URL,
 			"event_types": sub.EventTypes,
 			"status":      sub.Status,

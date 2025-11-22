@@ -60,7 +60,7 @@
 //	delivery, err := manager.QueueDelivery(ctx, &hookd.QueueDeliveryRequest{
 //	    SubscriptionID: sub.ID,
 //	    EventType:      "user.created",
-//	    Payload: map[string]interface{}{
+//	    Payload: map[string]any{
 //	        "user_id": "123",
 //	        "email":   "user@example.com",
 //	    },
@@ -104,10 +104,10 @@
 // Subscribe to internal events for monitoring and observability:
 //
 //	type MyEventBus struct {
-//	    subscribers map[string][]func(interface{})
+//	    subscribers map[string][]func(any)
 //	}
 //
-//	func (b *MyEventBus) Publish(topic string, data interface{}) {
+//	func (b *MyEventBus) Publish(topic string, data any) {
 //	    // Send to metrics, logging, alerting systems
 //	    for _, handler := range b.subscribers[topic] {
 //	        go handler(data)

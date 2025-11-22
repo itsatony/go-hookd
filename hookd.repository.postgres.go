@@ -66,7 +66,7 @@ func NewPostgresRepository(connectionString string) (*PostgresRepository, error)
 
 // marshalJSONB marshals a value to JSONB format for PostgreSQL.
 // Returns nil for nil input to handle nullable JSONB columns.
-func marshalJSONB(v interface{}) ([]byte, error) {
+func marshalJSONB(v any) ([]byte, error) {
 	if v == nil {
 		return nil, nil
 	}
@@ -81,7 +81,7 @@ func marshalJSONB(v interface{}) ([]byte, error) {
 
 // unmarshalJSONB unmarshals JSONB data from PostgreSQL into the target.
 // Handles NULL values by leaving target unchanged.
-func unmarshalJSONB(data []byte, target interface{}) error {
+func unmarshalJSONB(data []byte, target any) error {
 	if len(data) == 0 {
 		return nil
 	}
@@ -96,7 +96,7 @@ func unmarshalJSONB(data []byte, target interface{}) error {
 // scanSubscription scans a database row into a Subscription struct.
 // Handles JSONB fields (retry_policy, headers, metadata) and TEXT[] arrays (event_types).
 func scanSubscription(scanner interface {
-	Scan(dest ...interface{}) error
+	Scan(dest ...any) error
 }) (*Subscription, error) {
 	var sub Subscription
 	var retryPolicyJSON []byte
@@ -139,7 +139,7 @@ func scanSubscription(scanner interface {
 	}
 
 	if len(metadataJSON) > 0 {
-		sub.Metadata = make(map[string]interface{})
+		sub.Metadata = make(map[string]any)
 		if err := unmarshalJSONB(metadataJSON, &sub.Metadata); err != nil {
 			return nil, err
 		}
@@ -151,7 +151,7 @@ func scanSubscription(scanner interface {
 // scanDelivery scans a database row into a Delivery struct.
 // Handles JSONB payload field and nullable timestamps.
 func scanDelivery(scanner interface {
-	Scan(dest ...interface{}) error
+	Scan(dest ...any) error
 }) (*Delivery, error) {
 	var dlv Delivery
 	var payloadJSON []byte
@@ -177,7 +177,7 @@ func scanDelivery(scanner interface {
 
 	// Unmarshal payload JSONB
 	if len(payloadJSON) > 0 {
-		dlv.Payload = make(map[string]interface{})
+		dlv.Payload = make(map[string]any)
 		if err := unmarshalJSONB(payloadJSON, &dlv.Payload); err != nil {
 			return nil, err
 		}
@@ -197,7 +197,7 @@ func scanDelivery(scanner interface {
 // scanDeliveryAttempt scans a database row into a DeliveryAttempt struct.
 // Handles JSONB response_headers field.
 func scanDeliveryAttempt(scanner interface {
-	Scan(dest ...interface{}) error
+	Scan(dest ...any) error
 }) (*DeliveryAttempt, error) {
 	var att DeliveryAttempt
 	var responseHeadersJSON []byte
@@ -240,7 +240,7 @@ func scanDeliveryAttempt(scanner interface {
 // scanCircuitBreakerState scans a database row into a CircuitBreakerState struct.
 // Handles nullable timestamps.
 func scanCircuitBreakerState(scanner interface {
-	Scan(dest ...interface{}) error
+	Scan(dest ...any) error
 }) (*CircuitBreakerState, error) {
 	var state CircuitBreakerState
 	var lastFailure sql.NullTime
@@ -481,7 +481,7 @@ func (r *PostgresRepository) ListSubscriptions(ctx context.Context, filter *Subs
 		FROM subscriptions
 		WHERE 1=1`
 
-	args := []interface{}{}
+	args := []any{}
 	argCount := 1
 
 	// Apply filters
@@ -726,7 +726,7 @@ func (r *PostgresRepository) ListDeliveries(ctx context.Context, filter *Deliver
 		FROM deliveries
 		WHERE 1=1`
 
-	args := []interface{}{}
+	args := []any{}
 	argCount := 1
 
 	// Apply filters

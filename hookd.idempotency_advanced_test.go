@@ -75,7 +75,7 @@ func TestIdempotency_ExtremeRaceCondition(t *testing.T) {
 			delivery, err := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 				SubscriptionID: sub.ID,
 				EventType:      "test.extreme",
-				Payload: map[string]interface{}{
+				Payload: map[string]any{
 					"index": index,
 				},
 				IdempotencyKey: idempotencyKey,
@@ -183,7 +183,7 @@ func TestIdempotency_MultipleKeysConcurrent(t *testing.T) {
 				delivery, err := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 					SubscriptionID: sub.ID,
 					EventType:      "test.multikey",
-					Payload: map[string]interface{}{
+					Payload: map[string]any{
 						"key":   key,
 						"index": index,
 					},
@@ -269,7 +269,7 @@ func TestIdempotency_RapidFireSameKey(t *testing.T) {
 			delivery, err := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 				SubscriptionID: sub.ID,
 				EventType:      "test.rapidfire",
-				Payload: map[string]interface{}{
+				Payload: map[string]any{
 					"index": index,
 				},
 				IdempotencyKey: idempotencyKey,

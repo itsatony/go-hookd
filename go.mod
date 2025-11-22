@@ -6,7 +6,6 @@ toolchain go1.24.10
 
 require (
 	github.com/itsatony/go-cuserr v0.3.0
-	github.com/itsatony/go-pubbing v0.5.2
 	github.com/itsatony/go-version v1.0.0
 	github.com/lib/pq v1.10.9
 	github.com/matoous/go-nanoid/v2 v2.1.0

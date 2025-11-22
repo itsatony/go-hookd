@@ -90,7 +90,7 @@ func TestWorkerSemaphore_ActualConcurrencyLimit(t *testing.T) {
 		delivery, err := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 			SubscriptionID: sub.ID,
 			EventType:      "test.concurrency",
-			Payload: map[string]interface{}{
+			Payload: map[string]any{
 				"index": i,
 			},
 		})
@@ -211,7 +211,7 @@ func TestWorkerSemaphore_StressTest(t *testing.T) {
 		_, err := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 			SubscriptionID: sub.ID,
 			EventType:      "test.stress",
-			Payload: map[string]interface{}{
+			Payload: map[string]any{
 				"index": i,
 			},
 		})

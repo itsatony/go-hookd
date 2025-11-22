@@ -77,7 +77,7 @@ func TestCreateSubscription(t *testing.T) {
 
 		ctx := context.Background()
 		headers := map[string]string{"X-Custom": "value"}
-		metadata := map[string]interface{}{"key": "value"}
+		metadata := map[string]any{"key": "value"}
 
 		req := &CreateSubscriptionRequest{
 			TenantID:   "tenant_123",
@@ -332,7 +332,7 @@ func TestUpdateSubscription(t *testing.T) {
 
 		// Update headers and metadata
 		newHeaders := map[string]string{"X-Custom": "new-value"}
-		newMetadata := map[string]interface{}{"updated": true}
+		newMetadata := map[string]any{"updated": true}
 		updateReq := &UpdateSubscriptionRequest{
 			Headers:  &newHeaders,
 			Metadata: &newMetadata,

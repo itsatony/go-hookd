@@ -29,8 +29,8 @@ import (
 // Thread Safety: Manager is safe for concurrent use after Start() is called.
 // EventBus is a simple interface for publishing events.
 type EventBus interface {
-	Publish(topic string, data interface{})
-	Subscribe(topic string, handler func(interface{})) func()
+	Publish(topic string, data any)
+	Subscribe(topic string, handler func(any)) func()
 }
 
 // Manager is the main webhook management orchestrator.
@@ -692,7 +692,7 @@ func (m *Manager) publishDeliveryEvent(topic string, delivery *Delivery, sub *Su
 		EventType:      delivery.EventType,
 		Status:         delivery.Status,
 		Timestamp:      time.Now(),
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"attempt_count": delivery.AttemptCount,
 			"max_attempts":  delivery.MaxAttempts,
 		},
@@ -741,9 +741,9 @@ func truncateString(s string, maxLen int) string {
 type noOpEventBus struct{}
 
 // Publish is a no-op.
-func (n *noOpEventBus) Publish(topic string, data interface{}) {}
+func (n *noOpEventBus) Publish(topic string, data any) {}
 
 // Subscribe is a no-op.
-func (n *noOpEventBus) Subscribe(topic string, handler func(interface{})) func() {
+func (n *noOpEventBus) Subscribe(topic string, handler func(any)) func() {
 	return func() {}
 }

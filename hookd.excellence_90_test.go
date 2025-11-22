@@ -48,7 +48,7 @@ func TestGetDeliveryAttempts_ErrorPaths(t *testing.T) {
 		delivery, _ := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 			SubscriptionID: sub.ID,
 			EventType:      "test.event",
-			Payload:        map[string]interface{}{"test": "data"},
+			Payload:        map[string]any{"test": "data"},
 		})
 
 		// Inject error into repository
@@ -244,7 +244,7 @@ func TestProcessDeliveries_ErrorHandling(t *testing.T) {
 				SubscriptionID: sub.ID,
 				TenantID:       sub.TenantID,
 				EventType:      "test.event",
-				Payload:        map[string]interface{}{"index": i},
+				Payload:        map[string]any{"index": i},
 				Status:         DeliveryStatusPending,
 				AttemptCount:   0,
 				MaxAttempts:    3,
@@ -355,7 +355,7 @@ func TestQueueDelivery_ErrorPaths(t *testing.T) {
 		req := &QueueDeliveryRequest{
 			SubscriptionID: sub.ID,
 			EventType:      "test.event",
-			Payload:        map[string]interface{}{"test": "data"},
+			Payload:        map[string]any{"test": "data"},
 			IdempotencyKey: "test_key_123",
 		}
 
@@ -395,7 +395,7 @@ func TestQueueDelivery_ErrorPaths(t *testing.T) {
 		req := &QueueDeliveryRequest{
 			SubscriptionID: sub.ID,
 			EventType:      "test.event",
-			Payload:        map[string]interface{}{"test": "data"},
+			Payload:        map[string]any{"test": "data"},
 		}
 
 		delivery, err := manager.QueueDelivery(ctx, req)
@@ -480,7 +480,7 @@ func TestStop_InFlightDeliveries(t *testing.T) {
 			SubscriptionID: sub.ID,
 			TenantID:       sub.TenantID,
 			EventType:      "test.event",
-			Payload:        map[string]interface{}{"test": "data"},
+			Payload:        map[string]any{"test": "data"},
 			Status:         DeliveryStatusPending,
 			AttemptCount:   0,
 			MaxAttempts:    3,
@@ -542,7 +542,7 @@ func TestE2E_EventPublishing(t *testing.T) {
 		repo := NewMockRepository()
 
 		// Create custom event bus to track events
-		eventBus := &testEventBus{events: make([]interface{}, 0)}
+		eventBus := &testEventBus{events: make([]any, 0)}
 		manager, _ := NewManager(config, repo, WithEventBus(eventBus))
 
 		ctx := context.Background()
@@ -568,7 +568,7 @@ func TestE2E_EventPublishing(t *testing.T) {
 		delivery, _ := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 			SubscriptionID: sub.ID,
 			EventType:      "test.event",
-			Payload:        map[string]interface{}{"test": "data"},
+			Payload:        map[string]any{"test": "data"},
 		})
 
 		// Wait for delivery processing
@@ -648,7 +648,7 @@ func TestAdditionalEdgeCases_ForCoverage(t *testing.T) {
 		req := &QueueDeliveryRequest{
 			SubscriptionID: sub.ID,
 			EventType:      "test.event",
-			Payload:        map[string]interface{}{"test": "data"},
+			Payload:        map[string]any{"test": "data"},
 			IdempotencyKey: "", // No idempotency key
 		}
 

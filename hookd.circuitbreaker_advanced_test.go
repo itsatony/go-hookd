@@ -76,7 +76,7 @@ func TestCircuitBreaker_OpenToHalfOpenTransition(t *testing.T) {
 		SubscriptionID: sub.ID,
 		TenantID:       sub.TenantID,
 		EventType:      "test.circuit",
-		Payload:        map[string]interface{}{"test": "transition"},
+		Payload:        map[string]any{"test": "transition"},
 		Status:         DeliveryStatusPending,
 		AttemptCount:   0,
 		MaxAttempts:    3,
@@ -170,7 +170,7 @@ func TestCircuitBreaker_HalfOpenToClosedTransition(t *testing.T) {
 		SubscriptionID: sub.ID,
 		TenantID:       sub.TenantID,
 		EventType:      "test.circuit",
-		Payload:        map[string]interface{}{"test": "close"},
+		Payload:        map[string]any{"test": "close"},
 		Status:         DeliveryStatusPending,
 		AttemptCount:   0,
 		MaxAttempts:    3,
@@ -257,7 +257,7 @@ func TestCircuitBreaker_HalfOpenToOpenReopen(t *testing.T) {
 		SubscriptionID: sub.ID,
 		TenantID:       sub.TenantID,
 		EventType:      "test.circuit",
-		Payload:        map[string]interface{}{"test": "reopen"},
+		Payload:        map[string]any{"test": "reopen"},
 		Status:         DeliveryStatusPending,
 		AttemptCount:   0,
 		MaxAttempts:    3,
@@ -284,7 +284,7 @@ func TestCircuitBreaker_HalfOpenToOpenReopen(t *testing.T) {
 		SubscriptionID: sub.ID,
 		TenantID:       sub.TenantID,
 		EventType:      "test.circuit",
-		Payload:        map[string]interface{}{"test": "blocked"},
+		Payload:        map[string]any{"test": "blocked"},
 		Status:         DeliveryStatusPending,
 		AttemptCount:   0,
 		MaxAttempts:    3,
@@ -354,7 +354,7 @@ func TestCircuitBreaker_ConcurrentStateUpdates(t *testing.T) {
 		_, err := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 			SubscriptionID: sub.ID,
 			EventType:      "test.concurrent",
-			Payload: map[string]interface{}{
+			Payload: map[string]any{
 				"index": i,
 			},
 		})

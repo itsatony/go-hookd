@@ -68,7 +68,7 @@ func TestConcurrentWorkerPool_NoDoubleProcessing(t *testing.T) {
 			SubscriptionID: sub.ID,
 			TenantID:       sub.TenantID,
 			EventType:      "test.concurrent",
-			Payload: map[string]interface{}{
+			Payload: map[string]any{
 				"index": i,
 				"test":  "concurrent",
 			},
@@ -228,7 +228,7 @@ func TestConcurrentWorkerPool_SkipLocked(t *testing.T) {
 			SubscriptionID: sub.ID,
 			TenantID:       sub.TenantID,
 			EventType:      "test.skip_locked",
-			Payload: map[string]interface{}{
+			Payload: map[string]any{
 				"index": i,
 			},
 			Status:       DeliveryStatusPending,
@@ -393,7 +393,7 @@ func TestConcurrentWorkerPool_WorkerSemaphore(t *testing.T) {
 			SubscriptionID: sub.ID,
 			TenantID:       sub.TenantID,
 			EventType:      "test.semaphore",
-			Payload: map[string]interface{}{
+			Payload: map[string]any{
 				"index": i,
 			},
 			Status:       DeliveryStatusPending,

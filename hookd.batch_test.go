@@ -46,12 +46,12 @@ func TestManager_QueueDeliveries(t *testing.T) {
 				{
 					SubscriptionID: sub1.ID,
 					EventType:      "order.created",
-					Payload:        map[string]interface{}{"order_id": "123"},
+					Payload:        map[string]any{"order_id": "123"},
 				},
 				{
 					SubscriptionID: sub2.ID,
 					EventType:      "order.updated",
-					Payload:        map[string]interface{}{"order_id": "456"},
+					Payload:        map[string]any{"order_id": "456"},
 				},
 			},
 		}
@@ -78,17 +78,17 @@ func TestManager_QueueDeliveries(t *testing.T) {
 				{
 					SubscriptionID: sub1.ID,
 					EventType:      "order.created",
-					Payload:        map[string]interface{}{"order_id": "123"},
+					Payload:        map[string]any{"order_id": "123"},
 				},
 				{
 					SubscriptionID: "invalid-sub-id",
 					EventType:      "order.updated",
-					Payload:        map[string]interface{}{"order_id": "456"},
+					Payload:        map[string]any{"order_id": "456"},
 				},
 				{
 					SubscriptionID: sub2.ID,
 					EventType:      "order.updated",
-					Payload:        map[string]interface{}{"order_id": "789"},
+					Payload:        map[string]any{"order_id": "789"},
 				},
 			},
 		}
@@ -134,7 +134,7 @@ func TestManager_QueueDeliveries(t *testing.T) {
 			deliveries[i] = &QueueDeliveryRequest{
 				SubscriptionID: sub1.ID,
 				EventType:      "order.created",
-				Payload:        map[string]interface{}{"order_id": i},
+				Payload:        map[string]any{"order_id": i},
 			}
 		}
 
@@ -151,13 +151,13 @@ func TestManager_QueueDeliveries(t *testing.T) {
 				{
 					SubscriptionID: sub1.ID,
 					EventType:      "order.created",
-					Payload:        map[string]interface{}{"order_id": "999"},
+					Payload:        map[string]any{"order_id": "999"},
 					IdempotencyKey: idempotencyKey,
 				},
 				{
 					SubscriptionID: sub1.ID,
 					EventType:      "order.created",
-					Payload:        map[string]interface{}{"order_id": "999"},
+					Payload:        map[string]any{"order_id": "999"},
 					IdempotencyKey: idempotencyKey, // Duplicate
 				},
 			},
@@ -386,7 +386,7 @@ func TestBatch_ConcurrentSafety(t *testing.T) {
 						{
 							SubscriptionID: sub.ID,
 							EventType:      "test.event",
-							Payload:        map[string]interface{}{"iteration": iteration},
+							Payload:        map[string]any{"iteration": iteration},
 						},
 					},
 				}
@@ -435,7 +435,7 @@ func BenchmarkQueueDeliveries(b *testing.B) {
 		deliveries[i] = &QueueDeliveryRequest{
 			SubscriptionID: sub.ID,
 			EventType:      "bench.event",
-			Payload:        map[string]interface{}{"index": i},
+			Payload:        map[string]any{"index": i},
 		}
 	}
 

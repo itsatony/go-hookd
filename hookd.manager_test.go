@@ -78,7 +78,7 @@ func TestNewManager(t *testing.T) {
 	t.Run("success with custom event bus", func(t *testing.T) {
 		config := NewConfig("postgres://localhost/test")
 		repo := NewMockRepository()
-		customBus := &testEventBus{events: make([]interface{}, 0)}
+		customBus := &testEventBus{events: make([]any, 0)}
 
 		manager, err := NewManager(config, repo, WithEventBus(customBus))
 
@@ -120,7 +120,7 @@ func TestNewManager(t *testing.T) {
 
 		// Test noOpEventBus methods (for coverage)
 		manager.eventBus.Publish("test.topic", map[string]string{"test": "data"})
-		unsubscribe := manager.eventBus.Subscribe("test.topic", func(data interface{}) {
+		unsubscribe := manager.eventBus.Subscribe("test.topic", func(data any) {
 			// This handler will never be called
 		})
 		assert.NotNil(t, unsubscribe)
@@ -248,7 +248,7 @@ func TestWorkerPool(t *testing.T) {
 			SubscriptionID: sub.ID,
 			TenantID:       sub.TenantID,
 			EventType:      "test.event",
-			Payload:        map[string]interface{}{"test": "data"},
+			Payload:        map[string]any{"test": "data"},
 			Status:         DeliveryStatusPending,
 			AttemptCount:   0,
 			MaxAttempts:    3,
@@ -321,7 +321,7 @@ func TestDeliveryProcessing(t *testing.T) {
 			SubscriptionID: sub.ID,
 			TenantID:       sub.TenantID,
 			EventType:      "test.event",
-			Payload:        map[string]interface{}{"test": "data"},
+			Payload:        map[string]any{"test": "data"},
 			Status:         DeliveryStatusPending,
 			AttemptCount:   0,
 			MaxAttempts:    3,
@@ -366,7 +366,7 @@ func TestDeliveryProcessing(t *testing.T) {
 			SubscriptionID: sub.ID,
 			TenantID:       sub.TenantID,
 			EventType:      "test.event",
-			Payload:        map[string]interface{}{"test": "data"},
+			Payload:        map[string]any{"test": "data"},
 			Status:         DeliveryStatusPending,
 			AttemptCount:   0,
 			MaxAttempts:    3,
@@ -412,7 +412,7 @@ func TestDeliveryProcessing(t *testing.T) {
 			SubscriptionID: sub.ID,
 			TenantID:       sub.TenantID,
 			EventType:      "test.event",
-			Payload:        map[string]interface{}{"test": "data"},
+			Payload:        map[string]any{"test": "data"},
 			Status:         DeliveryStatusFailed,
 			AttemptCount:   3,
 			MaxAttempts:    3,
@@ -457,7 +457,7 @@ func TestDeliveryProcessing(t *testing.T) {
 			SubscriptionID: sub.ID,
 			TenantID:       sub.TenantID,
 			EventType:      "test.event",
-			Payload:        map[string]interface{}{"test": "data"},
+			Payload:        map[string]any{"test": "data"},
 			Status:         DeliveryStatusPending,
 			AttemptCount:   0,
 			MaxAttempts:    3,
@@ -569,7 +569,7 @@ func TestCircuitBreaker(t *testing.T) {
 			SubscriptionID: sub.ID,
 			TenantID:       sub.TenantID,
 			EventType:      "test.event",
-			Payload:        map[string]interface{}{"test": "data"},
+			Payload:        map[string]any{"test": "data"},
 			Status:         DeliveryStatusPending,
 			AttemptCount:   0,
 			MaxAttempts:    3,
@@ -593,7 +593,7 @@ func TestEventPublishing(t *testing.T) {
 	t.Run("manager publishes delivery events", func(t *testing.T) {
 		config := NewConfig("postgres://localhost/test")
 		repo := NewMockRepository()
-		eventBus := &testEventBus{events: make([]interface{}, 0)}
+		eventBus := &testEventBus{events: make([]any, 0)}
 		manager, _ := NewManager(config, repo, WithEventBus(eventBus))
 
 		sub := &Subscription{
@@ -618,7 +618,7 @@ func TestEventPublishing(t *testing.T) {
 	t.Run("manager publishes circuit breaker events", func(t *testing.T) {
 		config := NewConfig("postgres://localhost/test")
 		repo := NewMockRepository()
-		eventBus := &testEventBus{events: make([]interface{}, 0)}
+		eventBus := &testEventBus{events: make([]any, 0)}
 		manager, _ := NewManager(config, repo, WithEventBus(eventBus))
 
 		state := &CircuitBreakerState{
@@ -649,7 +649,7 @@ func TestErrorHandling(t *testing.T) {
 			SubscriptionID: "sub_nonexistent",
 			TenantID:       "tenant_test",
 			EventType:      "test.event",
-			Payload:        map[string]interface{}{"test": "data"},
+			Payload:        map[string]any{"test": "data"},
 			Status:         DeliveryStatusPending,
 			AttemptCount:   0,
 			MaxAttempts:    3,
@@ -692,7 +692,7 @@ func TestErrorHandling(t *testing.T) {
 			SubscriptionID: sub.ID,
 			TenantID:       sub.TenantID,
 			EventType:      "test.event",
-			Payload:        map[string]interface{}{"test": "data"},
+			Payload:        map[string]any{"test": "data"},
 			Status:         DeliveryStatusPending,
 			AttemptCount:   0,
 			MaxAttempts:    3,
@@ -752,7 +752,7 @@ func TestManager_HTTPClientErrors(t *testing.T) {
 			SubscriptionID: sub.ID,
 			TenantID:       sub.TenantID,
 			EventType:      "test.event",
-			Payload:        map[string]interface{}{"test": "data"},
+			Payload:        map[string]any{"test": "data"},
 			Status:         DeliveryStatusPending,
 			AttemptCount:   0,
 			MaxAttempts:    3,
@@ -795,7 +795,7 @@ func TestManager_HTTPClientErrors(t *testing.T) {
 			SubscriptionID: sub.ID,
 			TenantID:       sub.TenantID,
 			EventType:      "test.event",
-			Payload:        map[string]interface{}{"test": "data"},
+			Payload:        map[string]any{"test": "data"},
 			Status:         DeliveryStatusPending,
 			AttemptCount:   0,
 			MaxAttempts:    3,
@@ -845,7 +845,7 @@ func TestManager_HTTPClientErrors(t *testing.T) {
 			SubscriptionID: sub.ID,
 			TenantID:       sub.TenantID,
 			EventType:      "test.event",
-			Payload:        map[string]interface{}{"test": "data"},
+			Payload:        map[string]any{"test": "data"},
 			Status:         DeliveryStatusPending,
 			AttemptCount:   0,
 			MaxAttempts:    3,
@@ -901,7 +901,7 @@ func TestManager_HTTPClientErrors(t *testing.T) {
 			SubscriptionID: sub.ID,
 			TenantID:       sub.TenantID,
 			EventType:      "test.event",
-			Payload:        map[string]interface{}{"test": "data"},
+			Payload:        map[string]any{"test": "data"},
 			Status:         DeliveryStatusPending,
 			AttemptCount:   0,
 			MaxAttempts:    3,
@@ -960,7 +960,7 @@ func TestManager_CircuitBreakerStateTransitions(t *testing.T) {
 				SubscriptionID: sub.ID,
 				TenantID:       sub.TenantID,
 				EventType:      "test.event",
-				Payload:        map[string]interface{}{"test": "data"},
+				Payload:        map[string]any{"test": "data"},
 				Status:         DeliveryStatusPending,
 				AttemptCount:   0,
 				MaxAttempts:    1,
@@ -1021,7 +1021,7 @@ func TestManager_CircuitBreakerStateTransitions(t *testing.T) {
 			SubscriptionID: sub.ID,
 			TenantID:       sub.TenantID,
 			EventType:      "test.event",
-			Payload:        map[string]interface{}{"test": "data"},
+			Payload:        map[string]any{"test": "data"},
 			Status:         DeliveryStatusPending,
 			AttemptCount:   0,
 			MaxAttempts:    3,
@@ -1080,7 +1080,7 @@ func TestManager_CircuitBreakerStateTransitions(t *testing.T) {
 			SubscriptionID: sub.ID,
 			TenantID:       sub.TenantID,
 			EventType:      "test.event",
-			Payload:        map[string]interface{}{"test": "data"},
+			Payload:        map[string]any{"test": "data"},
 			Status:         DeliveryStatusPending,
 			AttemptCount:   0,
 			MaxAttempts:    3,
@@ -1139,7 +1139,7 @@ func TestManager_MaxRetriesExceeded(t *testing.T) {
 			SubscriptionID: sub.ID,
 			TenantID:       sub.TenantID,
 			EventType:      "test.event",
-			Payload:        map[string]interface{}{"test": "data"},
+			Payload:        map[string]any{"test": "data"},
 			Status:         DeliveryStatusPending,
 			AttemptCount:   0,
 			MaxAttempts:    2,
@@ -1245,7 +1245,7 @@ func TestManager_EdgeCases(t *testing.T) {
 			SubscriptionID: sub.ID,
 			TenantID:       sub.TenantID,
 			EventType:      "test.event",
-			Payload:        map[string]interface{}{"data": largeData},
+			Payload:        map[string]any{"data": largeData},
 			Status:         DeliveryStatusPending,
 			AttemptCount:   0,
 			MaxAttempts:    3,
@@ -1286,7 +1286,7 @@ func TestManager_EdgeCases(t *testing.T) {
 			SubscriptionID: sub.ID,
 			TenantID:       sub.TenantID,
 			EventType:      "test.event",
-			Payload:        map[string]interface{}{"test": "data"},
+			Payload:        map[string]any{"test": "data"},
 			Status:         DeliveryStatusPending,
 			AttemptCount:   0,
 			MaxAttempts:    3,
@@ -1312,10 +1312,10 @@ func TestManager_EdgeCases(t *testing.T) {
 // testEventBus is a simple event bus for testing
 type testEventBus struct {
 	mu     sync.Mutex
-	events []interface{}
+	events []any
 }
 
-func (t *testEventBus) Publish(topic string, data interface{}) {
+func (t *testEventBus) Publish(topic string, data any) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.events = append(t.events, data)
@@ -1327,6 +1327,6 @@ func (t *testEventBus) EventCount() int {
 	return len(t.events)
 }
 
-func (t *testEventBus) Subscribe(topic string, handler func(interface{})) func() {
+func (t *testEventBus) Subscribe(topic string, handler func(any)) func() {
 	return func() {}
 }

@@ -44,7 +44,7 @@ type Subscription struct {
 	Headers map[string]string `json:"headers,omitempty" db:"headers"`
 
 	// Metadata contains arbitrary key-value pairs for application use
-	Metadata map[string]interface{} `json:"metadata,omitempty" db:"metadata"`
+	Metadata map[string]any `json:"metadata,omitempty" db:"metadata"`
 
 	// CreatedAt is the timestamp when the subscription was created
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
@@ -71,7 +71,7 @@ type Delivery struct {
 	EventType string `json:"event_type" db:"event_type"`
 
 	// Payload is the event data to be delivered as JSON
-	Payload map[string]interface{} `json:"payload" db:"payload"`
+	Payload map[string]any `json:"payload" db:"payload"`
 
 	// Status is the current delivery status (pending, success, failed, dead_letter)
 	Status string `json:"status" db:"status"`
@@ -190,7 +190,7 @@ type CreateSubscriptionRequest struct {
 	Headers map[string]string `json:"headers,omitempty"`
 
 	// Metadata contains arbitrary key-value pairs (optional)
-	Metadata map[string]interface{} `json:"metadata,omitempty"`
+	Metadata map[string]any `json:"metadata,omitempty"`
 
 	// IdempotencyKey ensures this request is processed exactly once (optional)
 	IdempotencyKey string `json:"idempotency_key,omitempty"`
@@ -276,7 +276,7 @@ type UpdateSubscriptionRequest struct {
 	Headers *map[string]string `json:"headers,omitempty"`
 
 	// Metadata replaces the metadata
-	Metadata *map[string]interface{} `json:"metadata,omitempty"`
+	Metadata *map[string]any `json:"metadata,omitempty"`
 }
 
 // Validate implements the Validator interface for UpdateSubscriptionRequest.
@@ -343,7 +343,7 @@ type QueueDeliveryRequest struct {
 	EventType string `json:"event_type"`
 
 	// Payload is the event data to deliver
-	Payload map[string]interface{} `json:"payload"`
+	Payload map[string]any `json:"payload"`
 
 	// IdempotencyKey ensures this delivery is processed exactly once (optional)
 	IdempotencyKey string `json:"idempotency_key,omitempty"`
@@ -439,7 +439,7 @@ type DeliveryEvent struct {
 	Timestamp time.Time `json:"timestamp"`
 
 	// Metadata contains additional event-specific data
-	Metadata map[string]interface{} `json:"metadata,omitempty"`
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 // AuditEvent is published to the event bus for audit trail.
@@ -457,7 +457,7 @@ type AuditEvent struct {
 	Timestamp time.Time `json:"timestamp"`
 
 	// Metadata contains additional audit data
-	Metadata map[string]interface{} `json:"metadata,omitempty"`
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 // CircuitBreakerEvent is published to the event bus for circuit breaker state changes.

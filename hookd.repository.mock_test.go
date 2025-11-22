@@ -36,7 +36,7 @@ func createTestSubscription(t *testing.T, id, tenantID, url string) *Subscriptio
 		Headers: map[string]string{
 			"X-Custom-Header": "value",
 		},
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"key": "value",
 		},
 		CreatedAt: time.Now(),
@@ -52,7 +52,7 @@ func createTestDelivery(t *testing.T, id, subscriptionID, tenantID string) *Deli
 		SubscriptionID: subscriptionID,
 		TenantID:       tenantID,
 		EventType:      "user.created",
-		Payload: map[string]interface{}{
+		Payload: map[string]any{
 			"user_id": "12345",
 			"email":   "test@example.com",
 		},

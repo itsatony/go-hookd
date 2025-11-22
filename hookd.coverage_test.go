@@ -39,7 +39,7 @@ func TestNoOpEventBus_Subscribe(t *testing.T) {
 		bus := &noOpEventBus{}
 
 		handlerCalled := false
-		handler := func(data interface{}) {
+		handler := func(data any) {
 			handlerCalled = true
 		}
 
@@ -73,7 +73,7 @@ func TestMockRepository_UnlockDelivery(t *testing.T) {
 			SubscriptionID: "sub_test123",
 			TenantID:       "tenant_1",
 			EventType:      "test.event",
-			Payload:        map[string]interface{}{"key": "value"},
+			Payload:        map[string]any{"key": "value"},
 			Status:         DeliveryStatusPending,
 			MaxAttempts:    3,
 		}
@@ -107,7 +107,7 @@ func TestMockRepository_GetDelivery(t *testing.T) {
 			SubscriptionID: "sub_test123",
 			TenantID:       "tenant_1",
 			EventType:      "test.event",
-			Payload:        map[string]interface{}{"key": "value"},
+			Payload:        map[string]any{"key": "value"},
 			Status:         DeliveryStatusPending,
 			MaxAttempts:    3,
 		}

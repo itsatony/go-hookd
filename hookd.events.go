@@ -43,7 +43,7 @@ import (
 //	delivery, err := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 //	    SubscriptionID: "sub_6ByTSYmGzT2c8K3xN1fP2",
 //	    EventType:      "user.created",
-//	    Payload: map[string]interface{}{
+//	    Payload: map[string]any{
 //	        "user_id": "123",
 //	        "email":   "user@example.com",
 //	    },

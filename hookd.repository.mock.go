@@ -103,7 +103,7 @@ func copySubscription(sub *Subscription) *Subscription {
 	}
 
 	if sub.Metadata != nil {
-		copied.Metadata = make(map[string]interface{})
+		copied.Metadata = make(map[string]any)
 		for k, v := range sub.Metadata {
 			copied.Metadata[k] = v
 		}
@@ -130,7 +130,7 @@ func copyDelivery(dlv *Delivery) *Delivery {
 	}
 
 	if dlv.Payload != nil {
-		copied.Payload = make(map[string]interface{})
+		copied.Payload = make(map[string]any)
 		for k, v := range dlv.Payload {
 			copied.Payload[k] = v
 		}

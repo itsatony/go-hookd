@@ -73,7 +73,7 @@ func TestIdempotency_ConcurrentDuplicates(t *testing.T) {
 			delivery, err := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 				SubscriptionID: subResp.ID,
 				EventType:      "test.idempotency",
-				Payload: map[string]interface{}{
+				Payload: map[string]any{
 					"request_index": index,
 					"test":          "concurrent_idempotency",
 				},
@@ -161,7 +161,7 @@ func TestIdempotency_UniqueKeys(t *testing.T) {
 			delivery, err := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 				SubscriptionID: subResp.ID,
 				EventType:      "test.unique",
-				Payload: map[string]interface{}{
+				Payload: map[string]any{
 					"index": index,
 				},
 				IdempotencyKey: fmt.Sprintf("unique_key_%d", index),
@@ -233,7 +233,7 @@ func TestIdempotency_Expiration(t *testing.T) {
 	delivery1, err := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 		SubscriptionID: subResp.ID,
 		EventType:      "test.expiration",
-		Payload: map[string]interface{}{
+		Payload: map[string]any{
 			"attempt": 1,
 		},
 		IdempotencyKey: idempotencyKey,
@@ -246,7 +246,7 @@ func TestIdempotency_Expiration(t *testing.T) {
 	delivery2, err := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 		SubscriptionID: subResp.ID,
 		EventType:      "test.expiration",
-		Payload: map[string]interface{}{
+		Payload: map[string]any{
 			"attempt": 2,
 		},
 		IdempotencyKey: idempotencyKey,
@@ -265,7 +265,7 @@ func TestIdempotency_Expiration(t *testing.T) {
 	delivery3, err := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 		SubscriptionID: subResp.ID,
 		EventType:      "test.expiration",
-		Payload: map[string]interface{}{
+		Payload: map[string]any{
 			"attempt": 3,
 		},
 		IdempotencyKey: idempotencyKey,
@@ -327,7 +327,7 @@ func TestIdempotency_DifferentSubscriptions(t *testing.T) {
 	delivery1, err := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 		SubscriptionID: sub1.ID,
 		EventType:      "test.different",
-		Payload: map[string]interface{}{
+		Payload: map[string]any{
 			"subscription": "sub1",
 		},
 		IdempotencyKey: idempotencyKey,
@@ -339,7 +339,7 @@ func TestIdempotency_DifferentSubscriptions(t *testing.T) {
 	delivery2, err := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 		SubscriptionID: sub2.ID,
 		EventType:      "test.different",
-		Payload: map[string]interface{}{
+		Payload: map[string]any{
 			"subscription": "sub2",
 		},
 		IdempotencyKey: idempotencyKey,
@@ -353,7 +353,7 @@ func TestIdempotency_DifferentSubscriptions(t *testing.T) {
 	delivery3, err := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 		SubscriptionID: sub1.ID,
 		EventType:      "test.different",
-		Payload: map[string]interface{}{
+		Payload: map[string]any{
 			"subscription": "sub1_duplicate",
 		},
 		IdempotencyKey: idempotencyKey,
@@ -424,7 +424,7 @@ func TestIdempotency_HighConcurrency(t *testing.T) {
 				delivery, err := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 					SubscriptionID: subResp.ID,
 					EventType:      "test.high_concurrency",
-					Payload: map[string]interface{}{
+					Payload: map[string]any{
 						"key":   key,
 						"index": index,
 					},

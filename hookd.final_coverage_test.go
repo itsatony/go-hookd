@@ -64,7 +64,7 @@ func TestMarshalJSONB_ErrorPath(t *testing.T) {
 	})
 
 	t.Run("valid map marshals successfully", func(t *testing.T) {
-		data := map[string]interface{}{
+		data := map[string]any{
 			"key":   "value",
 			"count": 42,
 		}
@@ -73,7 +73,7 @@ func TestMarshalJSONB_ErrorPath(t *testing.T) {
 		assert.NotNil(t, result)
 
 		// Verify it's valid JSON
-		var decoded map[string]interface{}
+		var decoded map[string]any
 		err = json.Unmarshal(result, &decoded)
 		assert.NoError(t, err)
 		assert.Equal(t, "value", decoded["key"])
@@ -347,7 +347,7 @@ func TestCreateSubscription_ErrorPaths(t *testing.T) {
 			URL:        "https://example.com/webhook",
 			Secret:     "secret123",
 			EventTypes: []string{"test.event"},
-			Metadata: map[string]interface{}{
+			Metadata: map[string]any{
 				"valid": "data",
 			},
 		}
@@ -366,7 +366,7 @@ func TestCreateSubscription_ErrorPaths(t *testing.T) {
 			URL:        "https://example.com/webhook",
 			Secret:     "secret123",
 			EventTypes: []string{"test.event"},
-			Metadata: map[string]interface{}{
+			Metadata: map[string]any{
 				"large": largeString,
 			},
 		}
@@ -403,7 +403,7 @@ func TestCreateSubscription_ErrorPaths(t *testing.T) {
 			URL:        "https://example.com/webhook",
 			Secret:     "secret123",
 			EventTypes: []string{"test.event"},
-			Metadata: map[string]interface{}{
+			Metadata: map[string]any{
 				"key": "value",
 			},
 		}
@@ -512,7 +512,7 @@ func TestSubscription_Validate_AdditionalCases(t *testing.T) {
 	t.Run("UpdateSubscriptionRequest with invalid metadata", func(t *testing.T) {
 		// Create metadata that exceeds MaxMetadataSize
 		largeString := string(make([]byte, MaxMetadataSize+1))
-		metadata := map[string]interface{}{
+		metadata := map[string]any{
 			"large": largeString,
 		}
 

@@ -125,7 +125,7 @@ func TestCreateSubscriptionRequest_Validate(t *testing.T) {
 				URL:        "https://example.com/webhook",
 				EventTypes: []string{"user.created"},
 				Secret:     "secret-key-123",
-				Metadata: map[string]interface{}{
+				Metadata: map[string]any{
 					"large": strings.Repeat("a", MaxMetadataSize),
 				},
 			},
@@ -231,7 +231,7 @@ func TestUpdateSubscriptionRequest_Validate(t *testing.T) {
 		{
 			name: "metadata too large",
 			request: &UpdateSubscriptionRequest{
-				Metadata: &map[string]interface{}{
+				Metadata: &map[string]any{
 					"large": strings.Repeat("a", MaxMetadataSize),
 				},
 			},
@@ -267,7 +267,7 @@ func TestQueueDeliveryRequest_Validate(t *testing.T) {
 			request: &QueueDeliveryRequest{
 				SubscriptionID: "sub_abc123",
 				EventType:      "user.created",
-				Payload: map[string]interface{}{
+				Payload: map[string]any{
 					"user_id": "123",
 					"email":   "test@example.com",
 				},
@@ -279,7 +279,7 @@ func TestQueueDeliveryRequest_Validate(t *testing.T) {
 			request: &QueueDeliveryRequest{
 				SubscriptionID: "",
 				EventType:      "user.created",
-				Payload:        map[string]interface{}{"data": "value"},
+				Payload:        map[string]any{"data": "value"},
 			},
 			wantErr: true,
 			errMsg:  ErrMsgMissingSubscriptionID,
@@ -289,7 +289,7 @@ func TestQueueDeliveryRequest_Validate(t *testing.T) {
 			request: &QueueDeliveryRequest{
 				SubscriptionID: "sub_abc123",
 				EventType:      "",
-				Payload:        map[string]interface{}{"data": "value"},
+				Payload:        map[string]any{"data": "value"},
 			},
 			wantErr: true,
 			errMsg:  ErrMsgMissingEventType,
@@ -299,7 +299,7 @@ func TestQueueDeliveryRequest_Validate(t *testing.T) {
 			request: &QueueDeliveryRequest{
 				SubscriptionID: "sub_abc123",
 				EventType:      strings.Repeat("a", MaxEventTypeLength+1),
-				Payload:        map[string]interface{}{"data": "value"},
+				Payload:        map[string]any{"data": "value"},
 			},
 			wantErr: true,
 			errMsg:  ErrMsgEventTypeTooLong,
@@ -321,7 +321,7 @@ func TestQueueDeliveryRequest_Validate(t *testing.T) {
 			request: &QueueDeliveryRequest{
 				SubscriptionID: "sub_abc123",
 				EventType:      "user.created",
-				Payload: map[string]interface{}{
+				Payload: map[string]any{
 					"large_data": strings.Repeat("a", MaxPayloadSize),
 				},
 			},
@@ -333,7 +333,7 @@ func TestQueueDeliveryRequest_Validate(t *testing.T) {
 			request: &QueueDeliveryRequest{
 				SubscriptionID: "sub_abc123",
 				EventType:      "user.created",
-				Payload:        map[string]interface{}{"data": "value"},
+				Payload:        map[string]any{"data": "value"},
 				IdempotencyKey: "unique-key-123",
 			},
 			wantErr: false,
@@ -506,7 +506,7 @@ func TestSubscription_JSONMarshaling(t *testing.T) {
 		Headers: map[string]string{
 			"Authorization": "Bearer token",
 		},
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"team": "engineering",
 		},
 		CreatedAt: now,
@@ -544,7 +544,7 @@ func TestDelivery_JSONMarshaling(t *testing.T) {
 		SubscriptionID: "sub_abc123",
 		TenantID:       "tenant-123",
 		EventType:      "user.created",
-		Payload: map[string]interface{}{
+		Payload: map[string]any{
 			"user_id": "456",
 			"email":   "test@example.com",
 		},
@@ -637,7 +637,7 @@ func TestEvents_Structure(t *testing.T) {
 			EventType:      "user.created",
 			Status:         DeliveryStatusSuccess,
 			Timestamp:      now,
-			Metadata: map[string]interface{}{
+			Metadata: map[string]any{
 				"attempt_count": 3,
 				"status_code":   200,
 			},
@@ -656,7 +656,7 @@ func TestEvents_Structure(t *testing.T) {
 			ResourceID: "sub_abc123",
 			TenantID:   "tenant-123",
 			Timestamp:  now,
-			Metadata: map[string]interface{}{
+			Metadata: map[string]any{
 				"status": SubscriptionStatusActive,
 			},
 		}

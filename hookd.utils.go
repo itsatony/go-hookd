@@ -121,8 +121,8 @@ func StringMapPtr(m map[string]string) *map[string]string {
 }
 
 // InterfaceMapPtr returns a pointer to the given interface map.
-// Useful for optional map[string]interface{} fields in UpdateSubscriptionRequest.
-func InterfaceMapPtr(m map[string]interface{}) *map[string]interface{} {
+// Useful for optional map[string]any fields in UpdateSubscriptionRequest.
+func InterfaceMapPtr(m map[string]any) *map[string]any {
 	return &m
 }
 
@@ -183,11 +183,11 @@ func CopyStringMap(src map[string]string) map[string]string {
 
 // CopyInterfaceMap creates a shallow copy of an interface map.
 // Note: Values are not deep-copied, only the map structure.
-func CopyInterfaceMap(src map[string]interface{}) map[string]interface{} {
+func CopyInterfaceMap(src map[string]any) map[string]any {
 	if src == nil {
 		return nil
 	}
-	dst := make(map[string]interface{}, len(src))
+	dst := make(map[string]any, len(src))
 	for k, v := range src {
 		dst[k] = v
 	}

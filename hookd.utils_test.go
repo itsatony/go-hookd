@@ -440,20 +440,20 @@ func TestStringMapPtr(t *testing.T) {
 
 func TestInterfaceMapPtr(t *testing.T) {
 	t.Run("nil map", func(t *testing.T) {
-		var nilMap map[string]interface{}
+		var nilMap map[string]any
 		result := InterfaceMapPtr(nilMap)
 		require.NotNil(t, result)
 		assert.Nil(t, *result)
 	})
 
 	t.Run("empty map", func(t *testing.T) {
-		result := InterfaceMapPtr(map[string]interface{}{})
+		result := InterfaceMapPtr(map[string]any{})
 		require.NotNil(t, result)
 		assert.Empty(t, *result)
 	})
 
 	t.Run("with mixed types", func(t *testing.T) {
-		input := map[string]interface{}{
+		input := map[string]any{
 			"string": "value",
 			"int":    42,
 			"bool":   true,
@@ -595,13 +595,13 @@ func TestCopyInterfaceMap(t *testing.T) {
 	})
 
 	t.Run("empty map", func(t *testing.T) {
-		result := CopyInterfaceMap(map[string]interface{}{})
+		result := CopyInterfaceMap(map[string]any{})
 		assert.NotNil(t, result)
 		assert.Empty(t, result)
 	})
 
 	t.Run("shallow copy verification", func(t *testing.T) {
-		original := map[string]interface{}{
+		original := map[string]any{
 			"string": "value",
 			"int":    42,
 			"bool":   true,
@@ -635,7 +635,7 @@ func TestHelpers_UpdateSubscriptionRequestUsage(t *testing.T) {
 			"X-Custom-Header": "custom-value",
 			"Authorization":   "Bearer secret-token",
 		}),
-		Metadata: InterfaceMapPtr(map[string]interface{}{
+		Metadata: InterfaceMapPtr(map[string]any{
 			"environment": "production",
 			"version":     2,
 			"enabled":     true,

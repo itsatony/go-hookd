@@ -35,7 +35,7 @@ func TestQueueDelivery(t *testing.T) {
 		req := &QueueDeliveryRequest{
 			SubscriptionID: sub.ID,
 			EventType:      "user.created",
-			Payload: map[string]interface{}{
+			Payload: map[string]any{
 				"user_id": "123",
 				"email":   "user@example.com",
 			},
@@ -76,7 +76,7 @@ func TestQueueDelivery(t *testing.T) {
 		req := &QueueDeliveryRequest{
 			SubscriptionID: sub.ID,
 			EventType:      "user.created",
-			Payload:        map[string]interface{}{"test": "data"},
+			Payload:        map[string]any{"test": "data"},
 			IdempotencyKey: "unique_key_123",
 		}
 
@@ -106,7 +106,7 @@ func TestQueueDelivery(t *testing.T) {
 		req := &QueueDeliveryRequest{
 			SubscriptionID: sub.ID,
 			EventType:      "user.created",
-			Payload:        map[string]interface{}{"test": "data"},
+			Payload:        map[string]any{"test": "data"},
 			IdempotencyKey: "unique_key_456",
 		}
 		manager.QueueDelivery(ctx, req)
@@ -150,7 +150,7 @@ func TestQueueDelivery(t *testing.T) {
 		req := &QueueDeliveryRequest{
 			SubscriptionID: "sub_nonexistent",
 			EventType:      "user.created",
-			Payload:        map[string]interface{}{"test": "data"},
+			Payload:        map[string]any{"test": "data"},
 		}
 
 		delivery, err := manager.QueueDelivery(ctx, req)
@@ -180,7 +180,7 @@ func TestQueueDelivery(t *testing.T) {
 		req := &QueueDeliveryRequest{
 			SubscriptionID: sub.ID,
 			EventType:      "user.created",
-			Payload:        map[string]interface{}{"test": "data"},
+			Payload:        map[string]any{"test": "data"},
 		}
 
 		delivery, err := manager.QueueDelivery(ctx, req)
@@ -216,7 +216,7 @@ func TestGetDelivery(t *testing.T) {
 		queued, _ := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 			SubscriptionID: sub.ID,
 			EventType:      "user.created",
-			Payload:        map[string]interface{}{"test": "data"},
+			Payload:        map[string]any{"test": "data"},
 		})
 
 		// Get delivery
@@ -280,7 +280,7 @@ func TestGetDeliveryAttempts(t *testing.T) {
 		delivery, _ := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 			SubscriptionID: sub.ID,
 			EventType:      "user.created",
-			Payload:        map[string]interface{}{"test": "data"},
+			Payload:        map[string]any{"test": "data"},
 		})
 
 		// Get attempts (should be empty initially)
@@ -330,7 +330,7 @@ func TestRetryDelivery(t *testing.T) {
 		delivery, _ := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 			SubscriptionID: sub.ID,
 			EventType:      "user.created",
-			Payload:        map[string]interface{}{"test": "data"},
+			Payload:        map[string]any{"test": "data"},
 		})
 
 		// Simulate failure by updating status
@@ -391,7 +391,7 @@ func TestRetryDelivery(t *testing.T) {
 		delivery, _ := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 			SubscriptionID: sub.ID,
 			EventType:      "user.created",
-			Payload:        map[string]interface{}{"test": "data"},
+			Payload:        map[string]any{"test": "data"},
 		})
 
 		// Simulate success
@@ -436,7 +436,7 @@ func TestListDeliveries(t *testing.T) {
 			manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 				SubscriptionID: sub.ID,
 				EventType:      "user.created",
-				Payload:        map[string]interface{}{"index": i},
+				Payload:        map[string]any{"index": i},
 			})
 		}
 
@@ -478,13 +478,13 @@ func TestListDeliveries(t *testing.T) {
 		manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 			SubscriptionID: sub1.ID,
 			EventType:      "user.created",
-			Payload:        map[string]interface{}{"tenant": "1"},
+			Payload:        map[string]any{"tenant": "1"},
 		})
 
 		manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 			SubscriptionID: sub2.ID,
 			EventType:      "user.created",
-			Payload:        map[string]interface{}{"tenant": "2"},
+			Payload:        map[string]any{"tenant": "2"},
 		})
 
 		// List deliveries for tenant_1 only
@@ -526,13 +526,13 @@ func TestListDeliveries(t *testing.T) {
 		manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 			SubscriptionID: sub1.ID,
 			EventType:      "user.created",
-			Payload:        map[string]interface{}{"sub": "1"},
+			Payload:        map[string]any{"sub": "1"},
 		})
 
 		manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 			SubscriptionID: sub2.ID,
 			EventType:      "user.created",
-			Payload:        map[string]interface{}{"sub": "2"},
+			Payload:        map[string]any{"sub": "2"},
 		})
 
 		// List deliveries for sub1 only
@@ -568,13 +568,13 @@ func TestListDeliveries(t *testing.T) {
 		delivery1, _ := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 			SubscriptionID: sub.ID,
 			EventType:      "user.created",
-			Payload:        map[string]interface{}{"status": "pending"},
+			Payload:        map[string]any{"status": "pending"},
 		})
 
 		delivery2, _ := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 			SubscriptionID: sub.ID,
 			EventType:      "user.created",
-			Payload:        map[string]interface{}{"status": "success"},
+			Payload:        map[string]any{"status": "success"},
 		})
 
 		// Simulate success for delivery2
@@ -617,13 +617,13 @@ func TestListDeliveries(t *testing.T) {
 		manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 			SubscriptionID: sub.ID,
 			EventType:      "user.created",
-			Payload:        map[string]interface{}{"event": "created"},
+			Payload:        map[string]any{"event": "created"},
 		})
 
 		manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 			SubscriptionID: sub.ID,
 			EventType:      "user.deleted",
-			Payload:        map[string]interface{}{"event": "deleted"},
+			Payload:        map[string]any{"event": "deleted"},
 		})
 
 		// List user.created deliveries only
@@ -660,7 +660,7 @@ func TestListDeliveries(t *testing.T) {
 			manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 				SubscriptionID: sub.ID,
 				EventType:      "user.created",
-				Payload:        map[string]interface{}{"index": i},
+				Payload:        map[string]any{"index": i},
 			})
 		}
 
@@ -697,7 +697,7 @@ func TestListDeliveries(t *testing.T) {
 			manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 				SubscriptionID: sub.ID,
 				EventType:      "user.created",
-				Payload:        map[string]interface{}{"index": i},
+				Payload:        map[string]any{"index": i},
 			})
 		}
 
@@ -741,19 +741,19 @@ func TestListDeliveries(t *testing.T) {
 		manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 			SubscriptionID: sub1.ID,
 			EventType:      "user.created",
-			Payload:        map[string]interface{}{"test": "1"},
+			Payload:        map[string]any{"test": "1"},
 		})
 
 		manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 			SubscriptionID: sub1.ID,
 			EventType:      "user.deleted",
-			Payload:        map[string]interface{}{"test": "2"},
+			Payload:        map[string]any{"test": "2"},
 		})
 
 		manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 			SubscriptionID: sub2.ID,
 			EventType:      "user.created",
-			Payload:        map[string]interface{}{"test": "3"},
+			Payload:        map[string]any{"test": "3"},
 		})
 
 		// List with multiple filters: specific subscription + event type
@@ -809,21 +809,21 @@ func TestListDeliveries(t *testing.T) {
 		delivery1, _ := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 			SubscriptionID: sub.ID,
 			EventType:      "user.created",
-			Payload:        map[string]interface{}{"order": "first"},
+			Payload:        map[string]any{"order": "first"},
 		})
 		time.Sleep(10 * time.Millisecond)
 
 		delivery2, _ := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 			SubscriptionID: sub.ID,
 			EventType:      "user.created",
-			Payload:        map[string]interface{}{"order": "second"},
+			Payload:        map[string]any{"order": "second"},
 		})
 		time.Sleep(10 * time.Millisecond)
 
 		delivery3, _ := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 			SubscriptionID: sub.ID,
 			EventType:      "user.created",
-			Payload:        map[string]interface{}{"order": "third"},
+			Payload:        map[string]any{"order": "third"},
 		})
 
 		// List deliveries - should be newest first

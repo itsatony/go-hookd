@@ -62,7 +62,7 @@ func TestE2E_SuccessfulDelivery(t *testing.T) {
 	delivery, err := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 		SubscriptionID: sub.ID,
 		EventType:      "order.created",
-		Payload: map[string]interface{}{
+		Payload: map[string]any{
 			"order_id": "order_123",
 			"amount":   99.99,
 			"customer": "John Doe",
@@ -133,7 +133,7 @@ func TestE2E_RetryOnFailure(t *testing.T) {
 	delivery, err := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 		SubscriptionID: sub.ID,
 		EventType:      "test.retry",
-		Payload: map[string]interface{}{
+		Payload: map[string]any{
 			"test": "retry",
 		},
 	})
@@ -206,7 +206,7 @@ func TestE2E_MultipleDeliveries(t *testing.T) {
 		delivery, err := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 			SubscriptionID: sub.ID,
 			EventType:      "test.multiple",
-			Payload: map[string]interface{}{
+			Payload: map[string]any{
 				"index": i,
 				"test":  "multiple",
 			},
@@ -273,7 +273,7 @@ func TestE2E_IdempotencyWithRealDelivery(t *testing.T) {
 	delivery1, err := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 		SubscriptionID: sub.ID,
 		EventType:      "test.idempotency",
-		Payload: map[string]interface{}{
+		Payload: map[string]any{
 			"test": "first",
 		},
 		IdempotencyKey: idempotencyKey,
@@ -285,7 +285,7 @@ func TestE2E_IdempotencyWithRealDelivery(t *testing.T) {
 	delivery2, err := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 		SubscriptionID: sub.ID,
 		EventType:      "test.idempotency",
-		Payload: map[string]interface{}{
+		Payload: map[string]any{
 			"test": "second (duplicate)",
 		},
 		IdempotencyKey: idempotencyKey,
@@ -346,7 +346,7 @@ func TestE2E_MultipleSubscriptionsToSameEndpoint(t *testing.T) {
 		_, err := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 			SubscriptionID: sub.ID,
 			EventType:      fmt.Sprintf("event.type%d", i),
-			Payload: map[string]interface{}{
+			Payload: map[string]any{
 				"subscription_index": i,
 			},
 		})
@@ -408,7 +408,7 @@ func TestE2E_DeliveryTimeout(t *testing.T) {
 	delivery, err := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 		SubscriptionID: sub.ID,
 		EventType:      "test.timeout",
-		Payload: map[string]interface{}{
+		Payload: map[string]any{
 			"test": "timeout",
 		},
 	})
@@ -473,7 +473,7 @@ func TestE2E_CircuitBreakerOpensAndRecovers(t *testing.T) {
 		delivery, err := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 			SubscriptionID: sub.ID,
 			EventType:      "test.circuit",
-			Payload: map[string]interface{}{
+			Payload: map[string]any{
 				"test_id": fmt.Sprintf("circuit_%d", i),
 			},
 		})
@@ -502,7 +502,7 @@ func TestE2E_CircuitBreakerOpensAndRecovers(t *testing.T) {
 	recoveryDelivery, err := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 		SubscriptionID: sub.ID,
 		EventType:      "test.circuit",
-		Payload: map[string]interface{}{
+		Payload: map[string]any{
 			"test_id": "recovery_test",
 		},
 	})
@@ -562,7 +562,7 @@ func TestE2E_SubscriptionLifecycle(t *testing.T) {
 	delivery1, err := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 		SubscriptionID: sub.ID,
 		EventType:      "test.lifecycle",
-		Payload:        map[string]interface{}{"test": "active"},
+		Payload:        map[string]any{"test": "active"},
 	})
 	require.NoError(t, err)
 
@@ -583,7 +583,7 @@ func TestE2E_SubscriptionLifecycle(t *testing.T) {
 	delivery2, err := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 		SubscriptionID: sub.ID,
 		EventType:      "test.lifecycle",
-		Payload:        map[string]interface{}{"test": "paused"},
+		Payload:        map[string]any{"test": "paused"},
 	})
 
 	// System may reject delivery to paused subscription or queue it
@@ -617,7 +617,7 @@ func TestE2E_SubscriptionLifecycle(t *testing.T) {
 		delivery3, err := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 			SubscriptionID: sub.ID,
 			EventType:      "test.lifecycle",
-			Payload:        map[string]interface{}{"test": "resumed"},
+			Payload:        map[string]any{"test": "resumed"},
 		})
 		require.NoError(t, err)
 		time.Sleep(1 * time.Second)
@@ -669,7 +669,7 @@ func TestE2E_SignatureVerification(t *testing.T) {
 	require.NoError(t, err)
 
 	// Queue delivery
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"event_id": "evt_12345",
 		"data":     "test data for signature",
 	}
@@ -731,7 +731,7 @@ func TestE2E_EventFiltering(t *testing.T) {
 	delivery1, err := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 		SubscriptionID: sub.ID,
 		EventType:      "order.created",
-		Payload:        map[string]interface{}{"order_id": "123"},
+		Payload:        map[string]any{"order_id": "123"},
 	})
 	require.NoError(t, err)
 
@@ -739,7 +739,7 @@ func TestE2E_EventFiltering(t *testing.T) {
 	delivery2, err := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 		SubscriptionID: sub.ID,
 		EventType:      "order.updated",
-		Payload:        map[string]interface{}{"order_id": "123"},
+		Payload:        map[string]any{"order_id": "123"},
 	})
 	require.NoError(t, err)
 
@@ -801,7 +801,7 @@ func TestE2E_CustomHeaders(t *testing.T) {
 	_, err = manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 		SubscriptionID: sub.ID,
 		EventType:      "test.headers",
-		Payload:        map[string]interface{}{"test": "headers"},
+		Payload:        map[string]any{"test": "headers"},
 	})
 	require.NoError(t, err)
 
@@ -851,15 +851,15 @@ func TestE2E_LargePayload(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create large payload (1MB of data)
-	items := make([]map[string]interface{}, 1000)
+	items := make([]map[string]any, 1000)
 	for i := 0; i < 1000; i++ {
-		items[i] = map[string]interface{}{
+		items[i] = map[string]any{
 			"id":          fmt.Sprintf("item_%d", i),
 			"name":        fmt.Sprintf("Test Item %d", i),
 			"description": "This is a test item with some description text to make it larger. Lorem ipsum dolor sit amet, consectetur adipiscing elit.",
 			"price":       float64(i) * 10.50,
 			"quantity":    i % 100,
-			"metadata": map[string]interface{}{
+			"metadata": map[string]any{
 				"category":    "test",
 				"tags":        []string{"tag1", "tag2", "tag3"},
 				"created_at":  "2025-01-01T00:00:00Z",
@@ -868,7 +868,7 @@ func TestE2E_LargePayload(t *testing.T) {
 		}
 	}
 
-	largePayload := map[string]interface{}{
+	largePayload := map[string]any{
 		"event_id": "evt_large_payload",
 		"items":    items,
 		"total":    len(items),
@@ -934,7 +934,7 @@ func TestE2E_GracefulShutdown(t *testing.T) {
 	delivery, err := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 		SubscriptionID: sub.ID,
 		EventType:      "test.shutdown",
-		Payload:        map[string]interface{}{"test": "shutdown"},
+		Payload:        map[string]any{"test": "shutdown"},
 	})
 	require.NoError(t, err)
 

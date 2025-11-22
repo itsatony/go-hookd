@@ -15,7 +15,7 @@ import (
 
 // PollUntil polls a condition function until it returns true or timeout expires.
 // This replaces flaky time.Sleep() calls in tests.
-func PollUntil(t *testing.T, condition func() bool, timeout time.Duration, interval time.Duration, msgAndArgs ...interface{}) {
+func PollUntil(t *testing.T, condition func() bool, timeout time.Duration, interval time.Duration, msgAndArgs ...any) {
 	t.Helper()
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)

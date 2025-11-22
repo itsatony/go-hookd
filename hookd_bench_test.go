@@ -122,7 +122,7 @@ func BenchmarkQueueDelivery(b *testing.B) {
 		manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 			SubscriptionID: sub.ID,
 			EventType:      "test.event",
-			Payload:        map[string]interface{}{"test": "data"},
+			Payload:        map[string]any{"test": "data"},
 		})
 	}
 }
@@ -146,7 +146,7 @@ func BenchmarkQueueDeliveryWithIdempotency(b *testing.B) {
 		manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 			SubscriptionID: sub.ID,
 			EventType:      "test.event",
-			Payload:        map[string]interface{}{"test": "data"},
+			Payload:        map[string]any{"test": "data"},
 			IdempotencyKey: "bench_key",
 		})
 	}
@@ -169,7 +169,7 @@ func BenchmarkGetDelivery(b *testing.B) {
 	delivery, _ := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 		SubscriptionID: sub.ID,
 		EventType:      "test.event",
-		Payload:        map[string]interface{}{"test": "data"},
+		Payload:        map[string]any{"test": "data"},
 	})
 
 	b.ResetTimer()
@@ -195,7 +195,7 @@ func BenchmarkGetDeliveryAttempts(b *testing.B) {
 	delivery, _ := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 		SubscriptionID: sub.ID,
 		EventType:      "test.event",
-		Payload:        map[string]interface{}{"test": "data"},
+		Payload:        map[string]any{"test": "data"},
 	})
 
 	b.ResetTimer()
@@ -281,7 +281,7 @@ func BenchmarkDeliveryRequestValidation(b *testing.B) {
 	req := &QueueDeliveryRequest{
 		SubscriptionID: "sub_test123",
 		EventType:      "test.event",
-		Payload:        map[string]interface{}{"test": "data"},
+		Payload:        map[string]any{"test": "data"},
 	}
 
 	b.ResetTimer()
@@ -329,7 +329,7 @@ func BenchmarkConcurrentQueueDelivery(b *testing.B) {
 			manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 				SubscriptionID: sub.ID,
 				EventType:      "test.event",
-				Payload:        map[string]interface{}{"test": "data"},
+				Payload:        map[string]any{"test": "data"},
 				IdempotencyKey: string(rune(i)),
 			})
 			i++
@@ -401,7 +401,7 @@ func BenchmarkMemoryAllocation_QueueDelivery(b *testing.B) {
 		manager.QueueDelivery(ctx, &QueueDeliveryRequest{
 			SubscriptionID: sub.ID,
 			EventType:      "test.event",
-			Payload:        map[string]interface{}{"test": "data"},
+			Payload:        map[string]any{"test": "data"},
 		})
 	}
 }
