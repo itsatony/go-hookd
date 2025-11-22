@@ -393,3 +393,453 @@ func TestRetryDelivery(t *testing.T) {
 		assert.Contains(t, err.Error(), "cannot retry successful")
 	})
 }
+
+// =============================================================================
+// LIST DELIVERIES TESTS
+// =============================================================================
+
+func TestListDeliveries(t *testing.T) {
+	t.Run("success with empty filter", func(t *testing.T) {
+		config := NewConfig("postgres://localhost/test")
+		repo := NewMockRepository()
+		manager, _ := NewManager(config, repo)
+
+		ctx := context.Background()
+
+		// Create subscription and queue deliveries
+		sub, _ := manager.CreateSubscription(ctx, &CreateSubscriptionRequest{
+			TenantID:   "tenant_123",
+			URL:        "https://example.com/webhook",
+			EventTypes: []string{"user.created"},
+			Secret:     "test_secret",
+		})
+
+		// Queue multiple deliveries
+		for i := 0; i < 3; i++ {
+			manager.QueueDelivery(ctx, &QueueDeliveryRequest{
+				SubscriptionID: sub.ID,
+				EventType:      "user.created",
+				Payload:        map[string]interface{}{"index": i},
+			})
+		}
+
+		// List all deliveries for tenant
+		filter := &DeliveryFilter{
+			TenantID: "tenant_123",
+		}
+		deliveries, err := manager.ListDeliveries(ctx, filter)
+
+		require.NoError(t, err)
+		assert.Len(t, deliveries, 3)
+	})
+
+	t.Run("success with tenant ID filter", func(t *testing.T) {
+		config := NewConfig("postgres://localhost/test")
+		repo := NewMockRepository()
+		manager, _ := NewManager(config, repo)
+
+		ctx := context.Background()
+
+		// Create subscriptions for different tenants
+		sub1, _ := manager.CreateSubscription(ctx, &CreateSubscriptionRequest{
+			TenantID:   "tenant_1",
+			URL:        "https://example.com/webhook",
+			EventTypes: []string{"user.created"},
+			Secret:     "test_secret",
+		})
+
+		sub2, _ := manager.CreateSubscription(ctx, &CreateSubscriptionRequest{
+			TenantID:   "tenant_2",
+			URL:        "https://example.com/webhook",
+			EventTypes: []string{"user.created"},
+			Secret:     "test_secret",
+		})
+
+		// Queue deliveries for different tenants
+		manager.QueueDelivery(ctx, &QueueDeliveryRequest{
+			SubscriptionID: sub1.ID,
+			EventType:      "user.created",
+			Payload:        map[string]interface{}{"tenant": "1"},
+		})
+
+		manager.QueueDelivery(ctx, &QueueDeliveryRequest{
+			SubscriptionID: sub2.ID,
+			EventType:      "user.created",
+			Payload:        map[string]interface{}{"tenant": "2"},
+		})
+
+		// List deliveries for tenant_1 only
+		filter := &DeliveryFilter{
+			TenantID: "tenant_1",
+		}
+		deliveries, err := manager.ListDeliveries(ctx, filter)
+
+		require.NoError(t, err)
+		assert.Len(t, deliveries, 1)
+		assert.Equal(t, "tenant_1", deliveries[0].TenantID)
+	})
+
+	t.Run("success with subscription ID filter", func(t *testing.T) {
+		config := NewConfig("postgres://localhost/test")
+		repo := NewMockRepository()
+		manager, _ := NewManager(config, repo)
+
+		ctx := context.Background()
+
+		// Create multiple subscriptions
+		sub1, _ := manager.CreateSubscription(ctx, &CreateSubscriptionRequest{
+			TenantID:   "tenant_123",
+			URL:        "https://example.com/webhook1",
+			EventTypes: []string{"user.created"},
+			Secret:     "test_secret",
+		})
+
+		sub2, _ := manager.CreateSubscription(ctx, &CreateSubscriptionRequest{
+			TenantID:   "tenant_123",
+			URL:        "https://example.com/webhook2",
+			EventTypes: []string{"user.created"},
+			Secret:     "test_secret",
+		})
+
+		// Queue deliveries for different subscriptions
+		manager.QueueDelivery(ctx, &QueueDeliveryRequest{
+			SubscriptionID: sub1.ID,
+			EventType:      "user.created",
+			Payload:        map[string]interface{}{"sub": "1"},
+		})
+
+		manager.QueueDelivery(ctx, &QueueDeliveryRequest{
+			SubscriptionID: sub2.ID,
+			EventType:      "user.created",
+			Payload:        map[string]interface{}{"sub": "2"},
+		})
+
+		// List deliveries for sub1 only
+		filter := &DeliveryFilter{
+			TenantID:       "tenant_123",
+			SubscriptionID: StringPtr(sub1.ID),
+		}
+		deliveries, err := manager.ListDeliveries(ctx, filter)
+
+		require.NoError(t, err)
+		assert.Len(t, deliveries, 1)
+		assert.Equal(t, sub1.ID, deliveries[0].SubscriptionID)
+	})
+
+	t.Run("success with status filter", func(t *testing.T) {
+		config := NewConfig("postgres://localhost/test")
+		repo := NewMockRepository()
+		manager, _ := NewManager(config, repo)
+
+		ctx := context.Background()
+
+		// Create subscription
+		sub, _ := manager.CreateSubscription(ctx, &CreateSubscriptionRequest{
+			TenantID:   "tenant_123",
+			URL:        "https://example.com/webhook",
+			EventTypes: []string{"user.created"},
+			Secret:     "test_secret",
+		})
+
+		// Queue deliveries
+		delivery1, _ := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
+			SubscriptionID: sub.ID,
+			EventType:      "user.created",
+			Payload:        map[string]interface{}{"status": "pending"},
+		})
+
+		delivery2, _ := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
+			SubscriptionID: sub.ID,
+			EventType:      "user.created",
+			Payload:        map[string]interface{}{"status": "success"},
+		})
+
+		// Simulate success for delivery2
+		now := time.Now()
+		delivery2.Status = DeliveryStatusSuccess
+		delivery2.CompletedAt = &now
+		repo.UpdateDelivery(ctx, delivery2)
+
+		// List pending deliveries only
+		filter := &DeliveryFilter{
+			TenantID: "tenant_123",
+			Status:   StringPtr(DeliveryStatusPending),
+		}
+		deliveries, err := manager.ListDeliveries(ctx, filter)
+
+		require.NoError(t, err)
+		assert.Len(t, deliveries, 1)
+		assert.Equal(t, delivery1.ID, deliveries[0].ID)
+		assert.Equal(t, DeliveryStatusPending, deliveries[0].Status)
+	})
+
+	t.Run("success with event type filter", func(t *testing.T) {
+		config := NewConfig("postgres://localhost/test")
+		repo := NewMockRepository()
+		manager, _ := NewManager(config, repo)
+
+		ctx := context.Background()
+
+		// Create subscription
+		sub, _ := manager.CreateSubscription(ctx, &CreateSubscriptionRequest{
+			TenantID:   "tenant_123",
+			URL:        "https://example.com/webhook",
+			EventTypes: []string{"user.created", "user.deleted"},
+			Secret:     "test_secret",
+		})
+
+		// Queue deliveries with different event types
+		manager.QueueDelivery(ctx, &QueueDeliveryRequest{
+			SubscriptionID: sub.ID,
+			EventType:      "user.created",
+			Payload:        map[string]interface{}{"event": "created"},
+		})
+
+		manager.QueueDelivery(ctx, &QueueDeliveryRequest{
+			SubscriptionID: sub.ID,
+			EventType:      "user.deleted",
+			Payload:        map[string]interface{}{"event": "deleted"},
+		})
+
+		// List user.created deliveries only
+		filter := &DeliveryFilter{
+			TenantID:  "tenant_123",
+			EventType: StringPtr("user.created"),
+		}
+		deliveries, err := manager.ListDeliveries(ctx, filter)
+
+		require.NoError(t, err)
+		assert.Len(t, deliveries, 1)
+		assert.Equal(t, "user.created", deliveries[0].EventType)
+	})
+
+	t.Run("success with pagination - limit", func(t *testing.T) {
+		config := NewConfig("postgres://localhost/test")
+		repo := NewMockRepository()
+		manager, _ := NewManager(config, repo)
+
+		ctx := context.Background()
+
+		// Create subscription
+		sub, _ := manager.CreateSubscription(ctx, &CreateSubscriptionRequest{
+			TenantID:   "tenant_123",
+			URL:        "https://example.com/webhook",
+			EventTypes: []string{"user.created"},
+			Secret:     "test_secret",
+		})
+
+		// Queue 10 deliveries
+		for i := 0; i < 10; i++ {
+			manager.QueueDelivery(ctx, &QueueDeliveryRequest{
+				SubscriptionID: sub.ID,
+				EventType:      "user.created",
+				Payload:        map[string]interface{}{"index": i},
+			})
+		}
+
+		// List with limit of 5
+		filter := &DeliveryFilter{
+			TenantID: "tenant_123",
+			Limit:    5,
+		}
+		deliveries, err := manager.ListDeliveries(ctx, filter)
+
+		require.NoError(t, err)
+		assert.Len(t, deliveries, 5)
+	})
+
+	t.Run("success with pagination - offset", func(t *testing.T) {
+		config := NewConfig("postgres://localhost/test")
+		repo := NewMockRepository()
+		manager, _ := NewManager(config, repo)
+
+		ctx := context.Background()
+
+		// Create subscription
+		sub, _ := manager.CreateSubscription(ctx, &CreateSubscriptionRequest{
+			TenantID:   "tenant_123",
+			URL:        "https://example.com/webhook",
+			EventTypes: []string{"user.created"},
+			Secret:     "test_secret",
+		})
+
+		// Queue 10 deliveries
+		for i := 0; i < 10; i++ {
+			manager.QueueDelivery(ctx, &QueueDeliveryRequest{
+				SubscriptionID: sub.ID,
+				EventType:      "user.created",
+				Payload:        map[string]interface{}{"index": i},
+			})
+		}
+
+		// List with offset of 5 and limit of 3
+		filter := &DeliveryFilter{
+			TenantID: "tenant_123",
+			Limit:    3,
+			Offset:   5,
+		}
+		deliveries, err := manager.ListDeliveries(ctx, filter)
+
+		require.NoError(t, err)
+		assert.Len(t, deliveries, 3)
+	})
+
+	t.Run("success with multiple filters combined", func(t *testing.T) {
+		config := NewConfig("postgres://localhost/test")
+		repo := NewMockRepository()
+		manager, _ := NewManager(config, repo)
+
+		ctx := context.Background()
+
+		// Create multiple subscriptions
+		sub1, _ := manager.CreateSubscription(ctx, &CreateSubscriptionRequest{
+			TenantID:   "tenant_123",
+			URL:        "https://example.com/webhook1",
+			EventTypes: []string{"user.created", "user.deleted"},
+			Secret:     "test_secret",
+		})
+
+		sub2, _ := manager.CreateSubscription(ctx, &CreateSubscriptionRequest{
+			TenantID:   "tenant_123",
+			URL:        "https://example.com/webhook2",
+			EventTypes: []string{"user.created"},
+			Secret:     "test_secret",
+		})
+
+		// Queue multiple deliveries
+		manager.QueueDelivery(ctx, &QueueDeliveryRequest{
+			SubscriptionID: sub1.ID,
+			EventType:      "user.created",
+			Payload:        map[string]interface{}{"test": "1"},
+		})
+
+		manager.QueueDelivery(ctx, &QueueDeliveryRequest{
+			SubscriptionID: sub1.ID,
+			EventType:      "user.deleted",
+			Payload:        map[string]interface{}{"test": "2"},
+		})
+
+		manager.QueueDelivery(ctx, &QueueDeliveryRequest{
+			SubscriptionID: sub2.ID,
+			EventType:      "user.created",
+			Payload:        map[string]interface{}{"test": "3"},
+		})
+
+		// List with multiple filters: specific subscription + event type
+		filter := &DeliveryFilter{
+			TenantID:       "tenant_123",
+			SubscriptionID: StringPtr(sub1.ID),
+			EventType:      StringPtr("user.created"),
+		}
+		deliveries, err := manager.ListDeliveries(ctx, filter)
+
+		require.NoError(t, err)
+		assert.Len(t, deliveries, 1)
+		assert.Equal(t, sub1.ID, deliveries[0].SubscriptionID)
+		assert.Equal(t, "user.created", deliveries[0].EventType)
+	})
+
+	t.Run("success with no matching results", func(t *testing.T) {
+		config := NewConfig("postgres://localhost/test")
+		repo := NewMockRepository()
+		manager, _ := NewManager(config, repo)
+
+		ctx := context.Background()
+
+		// List deliveries for non-existent tenant
+		filter := &DeliveryFilter{
+			TenantID: "tenant_nonexistent",
+		}
+		deliveries, err := manager.ListDeliveries(ctx, filter)
+
+		require.NoError(t, err)
+		assert.NotNil(t, deliveries)
+		assert.Len(t, deliveries, 0)
+	})
+
+	t.Run("success - results ordered by created_at DESC", func(t *testing.T) {
+		config := NewConfig("postgres://localhost/test")
+		repo := NewMockRepository()
+		manager, _ := NewManager(config, repo)
+
+		ctx := context.Background()
+
+		// Create subscription
+		sub, _ := manager.CreateSubscription(ctx, &CreateSubscriptionRequest{
+			TenantID:   "tenant_123",
+			URL:        "https://example.com/webhook",
+			EventTypes: []string{"user.created"},
+			Secret:     "test_secret",
+		})
+
+		// Queue deliveries with small time gaps
+		delivery1, _ := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
+			SubscriptionID: sub.ID,
+			EventType:      "user.created",
+			Payload:        map[string]interface{}{"order": "first"},
+		})
+		time.Sleep(10 * time.Millisecond)
+
+		delivery2, _ := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
+			SubscriptionID: sub.ID,
+			EventType:      "user.created",
+			Payload:        map[string]interface{}{"order": "second"},
+		})
+		time.Sleep(10 * time.Millisecond)
+
+		delivery3, _ := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
+			SubscriptionID: sub.ID,
+			EventType:      "user.created",
+			Payload:        map[string]interface{}{"order": "third"},
+		})
+
+		// List deliveries - should be newest first
+		filter := &DeliveryFilter{
+			TenantID: "tenant_123",
+		}
+		deliveries, err := manager.ListDeliveries(ctx, filter)
+
+		require.NoError(t, err)
+		assert.Len(t, deliveries, 3)
+		// Newest first (DESC order)
+		assert.Equal(t, delivery3.ID, deliveries[0].ID)
+		assert.Equal(t, delivery2.ID, deliveries[1].ID)
+		assert.Equal(t, delivery1.ID, deliveries[2].ID)
+	})
+
+	t.Run("error with nil filter", func(t *testing.T) {
+		config := NewConfig("postgres://localhost/test")
+		repo := NewMockRepository()
+		manager, _ := NewManager(config, repo)
+
+		ctx := context.Background()
+
+		deliveries, err := manager.ListDeliveries(ctx, nil)
+
+		assert.Error(t, err)
+		assert.Nil(t, deliveries)
+		assert.Contains(t, err.Error(), "filter")
+	})
+
+	t.Run("error with repository failure", func(t *testing.T) {
+		config := NewConfig("postgres://localhost/test")
+		repo := NewMockRepository()
+		manager, _ := NewManager(config, repo)
+
+		ctx := context.Background()
+
+		// Inject error in repository
+		repo.injectError = NewDatabaseError("list_deliveries", assert.AnError)
+
+		filter := &DeliveryFilter{
+			TenantID: "tenant_123",
+		}
+		deliveries, err := manager.ListDeliveries(ctx, filter)
+
+		assert.Error(t, err)
+		assert.Nil(t, deliveries)
+
+		// Clear error
+		repo.injectError = nil
+	})
+}
