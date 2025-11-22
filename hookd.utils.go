@@ -215,7 +215,12 @@ func calculateSignature(secret, timestamp string, payload []byte) string {
 
 	// Calculate HMAC-SHA256
 	h := hmac.New(sha256.New, []byte(secret))
-	h.Write([]byte(message))
+	// Note: hash.Hash.Write() never returns an error in practice,
+	// but we check it to satisfy linters
+	if _, err := h.Write([]byte(message)); err != nil {
+		// This should never happen with HMAC, but handle it anyway
+		return ""
+	}
 
 	// Return hex-encoded signature
 	return hex.EncodeToString(h.Sum(nil))

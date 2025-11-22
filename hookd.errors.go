@@ -8,7 +8,6 @@
 package hookd
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/itsatony/go-cuserr"
@@ -16,7 +15,7 @@ import (
 
 // Sentinel Errors - Reusable error instances for common cases
 //
-// These are used with errors.Is() for error type checking.
+// These can be used for error type checking with standard error comparison.
 var (
 	// ErrSubscriptionNotFound indicates a subscription was not found
 	ErrSubscriptionNotFound = cuserr.NewNotFoundError("subscription", "")
@@ -80,11 +79,10 @@ func NewDeliveryExecutionError(url string, statusCode int, err error) error {
 // NewCircuitBreakerError creates an error indicating circuit breaker is open.
 func NewCircuitBreakerError(endpoint string) error {
 	// Circuit breaker open is an external service error (service unavailable)
-	baseErr := errors.New(ErrMsgCircuitBreakerOpen)
-	err := cuserr.NewExternalError("webhook-endpoint", "circuit_breaker", baseErr,
+	return cuserr.NewExternalError("webhook-endpoint", "circuit_breaker",
+		fmt.Errorf(ErrMsgCircuitBreakerOpen),
 		cuserr.WithMetadata("endpoint", endpoint),
 	)
-	return err
 }
 
 // NewIdempotencyError creates a conflict error for duplicate idempotency keys.

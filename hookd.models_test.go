@@ -114,7 +114,7 @@ func TestCreateSubscriptionRequest_Validate(t *testing.T) {
 				Secret:     "",
 			},
 			wantErr: true,
-			errMsg:  ErrMsgMissingSecret,
+			errMsg:  ErrMsgMissingWebhookSecret,
 		},
 		// Note: "too many custom headers" test removed - validation happens on map size,
 		// but we need to populate the map first which changes the test setup complexity

@@ -216,7 +216,7 @@ func (r *CreateSubscriptionRequest) Validate() error {
 
 	// Validate secret
 	if r.Secret == "" {
-		return cuserr.NewValidationError("secret", ErrMsgMissingSecret)
+		return cuserr.NewValidationError("secret", ErrMsgMissingWebhookSecret)
 	}
 	if len(r.Secret) > MaxSecretLength {
 		return cuserr.NewValidationError("secret", "secret exceeds maximum length")

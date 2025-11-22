@@ -330,7 +330,7 @@ func TestErrorMessages(t *testing.T) {
 		ErrMsgMissingTenantID,
 		ErrMsgMissingEventType,
 		ErrMsgMissingEventTypes,
-		ErrMsgMissingSecret,
+		ErrMsgMissingWebhookSecret,
 		ErrMsgMissingURL,
 		ErrMsgMissingPayload,
 		ErrMsgMissingSubscriptionID,

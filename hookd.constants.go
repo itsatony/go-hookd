@@ -265,8 +265,8 @@ const (
 	// ErrMsgMissingEventTypes is the error message for missing event types array
 	ErrMsgMissingEventTypes = "at least one event type is required"
 
-	// ErrMsgMissingSecret is the error message for missing secret
-	ErrMsgMissingSecret = "secret is required"
+	// ErrMsgMissingWebhookSecret is the error message for missing webhook signing secret
+	ErrMsgMissingWebhookSecret = "webhook signing key is required"
 
 	// ErrMsgMissingURL is the error message for missing URL
 	ErrMsgMissingURL = "URL is required"
