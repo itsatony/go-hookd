@@ -32,6 +32,26 @@ go.work.sum
 postgres-data/
 
 # Editor/IDE
-# .idea/
-# .vscode/
+.idea/
+.vscode/
 .codefinder
+*.swp
+*.swo
+*~
+
+# OS-specific
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+bin/
+dist/
+
+# Benchmark and profiling
+*.prof
+*.pprof
+
+# Test outputs
+TEST_*.md
+TEST_*.txt
+full_test_run.log

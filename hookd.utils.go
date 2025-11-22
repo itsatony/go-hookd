@@ -221,7 +221,7 @@ func calculateSignature(secret, timestamp string, payload []byte) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// verifySignature verifies the HMAC-SHA256 signature of a webhook payload.
+// VerifySignature verifies the HMAC-SHA256 signature of a webhook payload.
 //
 // This is the counterpart to calculateSignature, used by webhook recipients
 // to verify the authenticity of incoming requests.
@@ -233,7 +233,22 @@ func calculateSignature(secret, timestamp string, payload []byte) string {
 //   - signature: The signature from the X-Webhook-Signature header
 //
 // Returns true if the signature is valid, false otherwise.
-func verifySignature(secret, timestamp string, payload []byte, signature string) bool {
+//
+// Example:
+//
+//	func webhookHandler(w http.ResponseWriter, r *http.Request) {
+//	    payload, _ := io.ReadAll(r.Body)
+//	    signature := r.Header.Get("X-Webhook-Signature")
+//	    timestamp := r.Header.Get("X-Webhook-Timestamp")
+//	    secret := "your-subscription-secret"
+//
+//	    if !hookd.VerifySignature(secret, timestamp, payload, signature) {
+//	        http.Error(w, "invalid signature", http.StatusUnauthorized)
+//	        return
+//	    }
+//	    // Process webhook...
+//	}
+func VerifySignature(secret, timestamp string, payload []byte, signature string) bool {
 	expectedSignature := calculateSignature(secret, timestamp, payload)
 	return hmac.Equal([]byte(expectedSignature), []byte(signature))
 }

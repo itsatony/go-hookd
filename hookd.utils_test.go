@@ -174,23 +174,23 @@ func TestVerifySignature(t *testing.T) {
 	sig := calculateSignature(secret, timestamp, payload)
 
 	t.Run("valid signature", func(t *testing.T) {
-		assert.True(t, verifySignature(secret, timestamp, payload, sig))
+		assert.True(t, VerifySignature(secret, timestamp, payload, sig))
 	})
 
 	t.Run("invalid signature", func(t *testing.T) {
-		assert.False(t, verifySignature(secret, timestamp, payload, "invalid-signature"))
+		assert.False(t, VerifySignature(secret, timestamp, payload, "invalid-signature"))
 	})
 
 	t.Run("wrong secret", func(t *testing.T) {
-		assert.False(t, verifySignature("wrong-secret", timestamp, payload, sig))
+		assert.False(t, VerifySignature("wrong-secret", timestamp, payload, sig))
 	})
 
 	t.Run("wrong timestamp", func(t *testing.T) {
-		assert.False(t, verifySignature(secret, "9999999999", payload, sig))
+		assert.False(t, VerifySignature(secret, "9999999999", payload, sig))
 	})
 
 	t.Run("wrong payload", func(t *testing.T) {
-		assert.False(t, verifySignature(secret, timestamp, []byte(`{"user_id":"999"}`), sig))
+		assert.False(t, VerifySignature(secret, timestamp, []byte(`{"user_id":"999"}`), sig))
 	})
 }
 

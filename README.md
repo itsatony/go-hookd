@@ -62,18 +62,18 @@ import (
 
 func main() {
     // Configure manager
-    config := internal.NewConfig("postgres://localhost:5432/hookd?sslmode=disable")
+    config := hookd.NewConfig("postgres://localhost:5432/hookd?sslmode=disable")
     config.WorkerCount = 10
     config.QueuePollInterval = 1000 // milliseconds
 
     // Create repository
-    repo, err := internal.NewPostgresRepository(context.Background(), config)
+    repo, err := hookd.NewPostgresRepository(context.Background(), config)
     if err != nil {
         log.Fatal(err)
     }
 
     // Initialize manager
-    manager, err := internal.NewManager(config, repo)
+    manager, err := hookd.NewManager(config, repo)
     if err != nil {
         log.Fatal(err)
     }
@@ -86,7 +86,7 @@ func main() {
     defer manager.Stop()
 
     // Create subscription
-    sub, err := manager.CreateSubscription(ctx, &internal.CreateSubscriptionRequest{
+    sub, err := manager.CreateSubscription(ctx, &hookd.CreateSubscriptionRequest{
         TenantID:   "tenant_123",
         URL:        "https://example.com/webhook",
         EventTypes: []string{"user.created", "user.updated"},
@@ -97,7 +97,7 @@ func main() {
     }
 
     // Queue delivery
-    delivery, err := manager.QueueDelivery(ctx, &internal.QueueDeliveryRequest{
+    delivery, err := manager.QueueDelivery(ctx, &hookd.QueueDeliveryRequest{
         SubscriptionID: sub.ID,
         EventType:      "user.created",
         Payload: map[string]interface{}{
@@ -174,7 +174,7 @@ Execute HTTP Request ─────┬─────► Success → Update Sta
 ### Config Options
 
 ```go
-config := internal.NewConfig("postgres://localhost:5432/hookd")
+config := hookd.NewConfig("postgres://localhost:5432/hookd")
 
 // Worker Configuration
 config.WorkerCount = 10                    // Concurrent workers
@@ -207,22 +207,22 @@ config.ShutdownTimeoutMs = 30000           // Graceful shutdown (ms)
 ```go
 // Custom logger
 logger, _ := zap.NewProduction()
-manager, err := internal.NewManager(config, repo,
-    internal.WithLogger(logger),
+manager, err := hookd.NewManager(config, repo,
+    hookd.WithLogger(logger),
 )
 
 // Custom event bus
 eventBus := &MyEventBus{}
-manager, err := internal.NewManager(config, repo,
-    internal.WithEventBus(eventBus),
+manager, err := hookd.NewManager(config, repo,
+    hookd.WithEventBus(eventBus),
 )
 
 // Custom HTTP client
 httpClient := &http.Client{
     Timeout: 10 * time.Second,
 }
-manager, err := internal.NewManager(config, repo,
-    internal.WithHTTPClient(httpClient),
+manager, err := hookd.NewManager(config, repo,
+    hookd.WithHTTPClient(httpClient),
 )
 ```
 
@@ -255,12 +255,12 @@ psql -h localhost -p 54321 -U hookd -d hookd -f migrations/postgres/000001_creat
 
 ```go
 // Create subscription
-sub, err := manager.CreateSubscription(ctx, &internal.CreateSubscriptionRequest{
+sub, err := manager.CreateSubscription(ctx, &hookd.CreateSubscriptionRequest{
     TenantID:   "tenant_123",
     URL:        "https://example.com/webhook",
     EventTypes: []string{"user.created"},
     Secret:     "webhook_secret",
-    RetryPolicy: &internal.RetryPolicy{
+    RetryPolicy: &hookd.RetryPolicy{
         MaxAttempts:    5,
         InitialBackoff: 2 * time.Second,
         MaxBackoff:     2 * time.Minute,
@@ -278,15 +278,15 @@ sub, err := manager.CreateSubscription(ctx, &internal.CreateSubscriptionRequest{
 sub, err := manager.GetSubscription(ctx, subscriptionID)
 
 // Update subscription
-updated, err := manager.UpdateSubscription(ctx, subscriptionID, &internal.UpdateSubscriptionRequest{
+updated, err := manager.UpdateSubscription(ctx, subscriptionID, &hookd.UpdateSubscriptionRequest{
     EventTypes: &[]string{"user.created", "user.updated"},
-    Status:     internal.StringPtr("paused"),
+    Status:     hookd.StringPtr("paused"),
 })
 
 // List subscriptions
-subs, err := manager.ListSubscriptions(ctx, &internal.SubscriptionFilter{
+subs, err := manager.ListSubscriptions(ctx, &hookd.SubscriptionFilter{
     TenantID:   "tenant_123",
-    Status:     internal.SubscriptionStatusActive,
+    Status:     hookd.SubscriptionStatusActive,
     EventTypes: []string{"user.created"},
 })
 
@@ -303,7 +303,7 @@ err := manager.DeleteSubscription(ctx, subscriptionID)
 
 ```go
 // Queue delivery
-delivery, err := manager.QueueDelivery(ctx, &internal.QueueDeliveryRequest{
+delivery, err := manager.QueueDelivery(ctx, &hookd.QueueDeliveryRequest{
     SubscriptionID: subscriptionID,
     EventType:      "user.created",
     Payload: map[string]interface{}{
