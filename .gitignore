@@ -55,3 +55,7 @@ dist/
 TEST_*.md
 TEST_*.txt
 full_test_run.log
+
+# Coverage baseline tracking
+.coverage-baseline.json
+coverage-report.txt
