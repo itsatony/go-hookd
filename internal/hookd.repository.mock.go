@@ -30,6 +30,15 @@ type MockRepository struct {
 
 	// Locked deliveries for SKIP LOCKED simulation
 	lockedDeliveries map[string]bool
+
+	// Error injection for testing
+	injectError                   error
+	injectErrorOnCreate           bool
+	injectErrorOnUpdate           bool
+	injectErrorOnClose            bool
+	injectErrorOnIdempotencyCheck bool
+	injectErrorOnCreateDelivery   bool
+	injectErrorOnStoreIdempotency bool
 }
 
 // idempotencyEntry stores idempotency key data
@@ -203,6 +212,11 @@ func (r *MockRepository) CreateSubscription(ctx context.Context, sub *Subscripti
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	// Error injection for testing
+	if r.injectErrorOnCreate {
+		return fmt.Errorf("injected create error")
+	}
+
 	// Check for duplicate tenant_id + url
 	for _, existing := range r.subscriptions {
 		if existing.TenantID == sub.TenantID && existing.URL == sub.URL {
@@ -339,6 +353,11 @@ func (r *MockRepository) CreateDelivery(ctx context.Context, delivery *Delivery)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	// Error injection for testing
+	if r.injectErrorOnCreateDelivery {
+		return fmt.Errorf("injected create delivery error")
+	}
+
 	r.deliveries[delivery.ID] = copyDelivery(delivery)
 	return nil
 }
@@ -378,6 +397,11 @@ func (r *MockRepository) UpdateDelivery(ctx context.Context, delivery *Delivery)
 func (r *MockRepository) GetPendingDeliveries(ctx context.Context, limit int) ([]*Delivery, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	// Error injection for testing
+	if r.injectError != nil {
+		return nil, r.injectError
+	}
 
 	now := time.Now()
 	results := []*Delivery{}
@@ -501,6 +525,11 @@ func (r *MockRepository) GetDeliveryAttempts(ctx context.Context, deliveryID str
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
+	// Error injection for testing
+	if r.injectError != nil {
+		return nil, r.injectError
+	}
+
 	attempts := r.deliveryAttempts[deliveryID]
 	if attempts == nil {
 		return []*DeliveryAttempt{}, nil
@@ -528,6 +557,11 @@ func (r *MockRepository) CheckIdempotency(ctx context.Context, key string, subsc
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
+	// Error injection for testing
+	if r.injectErrorOnIdempotencyCheck {
+		return false, fmt.Errorf("injected idempotency check error")
+	}
+
 	entryKey := fmt.Sprintf("%s:%s", key, subscriptionID)
 	entry, exists := r.idempotencyKeys[entryKey]
 
@@ -547,6 +581,11 @@ func (r *MockRepository) CheckIdempotency(ctx context.Context, key string, subsc
 func (r *MockRepository) StoreIdempotencyKey(ctx context.Context, key string, subscriptionID string, expiresAt time.Time) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	// Error injection for testing
+	if r.injectErrorOnStoreIdempotency {
+		return fmt.Errorf("injected store idempotency error")
+	}
 
 	entryKey := fmt.Sprintf("%s:%s", key, subscriptionID)
 	r.idempotencyKeys[entryKey] = idempotencyEntry{
@@ -605,6 +644,11 @@ func (r *MockRepository) GetCircuitBreakerState(ctx context.Context, endpoint st
 func (r *MockRepository) UpdateCircuitBreakerState(ctx context.Context, state *CircuitBreakerState) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	// Error injection for testing
+	if r.injectErrorOnUpdate {
+		return fmt.Errorf("injected update error")
+	}
 
 	r.circuitBreakerState[state.Endpoint] = copyCircuitBreakerState(state)
 	return nil
@@ -673,6 +717,10 @@ func (r *MockRepository) Ping(ctx context.Context) error {
 
 // Close closes the repository (no-op for mock).
 func (r *MockRepository) Close() error {
+	// Error injection for testing
+	if r.injectErrorOnClose {
+		return fmt.Errorf("close error")
+	}
 	return nil
 }
 
