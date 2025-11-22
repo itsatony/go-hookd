@@ -371,7 +371,22 @@ func (m *Manager) attemptDelivery(ctx context.Context, delivery *Delivery, sub *
 	m.publishDeliveryEvent(EventTopicDeliveryStarted, delivery, sub, nil)
 
 	// Create delivery attempt record
-	attemptID, _ := GenerateAttemptID()
+	attemptID, err := GenerateAttemptID()
+	if err != nil {
+		m.logger.Error("failed to generate attempt ID",
+			zap.String("delivery_id", delivery.ID),
+			zap.Error(err),
+		)
+		// Can't continue without attempt ID, mark delivery as failed
+		delivery.Status = DeliveryStatusFailed
+		if updateErr := m.repo.UpdateDelivery(ctx, delivery); updateErr != nil {
+			m.logger.Error("failed to update delivery status after attempt ID generation failure",
+				zap.String("delivery_id", delivery.ID),
+				zap.Error(updateErr),
+			)
+		}
+		return
+	}
 	attempt := &DeliveryAttempt{
 		ID:            attemptID,
 		DeliveryID:    delivery.ID,
