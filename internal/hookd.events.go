@@ -6,7 +6,6 @@ package internal
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"go.uber.org/zap"
@@ -82,7 +81,8 @@ func (m *Manager) QueueDelivery(ctx context.Context, req *QueueDeliveryRequest) 
 				zap.Error(err),
 				zap.String("idempotency_key", req.IdempotencyKey),
 			)
-			return nil, fmt.Errorf("failed to check idempotency: %w", err)
+			// Repository already returns cuserr errors
+			return nil, err
 		}
 
 		if exists {
@@ -101,7 +101,8 @@ func (m *Manager) QueueDelivery(ctx context.Context, req *QueueDeliveryRequest) 
 		m.logger.Error("failed to generate delivery ID",
 			zap.Error(err),
 		)
-		return nil, fmt.Errorf("failed to generate delivery ID: %w", err)
+		// GenerateDeliveryID already returns cuserr.InternalError
+		return nil, err
 	}
 
 	// Create delivery
@@ -126,7 +127,8 @@ func (m *Manager) QueueDelivery(ctx context.Context, req *QueueDeliveryRequest) 
 			zap.String("subscription_id", req.SubscriptionID),
 			zap.String("event_type", req.EventType),
 		)
-		return nil, fmt.Errorf("failed to create delivery: %w", err)
+		// Repository already returns cuserr errors
+		return nil, err
 	}
 
 	// Store idempotency key if provided
@@ -220,7 +222,8 @@ func (m *Manager) GetDeliveryAttempts(ctx context.Context, deliveryID string) ([
 			zap.Error(err),
 			zap.String("delivery_id", deliveryID),
 		)
-		return nil, fmt.Errorf("failed to get delivery attempts: %w", err)
+		// Repository already returns cuserr errors
+		return nil, err
 	}
 
 	return attempts, nil
@@ -279,7 +282,8 @@ func (m *Manager) RetryDelivery(ctx context.Context, deliveryID string) (*Delive
 			zap.Error(err),
 			zap.String("delivery_id", deliveryID),
 		)
-		return nil, fmt.Errorf("failed to update delivery: %w", err)
+		// Repository already returns cuserr errors
+		return nil, err
 	}
 
 	m.logger.Info("delivery scheduled for manual retry",

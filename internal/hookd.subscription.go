@@ -6,7 +6,6 @@ package internal
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"go.uber.org/zap"
@@ -72,7 +71,8 @@ func (m *Manager) CreateSubscription(ctx context.Context, req *CreateSubscriptio
 		m.logger.Error("failed to generate subscription ID",
 			zap.Error(err),
 		)
-		return nil, fmt.Errorf("failed to generate subscription ID: %w", err)
+		// GenerateSubscriptionID already returns cuserr.InternalError
+		return nil, err
 	}
 
 	// Set default retry policy if not provided
@@ -112,7 +112,8 @@ func (m *Manager) CreateSubscription(ctx context.Context, req *CreateSubscriptio
 			zap.String("tenant_id", req.TenantID),
 			zap.String("url", req.URL),
 		)
-		return nil, fmt.Errorf("failed to create subscription: %w", err)
+		// Repository already returns cuserr errors
+		return nil, err
 	}
 
 	m.logger.Info(LogMsgSubscriptionCreated,
@@ -265,7 +266,8 @@ func (m *Manager) UpdateSubscription(ctx context.Context, id string, req *Update
 			zap.Error(err),
 			zap.String("subscription_id", id),
 		)
-		return nil, fmt.Errorf("failed to update subscription: %w", err)
+		// Repository already returns cuserr errors
+		return nil, err
 	}
 
 	m.logger.Info(LogMsgSubscriptionUpdated,
@@ -319,7 +321,8 @@ func (m *Manager) DeleteSubscription(ctx context.Context, id string) error {
 			zap.Error(err),
 			zap.String("subscription_id", id),
 		)
-		return fmt.Errorf("failed to delete subscription: %w", err)
+		// Repository already returns cuserr errors
+		return err
 	}
 
 	m.logger.Info(LogMsgSubscriptionDeleted,
@@ -376,7 +379,8 @@ func (m *Manager) ListSubscriptions(ctx context.Context, filter *SubscriptionFil
 			zap.Error(err),
 			zap.String("tenant_id", filter.TenantID),
 		)
-		return nil, fmt.Errorf("failed to list subscriptions: %w", err)
+		// Repository already returns cuserr errors
+		return nil, err
 	}
 
 	return subs, nil

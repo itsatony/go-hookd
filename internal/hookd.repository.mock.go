@@ -10,6 +10,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/itsatony/go-cuserr"
 )
 
 // MockRepository implements the Repository interface using in-memory storage.
@@ -214,7 +216,7 @@ func (r *MockRepository) CreateSubscription(ctx context.Context, sub *Subscripti
 
 	// Error injection for testing
 	if r.injectErrorOnCreate {
-		return fmt.Errorf("injected create error")
+		return cuserr.NewInternalError("mock_repository", nil, cuserr.WithMetadata("injected", "true"))
 	}
 
 	// Check for duplicate tenant_id + url
@@ -355,7 +357,7 @@ func (r *MockRepository) CreateDelivery(ctx context.Context, delivery *Delivery)
 
 	// Error injection for testing
 	if r.injectErrorOnCreateDelivery {
-		return fmt.Errorf("injected create delivery error")
+		return cuserr.NewInternalError("mock_repository", nil, cuserr.WithMetadata("injected", "true"))
 	}
 
 	r.deliveries[delivery.ID] = copyDelivery(delivery)
@@ -502,7 +504,7 @@ func (r *MockRepository) CreateDeliveryAttempt(ctx context.Context, attempt *Del
 	if attempts, exists := r.deliveryAttempts[attempt.DeliveryID]; exists {
 		for _, existing := range attempts {
 			if existing.AttemptNumber == attempt.AttemptNumber {
-				return fmt.Errorf("attempt %d already exists for delivery %s", attempt.AttemptNumber, attempt.DeliveryID)
+				return cuserr.NewConflictError("delivery_attempt", "attempt_number", fmt.Sprintf("attempt %d already exists for delivery %s", attempt.AttemptNumber, attempt.DeliveryID))
 			}
 		}
 	}
@@ -559,7 +561,7 @@ func (r *MockRepository) CheckIdempotency(ctx context.Context, key string, subsc
 
 	// Error injection for testing
 	if r.injectErrorOnIdempotencyCheck {
-		return false, fmt.Errorf("injected idempotency check error")
+		return false, cuserr.NewInternalError("mock_repository", nil, cuserr.WithMetadata("injected", "true"))
 	}
 
 	entryKey := fmt.Sprintf("%s:%s", key, subscriptionID)
@@ -584,7 +586,7 @@ func (r *MockRepository) StoreIdempotencyKey(ctx context.Context, key string, su
 
 	// Error injection for testing
 	if r.injectErrorOnStoreIdempotency {
-		return fmt.Errorf("injected store idempotency error")
+		return cuserr.NewInternalError("mock_repository", nil, cuserr.WithMetadata("injected", "true"))
 	}
 
 	entryKey := fmt.Sprintf("%s:%s", key, subscriptionID)
@@ -647,7 +649,7 @@ func (r *MockRepository) UpdateCircuitBreakerState(ctx context.Context, state *C
 
 	// Error injection for testing
 	if r.injectErrorOnUpdate {
-		return fmt.Errorf("injected update error")
+		return cuserr.NewInternalError("mock_repository", nil, cuserr.WithMetadata("injected", "true"))
 	}
 
 	r.circuitBreakerState[state.Endpoint] = copyCircuitBreakerState(state)
@@ -719,7 +721,7 @@ func (r *MockRepository) Ping(ctx context.Context) error {
 func (r *MockRepository) Close() error {
 	// Error injection for testing
 	if r.injectErrorOnClose {
-		return fmt.Errorf("close error")
+		return cuserr.NewInternalError("mock_repository", nil, cuserr.WithMetadata("operation", "close"))
 	}
 	return nil
 }
@@ -753,7 +755,7 @@ func (tx *MockRepositoryTx) Commit() error {
 		return nil // Already committed
 	}
 	if tx.rolledBack {
-		return fmt.Errorf("transaction already rolled back")
+		return cuserr.NewValidationError("transaction", "transaction already rolled back")
 	}
 
 	// Lock parent and copy changes back
@@ -1047,7 +1049,7 @@ func (tx *MockRepositoryTx) CreateDeliveryAttempt(ctx context.Context, attempt *
 	if attempts, exists := tx.deliveryAttempts[attempt.DeliveryID]; exists {
 		for _, existing := range attempts {
 			if existing.AttemptNumber == attempt.AttemptNumber {
-				return fmt.Errorf("attempt %d already exists for delivery %s", attempt.AttemptNumber, attempt.DeliveryID)
+				return cuserr.NewConflictError("delivery_attempt", "attempt_number", fmt.Sprintf("attempt %d already exists for delivery %s", attempt.AttemptNumber, attempt.DeliveryID))
 			}
 		}
 	}
@@ -1140,7 +1142,7 @@ func (tx *MockRepositoryTx) UpdateCircuitBreakerState(ctx context.Context, state
 
 // BeginTx is not supported within a transaction (nested transactions).
 func (tx *MockRepositoryTx) BeginTx(ctx context.Context) (RepositoryTx, error) {
-	return nil, fmt.Errorf("nested transactions are not supported")
+	return nil, cuserr.NewValidationError("transaction", "nested transactions are not supported")
 }
 
 // Ping checks database health (always returns nil for mock).
