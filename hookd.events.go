@@ -73,25 +73,27 @@ func (m *Manager) QueueDelivery(ctx context.Context, req *QueueDeliveryRequest) 
 		return nil, NewValidationError("subscription", ErrMsgSubscriptionNotActive)
 	}
 
-	// Check idempotency
+	// Store idempotency key FIRST to prevent race condition (TOCTOU)
+	// The database unique constraint will enforce atomicity
 	if req.IdempotencyKey != "" {
-		exists, err := m.repo.CheckIdempotency(ctx, req.IdempotencyKey, req.SubscriptionID)
+		expiresAt := time.Now().Add(time.Duration(m.config.IdempotencyTTLHours) * time.Hour)
+		err := m.repo.StoreIdempotencyKey(ctx, req.IdempotencyKey, req.SubscriptionID, expiresAt)
 		if err != nil {
-			m.logger.Error("failed to check idempotency",
+			// Check if it's a conflict (duplicate key)
+			if IsConflictError(err) {
+				m.logger.Info("idempotent delivery request detected",
+					zap.String("idempotency_key", req.IdempotencyKey),
+					zap.String("subscription_id", req.SubscriptionID),
+				)
+				return nil, NewIdempotencyError(req.IdempotencyKey)
+			}
+
+			// Other database error
+			m.logger.Error("failed to store idempotency key",
 				zap.Error(err),
 				zap.String("idempotency_key", req.IdempotencyKey),
 			)
-			// Repository already returns cuserr errors
 			return nil, err
-		}
-
-		if exists {
-			m.logger.Info("idempotent delivery request detected",
-				zap.String("idempotency_key", req.IdempotencyKey),
-				zap.String("subscription_id", req.SubscriptionID),
-			)
-			// Return error to prevent duplicate delivery creation
-			return nil, NewIdempotencyError(req.IdempotencyKey)
 		}
 	}
 
@@ -129,19 +131,6 @@ func (m *Manager) QueueDelivery(ctx context.Context, req *QueueDeliveryRequest) 
 		)
 		// Repository already returns cuserr errors
 		return nil, err
-	}
-
-	// Store idempotency key if provided
-	if req.IdempotencyKey != "" {
-		expiresAt := time.Now().Add(time.Duration(m.config.IdempotencyTTLHours) * time.Hour)
-		if err := m.repo.StoreIdempotencyKey(ctx, req.IdempotencyKey, req.SubscriptionID, expiresAt); err != nil {
-			// Log but don't fail - delivery is already created
-			m.logger.Warn("failed to store idempotency key",
-				zap.Error(err),
-				zap.String("idempotency_key", req.IdempotencyKey),
-				zap.String("delivery_id", delivery.ID),
-			)
-		}
 	}
 
 	m.logger.Info(LogMsgDeliveryQueued,

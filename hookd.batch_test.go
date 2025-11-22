@@ -168,12 +168,27 @@ func TestManager_QueueDeliveries(t *testing.T) {
 		assert.Equal(t, 1, resp.TotalSucceeded)
 		assert.Equal(t, 1, resp.TotalFailed)
 
-		// First should succeed
-		assert.True(t, resp.Results[0].Success)
+		// One should succeed, one should fail (order is non-deterministic due to concurrent execution)
+		var successCount, failureCount int
+		var failedResult *BatchResult[Delivery]
 
-		// Second should fail (duplicate idempotency key)
-		assert.False(t, resp.Results[1].Success)
-		assert.Contains(t, resp.Results[1].Error.Error(), "idempotency")
+		for _, result := range resp.Results {
+			if result.Success {
+				successCount++
+				assert.NotNil(t, result.Result)
+			} else {
+				failureCount++
+				assert.NotNil(t, result.Error, "Expected error for duplicate idempotency key")
+				if result.Error != nil {
+					assert.Contains(t, result.Error.Error(), "idempotency")
+				}
+				failedResult = result
+			}
+		}
+
+		assert.Equal(t, 1, successCount, "Expected exactly one success")
+		assert.Equal(t, 1, failureCount, "Expected exactly one failure")
+		assert.NotNil(t, failedResult, "Expected one failure result")
 	})
 }
 

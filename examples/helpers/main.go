@@ -10,7 +10,7 @@ import (
 )
 
 func main() {
-	fmt.Println("=== go-hookd Helper Functions Example ===\n")
+	fmt.Println("=== go-hookd Helper Functions Example ===")
 
 	// Example 1: Pointer Helpers
 	fmt.Println("1. UpdateSubscriptionRequest with pointer helpers:")

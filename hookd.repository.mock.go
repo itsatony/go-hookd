@@ -590,6 +590,19 @@ func (r *MockRepository) StoreIdempotencyKey(ctx context.Context, key string, su
 	}
 
 	entryKey := fmt.Sprintf("%s:%s", key, subscriptionID)
+
+	// Check if key already exists (mimics database unique constraint)
+	if existing, exists := r.idempotencyKeys[entryKey]; exists {
+		// Check if not expired
+		if time.Now().Before(existing.ExpiresAt) {
+			return cuserr.NewConflictError(
+				"idempotency_key",
+				key,
+				fmt.Sprintf("duplicate idempotency key for subscription %s", subscriptionID),
+			)
+		}
+	}
+
 	r.idempotencyKeys[entryKey] = idempotencyEntry{
 		Key:            key,
 		SubscriptionID: subscriptionID,
@@ -1105,6 +1118,19 @@ func (tx *MockRepositoryTx) StoreIdempotencyKey(ctx context.Context, key string,
 	defer tx.mu.Unlock()
 
 	entryKey := fmt.Sprintf("%s:%s", key, subscriptionID)
+
+	// Check if key already exists (mimics database unique constraint)
+	if existing, exists := tx.idempotencyKeys[entryKey]; exists {
+		// Check if not expired
+		if time.Now().Before(existing.ExpiresAt) {
+			return cuserr.NewConflictError(
+				"idempotency_key",
+				key,
+				fmt.Sprintf("duplicate idempotency key for subscription %s", subscriptionID),
+			)
+		}
+	}
+
 	tx.idempotencyKeys[entryKey] = idempotencyEntry{
 		Key:            key,
 		SubscriptionID: subscriptionID,

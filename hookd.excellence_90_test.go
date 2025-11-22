@@ -328,7 +328,7 @@ func TestCreateSubscription_RepositoryErrors(t *testing.T) {
 // =============================================================================
 
 func TestQueueDelivery_ErrorPaths(t *testing.T) {
-	t.Run("handles idempotency check error", func(t *testing.T) {
+	t.Run("handles idempotency store error", func(t *testing.T) {
 		config := NewConfig("postgres://localhost/test")
 		repo := NewMockRepository()
 		logger := zaptest.NewLogger(t)
@@ -345,8 +345,8 @@ func TestQueueDelivery_ErrorPaths(t *testing.T) {
 			Secret:     "test_secret",
 		})
 
-		// Inject error for CheckIdempotency
-		repo.injectErrorOnIdempotencyCheck = true
+		// Inject error for StoreIdempotencyKey (now called first)
+		repo.injectErrorOnStoreIdempotency = true
 
 		req := &QueueDeliveryRequest{
 			SubscriptionID: sub.ID,
@@ -363,7 +363,7 @@ func TestQueueDelivery_ErrorPaths(t *testing.T) {
 		assert.Contains(t, err.Error(), "internal error")
 
 		// Clear error
-		repo.injectErrorOnIdempotencyCheck = false
+		repo.injectErrorOnStoreIdempotency = false
 	})
 
 	t.Run("handles CreateDelivery failure", func(t *testing.T) {
@@ -401,44 +401,6 @@ func TestQueueDelivery_ErrorPaths(t *testing.T) {
 
 		// Clear error
 		repo.injectErrorOnCreateDelivery = false
-	})
-
-	t.Run("logs warning but continues when StoreIdempotencyKey fails", func(t *testing.T) {
-		config := NewConfig("postgres://localhost/test")
-		repo := NewMockRepository()
-		logger := zaptest.NewLogger(t)
-		manager, err := NewManager(config, repo, WithLogger(logger))
-		require.NoError(t, err)
-
-		ctx := context.Background()
-
-		// Create subscription
-		sub, _ := manager.CreateSubscription(ctx, &CreateSubscriptionRequest{
-			TenantID:   "tenant_test",
-			URL:        "https://example.com/webhook",
-			EventTypes: []string{"test.event"},
-			Secret:     "test_secret",
-		})
-
-		// Inject error for StoreIdempotencyKey
-		repo.injectErrorOnStoreIdempotency = true
-
-		req := &QueueDeliveryRequest{
-			SubscriptionID: sub.ID,
-			EventType:      "test.event",
-			Payload:        map[string]interface{}{"test": "data"},
-			IdempotencyKey: "test_key_456",
-		}
-
-		// Should succeed despite StoreIdempotencyKey error
-		delivery, err := manager.QueueDelivery(ctx, req)
-
-		require.NoError(t, err)
-		assert.NotNil(t, delivery)
-		assert.NotEmpty(t, delivery.ID)
-
-		// Clear error
-		repo.injectErrorOnStoreIdempotency = false
 	})
 }
 
