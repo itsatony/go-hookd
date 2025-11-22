@@ -365,7 +365,7 @@ func (m *Manager) DeleteSubscription(ctx context.Context, id string) error {
 func (m *Manager) ListSubscriptions(ctx context.Context, filter *SubscriptionFilter) ([]*Subscription, error) {
 	// Validate filter
 	if filter == nil {
-		return nil, NewValidationError("filter", "filter is required")
+		return nil, NewValidationError("filter", ErrMsgFilterRequired)
 	}
 
 	if filter.TenantID == "" {

@@ -351,6 +351,57 @@ const (
 
 	// ErrMsgInvalidBackoff is the error message for invalid backoff configuration
 	ErrMsgInvalidBackoff = "initial_backoff must be less than max_backoff"
+
+	// ErrMsgInvalidMaxBatchSize is the error message for invalid max batch size
+	ErrMsgInvalidMaxBatchSize = "max_batch_size must be at least 1"
+
+	// ErrMsgInvalidInitialBackoff is the error message for invalid initial backoff
+	ErrMsgInvalidInitialBackoff = "initial_backoff must be at least 1ms"
+
+	// ErrMsgInvalidMaxBackoff is the error message for invalid max backoff
+	ErrMsgInvalidMaxBackoff = "max_backoff must be at least 1ms"
+
+	// ErrMsgInvalidBackoffFactor is the error message for invalid backoff factor
+	ErrMsgInvalidBackoffFactor = "backoff_factor must be at least 1.0"
+
+	// ErrMsgInvalidCircuitBreakerThreshold is the error message for invalid circuit breaker threshold
+	ErrMsgInvalidCircuitBreakerThreshold = "circuit_breaker_threshold must be at least 1"
+
+	// ErrMsgInvalidCircuitBreakerTimeout is the error message for invalid circuit breaker timeout
+	ErrMsgInvalidCircuitBreakerTimeout = "circuit_breaker_timeout must be at least 1s"
+
+	// ErrMsgInvalidCircuitBreakerHalfOpen is the error message for invalid half-open requests
+	ErrMsgInvalidCircuitBreakerHalfOpen = "circuit_breaker_half_open_requests must be at least 1"
+
+	// ErrMsgInvalidIdempotencyTTL is the error message for invalid idempotency TTL
+	ErrMsgInvalidIdempotencyTTL = "idempotency_ttl must be at least 1 hour"
+
+	// ErrMsgInvalidShutdownTimeout is the error message for invalid shutdown timeout
+	ErrMsgInvalidShutdownTimeout = "shutdown_timeout must be at least 1 second"
+
+	// ErrMsgManagerAlreadyStarted is the error message when manager is already started
+	ErrMsgManagerAlreadyStarted = "manager already started"
+
+	// ErrMsgRequestRequired is the error message when request is nil
+	ErrMsgRequestRequired = "request is required"
+
+	// ErrMsgAtLeastOneDeliveryRequired is the error message when deliveries array is empty
+	ErrMsgAtLeastOneDeliveryRequired = "at least one delivery is required"
+
+	// ErrMsgAtLeastOneSubscriptionRequired is the error message when subscriptions array is empty
+	ErrMsgAtLeastOneSubscriptionRequired = "at least one subscription is required"
+
+	// ErrMsgBatchSizeExceedsMaximum is the error message when batch size exceeds limit
+	ErrMsgBatchSizeExceedsMaximum = "batch size exceeds maximum"
+
+	// ErrMsgDeliveryIDRequired is the error message when delivery ID is missing
+	ErrMsgDeliveryIDRequired = "delivery_id is required"
+
+	// ErrMsgCannotRetrySuccessful is the error message when trying to retry successful delivery
+	ErrMsgCannotRetrySuccessful = "cannot retry successful delivery"
+
+	// ErrMsgFilterRequired is the error message when filter is missing
+	ErrMsgFilterRequired = "filter is required"
 )
 
 // Log Messages - Operations

@@ -167,7 +167,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	defer m.startedMu.Unlock()
 
 	if m.started {
-		return cuserr.NewValidationError("manager", "manager already started")
+		return cuserr.NewValidationError("manager", ErrMsgManagerAlreadyStarted)
 	}
 
 	// Create cancellable context

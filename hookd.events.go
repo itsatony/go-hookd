@@ -164,7 +164,7 @@ func (m *Manager) QueueDelivery(ctx context.Context, req *QueueDeliveryRequest) 
 //	delivery, err := manager.GetDelivery(ctx, "dlv_9Kj2BxYzT3c5K8xM4fQ7")
 func (m *Manager) GetDelivery(ctx context.Context, id string) (*Delivery, error) {
 	if id == "" {
-		return nil, NewValidationError("id", "delivery_id is required")
+		return nil, NewValidationError("id", ErrMsgDeliveryIDRequired)
 	}
 
 	delivery, err := m.repo.GetDelivery(ctx, id)
@@ -202,7 +202,7 @@ func (m *Manager) GetDelivery(ctx context.Context, id string) (*Delivery, error)
 //	attempts, err := manager.GetDeliveryAttempts(ctx, "dlv_9Kj2BxYzT3c5K8xM4fQ7")
 func (m *Manager) GetDeliveryAttempts(ctx context.Context, deliveryID string) ([]*DeliveryAttempt, error) {
 	if deliveryID == "" {
-		return nil, NewValidationError("delivery_id", "delivery_id is required")
+		return nil, NewValidationError("delivery_id", ErrMsgDeliveryIDRequired)
 	}
 
 	attempts, err := m.repo.GetDeliveryAttempts(ctx, deliveryID)
@@ -246,7 +246,7 @@ func (m *Manager) GetDeliveryAttempts(ctx context.Context, deliveryID string) ([
 //	delivery, err := manager.RetryDelivery(ctx, "dlv_9Kj2BxYzT3c5K8xM4fQ7")
 func (m *Manager) RetryDelivery(ctx context.Context, deliveryID string) (*Delivery, error) {
 	if deliveryID == "" {
-		return nil, NewValidationError("delivery_id", "delivery_id is required")
+		return nil, NewValidationError("delivery_id", ErrMsgDeliveryIDRequired)
 	}
 
 	// Get delivery
@@ -257,7 +257,7 @@ func (m *Manager) RetryDelivery(ctx context.Context, deliveryID string) (*Delive
 
 	// Check if delivery can be retried
 	if delivery.Status == DeliveryStatusSuccess {
-		return nil, NewValidationError("status", "cannot retry successful delivery")
+		return nil, NewValidationError("status", ErrMsgCannotRetrySuccessful)
 	}
 
 	// Reset delivery for retry

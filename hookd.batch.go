@@ -69,15 +69,15 @@ type QueueDeliveriesResponse struct {
 // Thread-safe: Yes
 func (m *Manager) QueueDeliveries(ctx context.Context, req *QueueDeliveriesRequest) (*QueueDeliveriesResponse, error) {
 	if req == nil {
-		return nil, cuserr.NewValidationError("request", "request is required")
+		return nil, cuserr.NewValidationError("request", ErrMsgRequestRequired)
 	}
 
 	if len(req.Deliveries) == 0 {
-		return nil, cuserr.NewValidationError("deliveries", "at least one delivery is required")
+		return nil, cuserr.NewValidationError("deliveries", ErrMsgAtLeastOneDeliveryRequired)
 	}
 
 	if len(req.Deliveries) > MaxBatchSize {
-		return nil, cuserr.NewValidationError("deliveries", fmt.Sprintf("batch size exceeds maximum (%d)", MaxBatchSize))
+		return nil, cuserr.NewValidationError("deliveries", fmt.Sprintf("%s (%d)", ErrMsgBatchSizeExceedsMaximum, MaxBatchSize))
 	}
 
 	response := &QueueDeliveriesResponse{
@@ -161,15 +161,15 @@ type CreateSubscriptionsResponse struct {
 // Thread-safe: Yes
 func (m *Manager) CreateSubscriptions(ctx context.Context, req *CreateSubscriptionsRequest) (*CreateSubscriptionsResponse, error) {
 	if req == nil {
-		return nil, cuserr.NewValidationError("request", "request is required")
+		return nil, cuserr.NewValidationError("request", ErrMsgRequestRequired)
 	}
 
 	if len(req.Subscriptions) == 0 {
-		return nil, cuserr.NewValidationError("subscriptions", "at least one subscription is required")
+		return nil, cuserr.NewValidationError("subscriptions", ErrMsgAtLeastOneSubscriptionRequired)
 	}
 
 	if len(req.Subscriptions) > MaxBatchSize {
-		return nil, cuserr.NewValidationError("subscriptions", fmt.Sprintf("batch size exceeds maximum (%d)", MaxBatchSize))
+		return nil, cuserr.NewValidationError("subscriptions", fmt.Sprintf("%s (%d)", ErrMsgBatchSizeExceedsMaximum, MaxBatchSize))
 	}
 
 	response := &CreateSubscriptionsResponse{

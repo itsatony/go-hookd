@@ -119,7 +119,7 @@ func (c *Config) Validate() error {
 	}
 
 	if c.MaxBatchSize < 1 {
-		return NewConfigurationError("max_batch_size", "max_batch_size must be at least 1")
+		return NewConfigurationError("max_batch_size", ErrMsgInvalidMaxBatchSize)
 	}
 
 	// Retry policy validation
@@ -128,11 +128,11 @@ func (c *Config) Validate() error {
 	}
 
 	if c.DefaultInitialBackoffMs < 1 {
-		return NewConfigurationError("initial_backoff", "initial_backoff must be at least 1ms")
+		return NewConfigurationError("initial_backoff", ErrMsgInvalidInitialBackoff)
 	}
 
 	if c.DefaultMaxBackoffMs < 1 {
-		return NewConfigurationError("max_backoff", "max_backoff must be at least 1ms")
+		return NewConfigurationError("max_backoff", ErrMsgInvalidMaxBackoff)
 	}
 
 	if c.DefaultInitialBackoffMs >= c.DefaultMaxBackoffMs {
@@ -140,30 +140,30 @@ func (c *Config) Validate() error {
 	}
 
 	if c.DefaultBackoffFactor < 1.0 {
-		return NewConfigurationError("backoff_factor", "backoff_factor must be at least 1.0")
+		return NewConfigurationError("backoff_factor", ErrMsgInvalidBackoffFactor)
 	}
 
 	// Circuit breaker validation
 	if c.CircuitBreakerThreshold < 1 {
-		return NewConfigurationError("circuit_breaker_threshold", "circuit_breaker_threshold must be at least 1")
+		return NewConfigurationError("circuit_breaker_threshold", ErrMsgInvalidCircuitBreakerThreshold)
 	}
 
 	if c.CircuitBreakerTimeoutMs < 1000 {
-		return NewConfigurationError("circuit_breaker_timeout", "circuit_breaker_timeout must be at least 1s")
+		return NewConfigurationError("circuit_breaker_timeout", ErrMsgInvalidCircuitBreakerTimeout)
 	}
 
 	if c.CircuitBreakerHalfOpenRequests < 1 {
-		return NewConfigurationError("circuit_breaker_half_open_requests", "circuit_breaker_half_open_requests must be at least 1")
+		return NewConfigurationError("circuit_breaker_half_open_requests", ErrMsgInvalidCircuitBreakerHalfOpen)
 	}
 
 	// Idempotency validation
 	if c.IdempotencyTTLHours < 1 {
-		return NewConfigurationError("idempotency_ttl", "idempotency_ttl must be at least 1 hour")
+		return NewConfigurationError("idempotency_ttl", ErrMsgInvalidIdempotencyTTL)
 	}
 
 	// Shutdown validation
 	if c.ShutdownTimeoutSeconds < 1 {
-		return NewConfigurationError("shutdown_timeout", "shutdown_timeout must be at least 1 second")
+		return NewConfigurationError("shutdown_timeout", ErrMsgInvalidShutdownTimeout)
 	}
 
 	return nil
