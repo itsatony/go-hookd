@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/itsatony/go-hookd/internal"
+	"github.com/itsatony/go-version"
 )
 
 // =============================================================================
@@ -345,6 +346,20 @@ func StartMetricsReporter(metrics *MetricsCollector, interval time.Duration, sto
 // =============================================================================
 
 func main() {
+	// STEP 1: Initialize version management FIRST (mandatory per CLAUDE.md)
+	if err := version.Initialize(
+		version.WithManifestPath("../../versions.yaml"), // Relative to examples/monitoring/
+		version.WithGitInfo(),
+		version.WithBuildInfo(),
+		version.WithValidators(
+			version.NewSchemaValidator("postgres_main", "1"),
+		),
+	); err != nil {
+		log.Fatalf("Failed to initialize version management: %v", err)
+	}
+
+	versionInfo := version.MustGet()
+
 	// Database URL from environment or default
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
@@ -352,6 +367,7 @@ func main() {
 	}
 
 	fmt.Println("=== go-hookd Monitoring Example ===")
+	fmt.Printf("Version: %s (commit: %s)\n", versionInfo.Project.Version, versionInfo.Git.Commit)
 	fmt.Printf("Database: %s\n\n", dbURL)
 
 	// Create metrics collector

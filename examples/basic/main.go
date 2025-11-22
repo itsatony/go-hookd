@@ -10,9 +10,25 @@ import (
 	"time"
 
 	"github.com/itsatony/go-hookd/internal"
+	"github.com/itsatony/go-version"
 )
 
 func main() {
+	// STEP 1: Initialize version management FIRST (mandatory per CLAUDE.md)
+	// This must happen before any other operations
+	if err := version.Initialize(
+		version.WithManifestPath("../../versions.yaml"), // Relative to examples/basic/
+		version.WithGitInfo(),
+		version.WithBuildInfo(),
+		version.WithValidators(
+			version.NewSchemaValidator("postgres_main", "1"),
+		),
+	); err != nil {
+		log.Fatalf("Failed to initialize version management: %v", err)
+	}
+
+	versionInfo := version.MustGet()
+
 	// Database URL from environment or default
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
@@ -20,6 +36,7 @@ func main() {
 	}
 
 	fmt.Println("=== go-hookd Basic Example ===")
+	fmt.Printf("Version: %s (commit: %s)\n", versionInfo.Project.Version, versionInfo.Git.Commit)
 	fmt.Printf("Database: %s\n\n", dbURL)
 
 	// Create configuration
