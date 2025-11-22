@@ -57,7 +57,7 @@ import (
     "context"
     "log"
 
-    "github.com/itsatony/go-hookd/internal"
+    "github.com/itsatony/go-hookd"
 )
 
 func main() {

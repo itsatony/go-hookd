@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/itsatony/go-hookd/internal"
+	"github.com/itsatony/go-hookd"
 	"github.com/itsatony/go-version"
 )
 
@@ -40,7 +40,7 @@ func main() {
 	fmt.Printf("Database: %s\n\n", dbURL)
 
 	// Create configuration
-	config := internal.NewConfig(dbURL)
+	config := hookd.NewConfig(dbURL)
 	config.WorkerCount = 5
 	config.QueuePollInterval = 1000 // 1 second
 	config.DefaultMaxRetries = 3
@@ -56,10 +56,10 @@ func main() {
 
 	// For this example, use mock repository (no database required)
 	fmt.Println("Using mock repository (no database required)")
-	repo := internal.NewMockRepository()
+	repo := hookd.NewMockRepository()
 
 	// Initialize manager
-	manager, err := internal.NewManager(config, repo)
+	manager, err := hookd.NewManager(config, repo)
 	if err != nil {
 		log.Fatalf("Failed to create manager: %v", err)
 	}
@@ -89,7 +89,7 @@ func main() {
 
 	// Create a subscription
 	fmt.Println("Creating webhook subscription...")
-	subscription, err := manager.CreateSubscription(ctx, &internal.CreateSubscriptionRequest{
+	subscription, err := manager.CreateSubscription(ctx, &hookd.CreateSubscriptionRequest{
 		TenantID:   "tenant_demo",
 		URL:        "https://webhook.site/unique-id", // Replace with your webhook URL
 		EventTypes: []string{"user.created", "user.updated", "user.deleted"},
@@ -138,7 +138,7 @@ func main() {
 	}
 
 	for i, event := range events {
-		delivery, err := manager.QueueDelivery(ctx, &internal.QueueDeliveryRequest{
+		delivery, err := manager.QueueDelivery(ctx, &hookd.QueueDeliveryRequest{
 			SubscriptionID: subscription.ID,
 			EventType:      event.eventType,
 			Payload:        event.payload,
@@ -155,7 +155,7 @@ func main() {
 
 	// List all subscriptions
 	fmt.Println("Listing subscriptions for tenant...")
-	subs, err := manager.ListSubscriptions(ctx, &internal.SubscriptionFilter{
+	subs, err := manager.ListSubscriptions(ctx, &hookd.SubscriptionFilter{
 		TenantID: "tenant_demo",
 	})
 	if err != nil {
@@ -194,7 +194,7 @@ func main() {
 
 	// Check delivery statuses
 	fmt.Println("\nChecking delivery statuses...")
-	filter := &internal.SubscriptionFilter{
+	filter := &hookd.SubscriptionFilter{
 		TenantID: "tenant_demo",
 	}
 	subs, _ = manager.ListSubscriptions(ctx, filter)

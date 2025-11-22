@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/itsatony/go-hookd/internal"
+	"github.com/itsatony/go-hookd"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -15,7 +15,7 @@ import (
 // =============================================================================
 
 // AssertSubscriptionExists verifies a subscription exists with expected values
-func AssertSubscriptionExists(t *testing.T, repo internal.Repository, id string) *internal.Subscription {
+func AssertSubscriptionExists(t *testing.T, repo hookd.Repository, id string) *hookd.Subscription {
 	t.Helper()
 
 	sub, err := repo.GetSubscription(ContextWithTimeout(), id)
@@ -26,17 +26,17 @@ func AssertSubscriptionExists(t *testing.T, repo internal.Repository, id string)
 }
 
 // AssertSubscriptionNotExists verifies a subscription does not exist
-func AssertSubscriptionNotExists(t *testing.T, repo internal.Repository, id string) {
+func AssertSubscriptionNotExists(t *testing.T, repo hookd.Repository, id string) {
 	t.Helper()
 
 	sub, err := repo.GetSubscription(ContextWithTimeout(), id)
 	assert.Error(t, err, "Should return error for non-existent subscription")
 	assert.Nil(t, sub, "Subscription should be nil")
-	assert.True(t, internal.IsNotFoundError(err), "Error should be NotFoundError")
+	assert.True(t, hookd.IsNotFoundError(err), "Error should be NotFoundError")
 }
 
 // AssertDeliveryExists verifies a delivery exists with expected values
-func AssertDeliveryExists(t *testing.T, repo internal.Repository, id string) *internal.Delivery {
+func AssertDeliveryExists(t *testing.T, repo hookd.Repository, id string) *hookd.Delivery {
 	t.Helper()
 
 	delivery, err := repo.GetDelivery(ContextWithTimeout(), id)
@@ -47,7 +47,7 @@ func AssertDeliveryExists(t *testing.T, repo internal.Repository, id string) *in
 }
 
 // AssertDeliveryStatus verifies a delivery has the expected status
-func AssertDeliveryStatus(t *testing.T, repo internal.Repository, deliveryID string, expectedStatus string) {
+func AssertDeliveryStatus(t *testing.T, repo hookd.Repository, deliveryID string, expectedStatus string) {
 	t.Helper()
 
 	delivery := AssertDeliveryExists(t, repo, deliveryID)
@@ -57,7 +57,7 @@ func AssertDeliveryStatus(t *testing.T, repo internal.Repository, deliveryID str
 }
 
 // AssertDeliveryAttemptCount verifies a delivery has the expected attempt count
-func AssertDeliveryAttemptCount(t *testing.T, repo internal.Repository, deliveryID string, expectedCount int) {
+func AssertDeliveryAttemptCount(t *testing.T, repo hookd.Repository, deliveryID string, expectedCount int) {
 	t.Helper()
 
 	delivery := AssertDeliveryExists(t, repo, deliveryID)
@@ -67,18 +67,18 @@ func AssertDeliveryAttemptCount(t *testing.T, repo internal.Repository, delivery
 }
 
 // AssertDeliveryCompleted verifies a delivery is marked as completed
-func AssertDeliveryCompleted(t *testing.T, repo internal.Repository, deliveryID string) {
+func AssertDeliveryCompleted(t *testing.T, repo hookd.Repository, deliveryID string) {
 	t.Helper()
 
 	delivery := AssertDeliveryExists(t, repo, deliveryID)
-	assert.Equal(t, internal.DeliveryStatusSuccess, delivery.Status,
+	assert.Equal(t, hookd.DeliveryStatusSuccess, delivery.Status,
 		"Delivery should be successful")
 	assert.NotNil(t, delivery.CompletedAt,
 		"Delivery should have completion timestamp")
 }
 
 // AssertAttemptRecorded verifies a delivery attempt was recorded
-func AssertAttemptRecorded(t *testing.T, repo internal.Repository, deliveryID string, attemptNum int) *internal.DeliveryAttempt {
+func AssertAttemptRecorded(t *testing.T, repo hookd.Repository, deliveryID string, attemptNum int) *hookd.DeliveryAttempt {
 	t.Helper()
 
 	attempts, err := repo.GetDeliveryAttempts(ContextWithTimeout(), deliveryID)
@@ -91,7 +91,7 @@ func AssertAttemptRecorded(t *testing.T, repo internal.Repository, deliveryID st
 }
 
 // AssertCircuitBreakerState verifies circuit breaker is in expected state
-func AssertCircuitBreakerState(t *testing.T, repo internal.Repository, endpoint string, expectedState string) {
+func AssertCircuitBreakerState(t *testing.T, repo hookd.Repository, endpoint string, expectedState string) {
 	t.Helper()
 
 	state, err := repo.GetCircuitBreakerState(ContextWithTimeout(), endpoint)
@@ -104,10 +104,10 @@ func AssertCircuitBreakerState(t *testing.T, repo internal.Repository, endpoint 
 }
 
 // AssertSubscriptionCount verifies the number of subscriptions for a tenant
-func AssertSubscriptionCount(t *testing.T, repo internal.Repository, tenantID string, expectedCount int) {
+func AssertSubscriptionCount(t *testing.T, repo hookd.Repository, tenantID string, expectedCount int) {
 	t.Helper()
 
-	subs, err := repo.ListSubscriptions(ContextWithTimeout(), &internal.SubscriptionFilter{
+	subs, err := repo.ListSubscriptions(ContextWithTimeout(), &hookd.SubscriptionFilter{
 		TenantID: tenantID,
 	})
 	require.NoError(t, err, "Should list subscriptions")
@@ -118,7 +118,7 @@ func AssertSubscriptionCount(t *testing.T, repo internal.Repository, tenantID st
 }
 
 // AssertIdempotencyKeyExists verifies an idempotency key exists
-func AssertIdempotencyKeyExists(t *testing.T, repo internal.Repository, key, subscriptionID string) {
+func AssertIdempotencyKeyExists(t *testing.T, repo hookd.Repository, key, subscriptionID string) {
 	t.Helper()
 
 	exists, err := repo.CheckIdempotency(ContextWithTimeout(), key, subscriptionID)
@@ -127,7 +127,7 @@ func AssertIdempotencyKeyExists(t *testing.T, repo internal.Repository, key, sub
 }
 
 // AssertIdempotencyKeyNotExists verifies an idempotency key does not exist
-func AssertIdempotencyKeyNotExists(t *testing.T, repo internal.Repository, key, subscriptionID string) {
+func AssertIdempotencyKeyNotExists(t *testing.T, repo hookd.Repository, key, subscriptionID string) {
 	t.Helper()
 
 	exists, err := repo.CheckIdempotency(ContextWithTimeout(), key, subscriptionID)

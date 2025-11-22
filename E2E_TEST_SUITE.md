@@ -138,7 +138,7 @@ go test ./internal/ -run "^TestE2E" -v
 === RUN   TestE2E_GracefulShutdown
 --- PASS: TestE2E_GracefulShutdown (2.10s)
 PASS
-ok  	github.com/itsatony/go-hookd/internal	25.534s
+ok  	github.com/itsatony/go-hookd	25.534s
 ```
 
 **Total Runtime**: ~26 seconds

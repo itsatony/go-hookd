@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/itsatony/go-hookd/internal"
+	"github.com/itsatony/go-hookd"
 )
 
 // =============================================================================
@@ -18,7 +18,7 @@ import (
 // TestDB provides database utilities for integration tests
 type TestDB struct {
 	t       *testing.T
-	repo    *internal.PostgresRepository
+	repo    *hookd.PostgresRepository
 	connStr string
 	db      *sql.DB
 }
@@ -41,7 +41,7 @@ func NewTestDB(t *testing.T) *TestDB {
 		t.Skip(fmt.Sprintf("PostgreSQL not reachable: %v\n%s", err, databaseSetupMessage()))
 	}
 
-	repo, err := internal.NewPostgresRepository(connStr)
+	repo, err := hookd.NewPostgresRepository(connStr)
 	if err != nil {
 		t.Fatalf("Failed to create repository: %v", err)
 	}
@@ -55,7 +55,7 @@ func NewTestDB(t *testing.T) *TestDB {
 }
 
 // Repository returns the repository instance
-func (tdb *TestDB) Repository() internal.Repository {
+func (tdb *TestDB) Repository() hookd.Repository {
 	return tdb.repo
 }
 
@@ -69,11 +69,11 @@ func (tdb *TestDB) Truncate() {
 	ctx := context.Background()
 
 	tables := []string{
-		internal.TableDeliveryAttempts,
-		internal.TableDeliveries,
-		internal.TableIdempotencyStore,
-		internal.TableCircuitBreakerState,
-		internal.TableSubscriptions,
+		hookd.TableDeliveryAttempts,
+		hookd.TableDeliveries,
+		hookd.TableIdempotencyStore,
+		hookd.TableCircuitBreakerState,
+		hookd.TableSubscriptions,
 	}
 
 	for _, table := range tables {
@@ -99,7 +99,7 @@ func (tdb *TestDB) Close() {
 // =============================================================================
 
 // TxTestFunc is a test function that receives a transactional repository
-type TxTestFunc func(t *testing.T, repo internal.Repository)
+type TxTestFunc func(t *testing.T, repo hookd.Repository)
 
 // WithTransaction runs a test function within a transaction that auto-rolls back
 // This provides test isolation and enables parallel test execution
@@ -116,7 +116,7 @@ func WithTransaction(t *testing.T, testFunc TxTestFunc) {
 	}
 
 	// Create transactional repository
-	config := internal.NewConfig(tdb.connStr)
+	config := hookd.NewConfig(tdb.connStr)
 	txRepo := &TransactionalRepository{
 		tx:     tx,
 		config: config,
@@ -143,14 +143,14 @@ func WithTransaction(t *testing.T, testFunc TxTestFunc) {
 // This allows tests to run in isolated transactions
 type TransactionalRepository struct {
 	tx     *sql.Tx
-	config *internal.Config
+	config *hookd.Config
 }
 
 // Note: TransactionalRepository implements most Repository methods
 // Some methods like BeginTx are not applicable within a transaction
 
 // CreateSubscription creates a subscription within the transaction
-func (r *TransactionalRepository) CreateSubscription(ctx context.Context, sub *internal.Subscription) error {
+func (r *TransactionalRepository) CreateSubscription(ctx context.Context, sub *hookd.Subscription) error {
 	query := `
 		INSERT INTO subscriptions (
 			id, tenant_id, url, event_types, secret, status,
@@ -168,7 +168,7 @@ func (r *TransactionalRepository) CreateSubscription(ctx context.Context, sub *i
 }
 
 // GetSubscription retrieves a subscription by ID within the transaction
-func (r *TransactionalRepository) GetSubscription(ctx context.Context, id string) (*internal.Subscription, error) {
+func (r *TransactionalRepository) GetSubscription(ctx context.Context, id string) (*hookd.Subscription, error) {
 	query := `
 		SELECT id, tenant_id, url, event_types, secret, status,
 			   headers, metadata, retry_policy, created_at, updated_at
@@ -176,7 +176,7 @@ func (r *TransactionalRepository) GetSubscription(ctx context.Context, id string
 		WHERE id = $1
 	`
 
-	var sub internal.Subscription
+	var sub hookd.Subscription
 	err := r.tx.QueryRowContext(ctx, query, id).Scan(
 		&sub.ID, &sub.TenantID, &sub.URL, &sub.EventTypes, &sub.Secret,
 		&sub.Status, &sub.Headers, &sub.Metadata, &sub.RetryPolicy,
@@ -184,14 +184,14 @@ func (r *TransactionalRepository) GetSubscription(ctx context.Context, id string
 	)
 
 	if err == sql.ErrNoRows {
-		return nil, internal.NewSubscriptionNotFoundError(id)
+		return nil, hookd.NewSubscriptionNotFoundError(id)
 	}
 
 	return &sub, err
 }
 
 // UpdateSubscription updates a subscription within the transaction
-func (r *TransactionalRepository) UpdateSubscription(ctx context.Context, sub *internal.Subscription) error {
+func (r *TransactionalRepository) UpdateSubscription(ctx context.Context, sub *hookd.Subscription) error {
 	query := `
 		UPDATE subscriptions
 		SET url = $2, event_types = $3, secret = $4, status = $5,
@@ -214,7 +214,7 @@ func (r *TransactionalRepository) UpdateSubscription(ctx context.Context, sub *i
 	}
 
 	if rows == 0 {
-		return internal.NewSubscriptionNotFoundError(sub.ID)
+		return hookd.NewSubscriptionNotFoundError(sub.ID)
 	}
 
 	return nil
@@ -235,14 +235,14 @@ func (r *TransactionalRepository) DeleteSubscription(ctx context.Context, id str
 	}
 
 	if rows == 0 {
-		return internal.NewSubscriptionNotFoundError(id)
+		return hookd.NewSubscriptionNotFoundError(id)
 	}
 
 	return nil
 }
 
 // ListSubscriptions lists subscriptions with filters within the transaction
-func (r *TransactionalRepository) ListSubscriptions(ctx context.Context, filter *internal.SubscriptionFilter) ([]*internal.Subscription, error) {
+func (r *TransactionalRepository) ListSubscriptions(ctx context.Context, filter *hookd.SubscriptionFilter) ([]*hookd.Subscription, error) {
 	// Simplified implementation for testing
 	query := `
 		SELECT id, tenant_id, url, event_types, secret, status,
@@ -257,9 +257,9 @@ func (r *TransactionalRepository) ListSubscriptions(ctx context.Context, filter 
 	}
 	defer rows.Close()
 
-	var subs []*internal.Subscription
+	var subs []*hookd.Subscription
 	for rows.Next() {
-		var sub internal.Subscription
+		var sub hookd.Subscription
 		err := rows.Scan(
 			&sub.ID, &sub.TenantID, &sub.URL, &sub.EventTypes, &sub.Secret,
 			&sub.Status, &sub.Headers, &sub.Metadata, &sub.RetryPolicy,
@@ -275,7 +275,7 @@ func (r *TransactionalRepository) ListSubscriptions(ctx context.Context, filter 
 }
 
 // CreateDelivery creates a delivery within the transaction
-func (r *TransactionalRepository) CreateDelivery(ctx context.Context, delivery *internal.Delivery) error {
+func (r *TransactionalRepository) CreateDelivery(ctx context.Context, delivery *hookd.Delivery) error {
 	query := `
 		INSERT INTO deliveries (
 			id, subscription_id, tenant_id, event_type, payload, status,
@@ -294,7 +294,7 @@ func (r *TransactionalRepository) CreateDelivery(ctx context.Context, delivery *
 }
 
 // GetDelivery retrieves a delivery by ID within the transaction
-func (r *TransactionalRepository) GetDelivery(ctx context.Context, id string) (*internal.Delivery, error) {
+func (r *TransactionalRepository) GetDelivery(ctx context.Context, id string) (*hookd.Delivery, error) {
 	query := `
 		SELECT id, subscription_id, tenant_id, event_type, payload, status,
 			   attempt_count, max_attempts, next_retry_at,
@@ -303,7 +303,7 @@ func (r *TransactionalRepository) GetDelivery(ctx context.Context, id string) (*
 		WHERE id = $1
 	`
 
-	var delivery internal.Delivery
+	var delivery hookd.Delivery
 	err := r.tx.QueryRowContext(ctx, query, id).Scan(
 		&delivery.ID, &delivery.SubscriptionID, &delivery.TenantID,
 		&delivery.EventType, &delivery.Payload, &delivery.Status,
@@ -313,14 +313,14 @@ func (r *TransactionalRepository) GetDelivery(ctx context.Context, id string) (*
 	)
 
 	if err == sql.ErrNoRows {
-		return nil, internal.NewDeliveryNotFoundError(id)
+		return nil, hookd.NewDeliveryNotFoundError(id)
 	}
 
 	return &delivery, err
 }
 
 // UpdateDelivery updates a delivery within the transaction
-func (r *TransactionalRepository) UpdateDelivery(ctx context.Context, delivery *internal.Delivery) error {
+func (r *TransactionalRepository) UpdateDelivery(ctx context.Context, delivery *hookd.Delivery) error {
 	query := `
 		UPDATE deliveries
 		SET status = $2, attempt_count = $3, next_retry_at = $4,
@@ -343,14 +343,14 @@ func (r *TransactionalRepository) UpdateDelivery(ctx context.Context, delivery *
 	}
 
 	if rows == 0 {
-		return internal.NewDeliveryNotFoundError(delivery.ID)
+		return hookd.NewDeliveryNotFoundError(delivery.ID)
 	}
 
 	return nil
 }
 
 // CreateDeliveryAttempt creates a delivery attempt within the transaction
-func (r *TransactionalRepository) CreateDeliveryAttempt(ctx context.Context, attempt *internal.DeliveryAttempt) error {
+func (r *TransactionalRepository) CreateDeliveryAttempt(ctx context.Context, attempt *hookd.DeliveryAttempt) error {
 	query := `
 		INSERT INTO delivery_attempts (
 			id, delivery_id, attempt_number, status_code, error,
@@ -368,7 +368,7 @@ func (r *TransactionalRepository) CreateDeliveryAttempt(ctx context.Context, att
 }
 
 // GetDeliveryAttempts retrieves all attempts for a delivery within the transaction
-func (r *TransactionalRepository) GetDeliveryAttempts(ctx context.Context, deliveryID string) ([]*internal.DeliveryAttempt, error) {
+func (r *TransactionalRepository) GetDeliveryAttempts(ctx context.Context, deliveryID string) ([]*hookd.DeliveryAttempt, error) {
 	query := `
 		SELECT id, delivery_id, attempt_number, status_code, error,
 			   response_body, duration_ms, attempted_at
@@ -383,9 +383,9 @@ func (r *TransactionalRepository) GetDeliveryAttempts(ctx context.Context, deliv
 	}
 	defer rows.Close()
 
-	var attempts []*internal.DeliveryAttempt
+	var attempts []*hookd.DeliveryAttempt
 	for rows.Next() {
-		var attempt internal.DeliveryAttempt
+		var attempt hookd.DeliveryAttempt
 		err := rows.Scan(
 			&attempt.ID, &attempt.DeliveryID, &attempt.AttemptNumber,
 			&attempt.StatusCode, &attempt.Error, &attempt.ResponseBody,
@@ -401,7 +401,7 @@ func (r *TransactionalRepository) GetDeliveryAttempts(ctx context.Context, deliv
 }
 
 // GetPendingDeliveries retrieves pending deliveries within the transaction
-func (r *TransactionalRepository) GetPendingDeliveries(ctx context.Context, limit int) ([]*internal.Delivery, error) {
+func (r *TransactionalRepository) GetPendingDeliveries(ctx context.Context, limit int) ([]*hookd.Delivery, error) {
 	query := `
 		SELECT id, subscription_id, tenant_id, event_type, payload, status,
 			   attempt_count, max_attempts, next_retry_at,
@@ -414,15 +414,15 @@ func (r *TransactionalRepository) GetPendingDeliveries(ctx context.Context, limi
 		FOR UPDATE SKIP LOCKED
 	`
 
-	rows, err := r.tx.QueryContext(ctx, query, internal.DeliveryStatusPending, time.Now(), limit)
+	rows, err := r.tx.QueryContext(ctx, query, hookd.DeliveryStatusPending, time.Now(), limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var deliveries []*internal.Delivery
+	var deliveries []*hookd.Delivery
 	for rows.Next() {
-		var delivery internal.Delivery
+		var delivery hookd.Delivery
 		err := rows.Scan(
 			&delivery.ID, &delivery.SubscriptionID, &delivery.TenantID,
 			&delivery.EventType, &delivery.Payload, &delivery.Status,
@@ -440,7 +440,7 @@ func (r *TransactionalRepository) GetPendingDeliveries(ctx context.Context, limi
 }
 
 // GetSubscriptionByTenantAndURL retrieves a subscription by tenant and URL
-func (r *TransactionalRepository) GetSubscriptionByTenantAndURL(ctx context.Context, tenantID, url string) (*internal.Subscription, error) {
+func (r *TransactionalRepository) GetSubscriptionByTenantAndURL(ctx context.Context, tenantID, url string) (*hookd.Subscription, error) {
 	query := `
 		SELECT id, tenant_id, url, event_types, secret, status,
 			   headers, metadata, retry_policy, created_at, updated_at
@@ -448,7 +448,7 @@ func (r *TransactionalRepository) GetSubscriptionByTenantAndURL(ctx context.Cont
 		WHERE tenant_id = $1 AND url = $2
 	`
 
-	var sub internal.Subscription
+	var sub hookd.Subscription
 	err := r.tx.QueryRowContext(ctx, query, tenantID, url).Scan(
 		&sub.ID, &sub.TenantID, &sub.URL, &sub.EventTypes, &sub.Secret,
 		&sub.Status, &sub.Headers, &sub.Metadata, &sub.RetryPolicy,
@@ -456,14 +456,14 @@ func (r *TransactionalRepository) GetSubscriptionByTenantAndURL(ctx context.Cont
 	)
 
 	if err == sql.ErrNoRows {
-		return nil, internal.NewSubscriptionNotFoundError(tenantID + "/" + url)
+		return nil, hookd.NewSubscriptionNotFoundError(tenantID + "/" + url)
 	}
 
 	return &sub, err
 }
 
 // BeginTx is not applicable for TransactionalRepository (already in transaction)
-func (r *TransactionalRepository) BeginTx(ctx context.Context) (internal.RepositoryTx, error) {
+func (r *TransactionalRepository) BeginTx(ctx context.Context) (hookd.RepositoryTx, error) {
 	return nil, fmt.Errorf("BeginTx not supported on TransactionalRepository")
 }
 
@@ -485,11 +485,11 @@ func (r *TransactionalRepository) StoreIdempotencyKey(ctx context.Context, key, 
 	return nil
 }
 
-func (r *TransactionalRepository) GetCircuitBreakerState(ctx context.Context, endpoint string) (*internal.CircuitBreakerState, error) {
+func (r *TransactionalRepository) GetCircuitBreakerState(ctx context.Context, endpoint string) (*hookd.CircuitBreakerState, error) {
 	return nil, nil
 }
 
-func (r *TransactionalRepository) UpdateCircuitBreakerState(ctx context.Context, state *internal.CircuitBreakerState) error {
+func (r *TransactionalRepository) UpdateCircuitBreakerState(ctx context.Context, state *hookd.CircuitBreakerState) error {
 	return nil
 }
 

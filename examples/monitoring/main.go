@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/itsatony/go-hookd/internal"
+	"github.com/itsatony/go-hookd"
 	"github.com/itsatony/go-version"
 )
 
@@ -245,7 +245,7 @@ func (m *MetricsCollector) PrintSummary() {
 // OBSERVABILITY EVENT BUS
 // =============================================================================
 
-// ObservabilityEventBus implements internal.EventBus with metrics collection
+// ObservabilityEventBus implements hookd.EventBus with metrics collection
 type ObservabilityEventBus struct {
 	metrics     *MetricsCollector
 	subscribers map[string][]func(interface{})
@@ -262,33 +262,33 @@ func NewObservabilityEventBus(metrics *MetricsCollector) *ObservabilityEventBus 
 func (b *ObservabilityEventBus) Publish(topic string, data interface{}) {
 	// Record metrics based on event topic
 	switch topic {
-	case internal.EventTopicDeliveryQueued:
+	case hookd.EventTopicDeliveryQueued:
 		b.metrics.RecordDeliveryQueued()
-	case internal.EventTopicDeliverySuccess:
+	case hookd.EventTopicDeliverySuccess:
 		if evt, ok := data.(map[string]interface{}); ok {
 			if duration, ok := evt["duration"].(time.Duration); ok {
 				b.metrics.RecordDeliverySuccess(duration)
 			}
 		}
-	case internal.EventTopicDeliveryFailed:
+	case hookd.EventTopicDeliveryFailed:
 		if evt, ok := data.(map[string]interface{}); ok {
 			if err, ok := evt["error"].(string); ok {
 				b.metrics.RecordDeliveryFailure(err)
 			}
 		}
-	case internal.EventTopicMetricsRetryTriggered:
+	case hookd.EventTopicMetricsRetryTriggered:
 		b.metrics.RecordDeliveryRetry()
-	case internal.EventTopicDeliveryDeadLetter:
+	case hookd.EventTopicDeliveryDeadLetter:
 		b.metrics.RecordDeliveryDeadLetter()
-	case internal.EventTopicCircuitOpened:
+	case hookd.EventTopicCircuitOpened:
 		b.metrics.RecordCircuitOpened()
-	case internal.EventTopicCircuitHalfOpen:
+	case hookd.EventTopicCircuitHalfOpen:
 		b.metrics.RecordCircuitHalfOpen()
-	case internal.EventTopicCircuitClosed:
+	case hookd.EventTopicCircuitClosed:
 		b.metrics.RecordCircuitClosed()
-	case internal.EventTopicAuditSubscriptionCreated:
+	case hookd.EventTopicAuditSubscriptionCreated:
 		b.metrics.RecordSubscriptionCreated()
-	case internal.EventTopicAuditSubscriptionDeleted:
+	case hookd.EventTopicAuditSubscriptionDeleted:
 		b.metrics.RecordSubscriptionDeleted()
 	}
 
@@ -377,24 +377,24 @@ func main() {
 	eventBus := NewObservabilityEventBus(metrics)
 
 	// Subscribe to delivery events for logging
-	eventBus.Subscribe(internal.EventTopicDeliveryQueued, func(data interface{}) {
+	eventBus.Subscribe(hookd.EventTopicDeliveryQueued, func(data interface{}) {
 		log.Printf("[EVENT] Delivery queued: %+v", data)
 	})
 
-	eventBus.Subscribe(internal.EventTopicDeliverySuccess, func(data interface{}) {
+	eventBus.Subscribe(hookd.EventTopicDeliverySuccess, func(data interface{}) {
 		log.Printf("[EVENT] Delivery succeeded: %+v", data)
 	})
 
-	eventBus.Subscribe(internal.EventTopicDeliveryFailed, func(data interface{}) {
+	eventBus.Subscribe(hookd.EventTopicDeliveryFailed, func(data interface{}) {
 		log.Printf("[EVENT] Delivery failed: %+v", data)
 	})
 
-	eventBus.Subscribe(internal.EventTopicCircuitOpened, func(data interface{}) {
+	eventBus.Subscribe(hookd.EventTopicCircuitOpened, func(data interface{}) {
 		log.Printf("[EVENT] Circuit opened: %+v", data)
 	})
 
 	// Create configuration
-	config := internal.NewConfig(dbURL)
+	config := hookd.NewConfig(dbURL)
 	config.WorkerCount = 5
 	config.QueuePollInterval = 1000
 	config.DefaultMaxRetries = 3
@@ -403,10 +403,10 @@ func main() {
 	config.DefaultBackoffFactor = 2.0
 
 	fmt.Println("Using mock repository (no database required)")
-	repo := internal.NewMockRepository()
+	repo := hookd.NewMockRepository()
 
 	// Initialize manager with observability event bus
-	manager, err := internal.NewManager(config, repo, internal.WithEventBus(eventBus))
+	manager, err := hookd.NewManager(config, repo, hookd.WithEventBus(eventBus))
 	if err != nil {
 		log.Fatalf("Failed to create manager: %v", err)
 	}
@@ -445,7 +445,7 @@ func main() {
 
 	// Create test subscriptions and deliveries
 	fmt.Println("Creating test subscriptions...")
-	sub1, _ := manager.CreateSubscription(ctx, &internal.CreateSubscriptionRequest{
+	sub1, _ := manager.CreateSubscription(ctx, &hookd.CreateSubscriptionRequest{
 		TenantID:   "tenant_metrics",
 		URL:        "https://webhook.site/test-endpoint-1",
 		EventTypes: []string{"user.created", "user.updated"},
@@ -453,7 +453,7 @@ func main() {
 	})
 	fmt.Printf("✓ Subscription created: %s\n", sub1.ID)
 
-	sub2, _ := manager.CreateSubscription(ctx, &internal.CreateSubscriptionRequest{
+	sub2, _ := manager.CreateSubscription(ctx, &hookd.CreateSubscriptionRequest{
 		TenantID:   "tenant_metrics",
 		URL:        "https://webhook.site/test-endpoint-2",
 		EventTypes: []string{"order.created"},
@@ -471,7 +471,7 @@ func main() {
 			eventType = "order.created"
 		}
 
-		delivery, err := manager.QueueDelivery(ctx, &internal.QueueDeliveryRequest{
+		delivery, err := manager.QueueDelivery(ctx, &hookd.QueueDeliveryRequest{
 			SubscriptionID: subID,
 			EventType:      eventType,
 			Payload: map[string]interface{}{

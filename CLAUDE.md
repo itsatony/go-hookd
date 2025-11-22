@@ -173,7 +173,7 @@ pubbing.SubscribeTyped[DeliveryEvent](
 ## Development Standards (Non-Negotiable)
 
 ### 1. No Magic Strings
-**ALL strings must be constants** in `internal/hookd.constants.go`:
+**ALL strings must be constants** in `hookd.constants.go`:
 ```go
 const (
     // Status
@@ -264,10 +264,12 @@ make test-integration  # Integration tests with testcontainers
 
 ## File Structure & Naming
 
-All internal files follow: `hookd.{type}.{module}.go`
+All package files follow: `hookd.{type}.{module}.go`
+
+Package files are located at the repository root (following Go conventions):
 
 ```
-internal/
+github.com/itsatony/go-hookd/
 ├── hookd.config.go              # Configuration structures
 ├── hookd.constants.go           # ALL constants (no magic strings)
 ├── hookd.errors.go              # Error definitions using go-cuserr
@@ -275,16 +277,19 @@ internal/
 ├── hookd.interfaces.go          # Core interfaces (Repository, etc.)
 ├── hookd.manager.go             # Main Manager implementation
 ├── hookd.subscription.go        # Subscription operations
-├── hookd.delivery.go            # Delivery engine
-├── hookd.retry.go               # Retry logic with exponential backoff
-├── hookd.circuit_breaker.go     # Circuit breaker implementation
-├── hookd.idempotency.go         # Idempotency handling
-├── hookd.security.go            # HMAC signature generation
+├── hookd.delivery.go            # Delivery engine (planned)
+├── hookd.retry.go               # Retry logic with exponential backoff (planned)
+├── hookd.circuit_breaker.go     # Circuit breaker implementation (planned)
+├── hookd.idempotency.go         # Idempotency handling (planned)
+├── hookd.security.go            # HMAC signature generation (planned)
 ├── hookd.repository.interface.go
 ├── hookd.repository.postgres.go
 ├── hookd.repository.mock.go
-├── hookd.observability.go       # Metrics, logging, tracing
-└── hookd.events.go              # Event definitions
+├── hookd.observability.go       # Metrics, logging, tracing (planned)
+├── hookd.events.go              # Event definitions
+├── examples/                    # Example applications
+├── migrations/                  # PostgreSQL migrations
+└── testutil/                    # Test utilities
 ```
 
 ---
@@ -408,7 +413,7 @@ Each phase has specific validation criteria. See `docs/implementation_guide.md` 
 ### Quick Commands
 ```python
 # Project overview
-aggregate(metric="count", scope=["internal/"])
+aggregate(metric="count", scope=["."])
 
 # Find specific symbol
 query(q="Manager", t="struct", m="x", ctx="full")
@@ -530,7 +535,7 @@ func TestIntegration_EndToEnd(t *testing.T) {
 ```bash
 # MUST pass
 go test -race ./...
-go test -race -count=100 ./internal/... -run TestDelivery_Concurrent
+go test -race -count=100 . -run TestDelivery_Concurrent
 ```
 
 ---

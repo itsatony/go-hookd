@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/itsatony/go-hookd/internal"
+	"github.com/itsatony/go-hookd"
 )
 
 // =============================================================================
@@ -16,12 +16,12 @@ import (
 // ScenarioBuilder provides a fluent API for creating complex test scenarios
 type ScenarioBuilder struct {
 	t    *testing.T
-	repo internal.Repository
+	repo hookd.Repository
 
 	// Created entities
-	subscription *internal.Subscription
-	deliveries   []*internal.Delivery
-	attempts     []*internal.DeliveryAttempt
+	subscription *hookd.Subscription
+	deliveries   []*hookd.Delivery
+	attempts     []*hookd.DeliveryAttempt
 
 	// Configuration
 	tenantID   string
@@ -33,7 +33,7 @@ type ScenarioBuilder struct {
 }
 
 // NewScenario creates a new scenario builder
-func NewScenario(t *testing.T, repo internal.Repository) *ScenarioBuilder {
+func NewScenario(t *testing.T, repo hookd.Repository) *ScenarioBuilder {
 	return &ScenarioBuilder{
 		t:          t,
 		repo:       repo,
@@ -93,18 +93,18 @@ func (b *ScenarioBuilder) WithDelivery(eventType string, payload map[string]inte
 		b.t.Fatal("Must create subscription before adding delivery")
 	}
 
-	deliveryID, err := internal.GenerateDeliveryID()
+	deliveryID, err := hookd.GenerateDeliveryID()
 	if err != nil {
 		b.t.Fatalf("Failed to generate delivery ID: %v", err)
 	}
 
-	delivery := &internal.Delivery{
+	delivery := &hookd.Delivery{
 		ID:             deliveryID,
 		SubscriptionID: b.subscription.ID,
 		TenantID:       b.subscription.TenantID,
 		EventType:      eventType,
 		Payload:        payload,
-		Status:         internal.DeliveryStatusPending,
+		Status:         hookd.DeliveryStatusPending,
 		AttemptCount:   0,
 		MaxAttempts:    3,
 		CreatedAt:      time.Now(),
@@ -123,12 +123,12 @@ func (b *ScenarioBuilder) WithFailedAttempts(count int) *ScenarioBuilder {
 	delivery := b.deliveries[len(b.deliveries)-1]
 
 	for i := 0; i < count; i++ {
-		attemptID, err := internal.GenerateAttemptID()
+		attemptID, err := hookd.GenerateAttemptID()
 		if err != nil {
 			b.t.Fatalf("Failed to generate attempt ID: %v", err)
 		}
 
-		attempt := &internal.DeliveryAttempt{
+		attempt := &hookd.DeliveryAttempt{
 			ID:            attemptID,
 			DeliveryID:    delivery.ID,
 			AttemptNumber: i + 1,
@@ -141,7 +141,7 @@ func (b *ScenarioBuilder) WithFailedAttempts(count int) *ScenarioBuilder {
 	}
 
 	delivery.AttemptCount = count
-	delivery.Status = internal.DeliveryStatusFailed
+	delivery.Status = hookd.DeliveryStatusFailed
 
 	return b
 }
@@ -154,13 +154,13 @@ func (b *ScenarioBuilder) WithSuccessfulAttempt() *ScenarioBuilder {
 
 	delivery := b.deliveries[len(b.deliveries)-1]
 
-	attemptID, err := internal.GenerateAttemptID()
+	attemptID, err := hookd.GenerateAttemptID()
 	if err != nil {
 		b.t.Fatalf("Failed to generate attempt ID: %v", err)
 	}
 
 	attemptTime := time.Now()
-	attempt := &internal.DeliveryAttempt{
+	attempt := &hookd.DeliveryAttempt{
 		ID:            attemptID,
 		DeliveryID:    delivery.ID,
 		AttemptNumber: delivery.AttemptCount + 1,
@@ -172,7 +172,7 @@ func (b *ScenarioBuilder) WithSuccessfulAttempt() *ScenarioBuilder {
 	b.attempts = append(b.attempts, attempt)
 
 	delivery.AttemptCount++
-	delivery.Status = internal.DeliveryStatusSuccess
+	delivery.Status = hookd.DeliveryStatusSuccess
 	delivery.CompletedAt = &attemptTime
 
 	return b
@@ -183,12 +183,12 @@ func (b *ScenarioBuilder) Build() *Scenario {
 	ctx := context.Background()
 
 	// Create subscription
-	subID, err := internal.GenerateSubscriptionID()
+	subID, err := hookd.GenerateSubscriptionID()
 	if err != nil {
 		b.t.Fatalf("Failed to generate subscription ID: %v", err)
 	}
 
-	sub := &internal.Subscription{
+	sub := &hookd.Subscription{
 		ID:         subID,
 		TenantID:   b.tenantID,
 		URL:        b.url,
@@ -196,7 +196,7 @@ func (b *ScenarioBuilder) Build() *Scenario {
 		Secret:     b.secret,
 		Headers:    b.headers,
 		Metadata:   b.metadata,
-		Status:     internal.SubscriptionStatusActive,
+		Status:     hookd.SubscriptionStatusActive,
 		CreatedAt:  time.Now(),
 		UpdatedAt:  time.Now(),
 	}
@@ -230,9 +230,9 @@ func (b *ScenarioBuilder) Build() *Scenario {
 
 // Scenario represents a complete test scenario with all created entities
 type Scenario struct {
-	Subscription *internal.Subscription
-	Deliveries   []*internal.Delivery
-	Attempts     []*internal.DeliveryAttempt
+	Subscription *hookd.Subscription
+	Deliveries   []*hookd.Delivery
+	Attempts     []*hookd.DeliveryAttempt
 }
 
 // =============================================================================
@@ -240,7 +240,7 @@ type Scenario struct {
 // =============================================================================
 
 // StandardRetryScenario creates a scenario with a failed delivery that needs retry
-func StandardRetryScenario(t *testing.T, repo internal.Repository) *Scenario {
+func StandardRetryScenario(t *testing.T, repo hookd.Repository) *Scenario {
 	return NewScenario(t, repo).
 		WithSubscription("tenant_retry", "https://example.com/retry").
 		WithDelivery("order.created", map[string]interface{}{
@@ -253,7 +253,7 @@ func StandardRetryScenario(t *testing.T, repo internal.Repository) *Scenario {
 
 // CircuitBreakerScenario creates a scenario with multiple failed deliveries
 // that should trigger a circuit breaker
-func CircuitBreakerScenario(t *testing.T, repo internal.Repository) *Scenario {
+func CircuitBreakerScenario(t *testing.T, repo hookd.Repository) *Scenario {
 	builder := NewScenario(t, repo).
 		WithSubscription("tenant_cb", "https://example.com/flaky")
 
@@ -268,7 +268,7 @@ func CircuitBreakerScenario(t *testing.T, repo internal.Repository) *Scenario {
 }
 
 // DeadLetterQueueScenario creates a delivery that exhausted all retries
-func DeadLetterQueueScenario(t *testing.T, repo internal.Repository) *Scenario {
+func DeadLetterQueueScenario(t *testing.T, repo hookd.Repository) *Scenario {
 	return NewScenario(t, repo).
 		WithSubscription("tenant_dlq", "https://example.com/dead").
 		WithDelivery("payment.failed", map[string]interface{}{
@@ -279,7 +279,7 @@ func DeadLetterQueueScenario(t *testing.T, repo internal.Repository) *Scenario {
 }
 
 // SuccessfulDeliveryScenario creates a completed successful delivery
-func SuccessfulDeliveryScenario(t *testing.T, repo internal.Repository) *Scenario {
+func SuccessfulDeliveryScenario(t *testing.T, repo hookd.Repository) *Scenario {
 	return NewScenario(t, repo).
 		WithSubscription("tenant_success", "https://example.com/success").
 		WithDelivery("user.updated", map[string]interface{}{
@@ -290,7 +290,7 @@ func SuccessfulDeliveryScenario(t *testing.T, repo internal.Repository) *Scenari
 }
 
 // MultiTenantScenario creates subscriptions and deliveries for multiple tenants
-func MultiTenantScenario(t *testing.T, repo internal.Repository, tenantCount int) []*Scenario {
+func MultiTenantScenario(t *testing.T, repo hookd.Repository, tenantCount int) []*Scenario {
 	scenarios := make([]*Scenario, tenantCount)
 
 	for i := 0; i < tenantCount; i++ {
@@ -314,7 +314,7 @@ func MultiTenantScenario(t *testing.T, repo internal.Repository, tenantCount int
 // SubscriptionBuilder provides a fluent API for creating subscriptions
 type SubscriptionBuilder struct {
 	t    *testing.T
-	repo internal.Repository
+	repo hookd.Repository
 
 	tenantID    string
 	url         string
@@ -323,11 +323,11 @@ type SubscriptionBuilder struct {
 	status      string
 	headers     map[string]string
 	metadata    map[string]interface{}
-	retryPolicy *internal.RetryPolicy
+	retryPolicy *hookd.RetryPolicy
 }
 
 // NewSubscription creates a new subscription builder with defaults
-func NewSubscription(t *testing.T, repo internal.Repository) *SubscriptionBuilder {
+func NewSubscription(t *testing.T, repo hookd.Repository) *SubscriptionBuilder {
 	return &SubscriptionBuilder{
 		t:          t,
 		repo:       repo,
@@ -335,7 +335,7 @@ func NewSubscription(t *testing.T, repo internal.Repository) *SubscriptionBuilde
 		url:        "https://example.com/webhook",
 		eventTypes: []string{"test.event"},
 		secret:     "test_secret",
-		status:     internal.SubscriptionStatusActive,
+		status:     hookd.SubscriptionStatusActive,
 	}
 }
 
@@ -382,19 +382,19 @@ func (b *SubscriptionBuilder) WithMetadata(metadata map[string]interface{}) *Sub
 }
 
 // WithRetryPolicy sets a custom retry policy
-func (b *SubscriptionBuilder) WithRetryPolicy(policy *internal.RetryPolicy) *SubscriptionBuilder {
+func (b *SubscriptionBuilder) WithRetryPolicy(policy *hookd.RetryPolicy) *SubscriptionBuilder {
 	b.retryPolicy = policy
 	return b
 }
 
 // Create creates the subscription in the repository
-func (b *SubscriptionBuilder) Create() *internal.Subscription {
-	subID, err := internal.GenerateSubscriptionID()
+func (b *SubscriptionBuilder) Create() *hookd.Subscription {
+	subID, err := hookd.GenerateSubscriptionID()
 	if err != nil {
 		b.t.Fatalf("Failed to generate subscription ID: %v", err)
 	}
 
-	sub := &internal.Subscription{
+	sub := &hookd.Subscription{
 		ID:          subID,
 		TenantID:    b.tenantID,
 		URL:         b.url,
@@ -423,7 +423,7 @@ func (b *SubscriptionBuilder) Create() *internal.Subscription {
 // DeliveryBuilder provides a fluent API for creating deliveries
 type DeliveryBuilder struct {
 	t    *testing.T
-	repo internal.Repository
+	repo hookd.Repository
 
 	subscriptionID string
 	tenantID       string
@@ -436,7 +436,7 @@ type DeliveryBuilder struct {
 }
 
 // NewDelivery creates a new delivery builder
-func NewDelivery(t *testing.T, repo internal.Repository, subscriptionID string) *DeliveryBuilder {
+func NewDelivery(t *testing.T, repo hookd.Repository, subscriptionID string) *DeliveryBuilder {
 	return &DeliveryBuilder{
 		t:              t,
 		repo:           repo,
@@ -444,7 +444,7 @@ func NewDelivery(t *testing.T, repo internal.Repository, subscriptionID string) 
 		tenantID:       "test_tenant",
 		eventType:      "test.event",
 		payload:        map[string]interface{}{"test": "data"},
-		status:         internal.DeliveryStatusPending,
+		status:         hookd.DeliveryStatusPending,
 		maxAttempts:    3,
 	}
 }
@@ -486,13 +486,13 @@ func (b *DeliveryBuilder) WithIdempotencyKey(key string) *DeliveryBuilder {
 }
 
 // Create creates the delivery in the repository
-func (b *DeliveryBuilder) Create() *internal.Delivery {
-	deliveryID, err := internal.GenerateDeliveryID()
+func (b *DeliveryBuilder) Create() *hookd.Delivery {
+	deliveryID, err := hookd.GenerateDeliveryID()
 	if err != nil {
 		b.t.Fatalf("Failed to generate delivery ID: %v", err)
 	}
 
-	delivery := &internal.Delivery{
+	delivery := &hookd.Delivery{
 		ID:             deliveryID,
 		SubscriptionID: b.subscriptionID,
 		TenantID:       b.tenantID,

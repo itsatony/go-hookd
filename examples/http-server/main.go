@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/itsatony/go-hookd/internal"
+	"github.com/itsatony/go-hookd"
 	"github.com/itsatony/go-version"
 )
 
@@ -21,12 +21,12 @@ import (
 // =============================================================================
 
 type Server struct {
-	manager *internal.Manager
+	manager *hookd.Manager
 	port    string
 	server  *http.Server
 }
 
-func NewServer(manager *internal.Manager, port string) *Server {
+func NewServer(manager *hookd.Manager, port string) *Server {
 	return &Server{
 		manager: manager,
 		port:    port,
@@ -92,7 +92,7 @@ type CreateSubscriptionRequestHTTP struct {
 	Secret      string                 `json:"secret"`
 	Headers     map[string]string      `json:"headers,omitempty"`
 	Metadata    map[string]interface{} `json:"metadata,omitempty"`
-	RetryPolicy *internal.RetryPolicy  `json:"retry_policy,omitempty"`
+	RetryPolicy *hookd.RetryPolicy  `json:"retry_policy,omitempty"`
 }
 
 func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request) {
@@ -102,7 +102,7 @@ func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	sub, err := s.manager.CreateSubscription(r.Context(), &internal.CreateSubscriptionRequest{
+	sub, err := s.manager.CreateSubscription(r.Context(), &hookd.CreateSubscriptionRequest{
 		TenantID:    req.TenantID,
 		URL:         req.URL,
 		EventTypes:  req.EventTypes,
@@ -140,7 +140,7 @@ type UpdateSubscriptionRequestHTTP struct {
 	EventTypes  *[]string               `json:"event_types,omitempty"`
 	Headers     *map[string]string      `json:"headers,omitempty"`
 	Metadata    *map[string]interface{} `json:"metadata,omitempty"`
-	RetryPolicy *internal.RetryPolicy   `json:"retry_policy,omitempty"`
+	RetryPolicy *hookd.RetryPolicy   `json:"retry_policy,omitempty"`
 	Status      *string                 `json:"status,omitempty"`
 }
 
@@ -153,7 +153,7 @@ func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	sub, err := s.manager.UpdateSubscription(r.Context(), id, &internal.UpdateSubscriptionRequest{
+	sub, err := s.manager.UpdateSubscription(r.Context(), id, &hookd.UpdateSubscriptionRequest{
 		URL:         req.URL,
 		EventTypes:  req.EventTypes,
 		Headers:     req.Headers,
@@ -189,7 +189,7 @@ func (s *Server) handleDeleteSubscription(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) handleListSubscriptions(w http.ResponseWriter, r *http.Request) {
-	filter := &internal.SubscriptionFilter{
+	filter := &hookd.SubscriptionFilter{
 		TenantID: r.URL.Query().Get("tenant_id"),
 		Status:   r.URL.Query().Get("status"),
 	}
@@ -258,7 +258,7 @@ func (s *Server) handleQueueDelivery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	delivery, err := s.manager.QueueDelivery(r.Context(), &internal.QueueDeliveryRequest{
+	delivery, err := s.manager.QueueDelivery(r.Context(), &hookd.QueueDeliveryRequest{
 		SubscriptionID: req.SubscriptionID,
 		EventType:      req.EventType,
 		Payload:        req.Payload,
@@ -389,7 +389,7 @@ func main() {
 	fmt.Printf("Port: %s\n\n", port)
 
 	// Create configuration
-	config := internal.NewConfig(dbURL)
+	config := hookd.NewConfig(dbURL)
 	config.WorkerCount = 5
 	config.QueuePollInterval = 1000
 	config.DefaultMaxRetries = 3
@@ -399,10 +399,10 @@ func main() {
 
 	// For this example, use mock repository
 	fmt.Println("Using mock repository (no database required)")
-	repo := internal.NewMockRepository()
+	repo := hookd.NewMockRepository()
 
 	// Initialize manager
-	manager, err := internal.NewManager(config, repo)
+	manager, err := hookd.NewManager(config, repo)
 	if err != nil {
 		log.Fatalf("Failed to create manager: %v", err)
 	}
