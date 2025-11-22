@@ -1,0 +1,391 @@
+# golangci-lint configuration for go-hookd
+# vAudience.AI GmbH - "Excellence. Always."
+#
+# This configuration enforces production-ready code quality standards:
+# - No unchecked errors
+# - No magic strings (use constants)
+# - Thread-safe code patterns
+# - Security best practices
+# - Code complexity limits
+# - Comprehensive linting
+
+run:
+  # Timeout for analysis
+  timeout: 5m
+
+  # Include test files
+  tests: true
+
+  # Which dirs to skip: issues from them won't be reported
+  skip-dirs:
+    - vendor
+    - testdata
+    - .git
+    - .github
+
+  # Which files to skip: they will be analyzed, but issues from them won't be reported
+  skip-files:
+    - ".*\\.pb\\.go$"
+    - ".*_generated\\.go$"
+
+# Output configuration
+output:
+  # Colored output
+  format: colored-line-number
+
+  # Print lines of code with issue
+  print-issued-lines: true
+
+  # Print linter name in the end of issue text
+  print-linter-name: true
+
+  # Make issues output unique by line
+  uniq-by-line: true
+
+  # Sort results by: filepath, line and column
+  sort-results: true
+
+# Linters configuration
+linters:
+  # Disable all linters by default
+  disable-all: true
+
+  # Enable specific linters
+  enable:
+    # Error handling
+    - errcheck        # Checks for unchecked errors (CRITICAL for vAI standards)
+    - errorlint       # Find code that will cause problems with Go 1.13+ error wrapping
+    - goerr113        # Enforce error wrapping and custom error types
+
+    # Code quality
+    - gofmt           # Check if code is formatted with gofmt
+    - goimports       # Check if imports are sorted correctly
+    - govet           # Reports suspicious constructs
+    - ineffassign     # Detects ineffectual assignments
+    - staticcheck     # Static analysis checks
+    - unused          # Checks for unused constants, variables, functions and types
+    - typecheck       # Type checking
+
+    # Security
+    - gosec           # Inspects source code for security problems
+
+    # Bugs
+    - bodyclose       # Checks whether HTTP response body is closed
+    - contextcheck    # Check whether the function uses a non-inherited context
+    - nilerr          # Finds code that returns nil even if it checks that error is not nil
+    - nilnil          # Checks that there is no simultaneous return of nil error and nil value
+    - noctx           # Finds sending http request without context.Context
+    - rowserrcheck    # Checks whether Err of rows is checked successfully
+    - sqlclosecheck   # Checks that sql.Rows and sql.Stmt are closed
+
+    # Style
+    - goconst         # Finds repeated strings that could be constants
+    - gocritic        # Provides diagnostics that check for bugs, performance and style issues
+    - gocyclo         # Computes cyclomatic complexity
+    - godot           # Check if comments end in a period
+    - misspell        # Finds commonly misspelled English words in comments
+    - revive          # Fast, configurable, extensible, flexible, and beautiful linter
+    - stylecheck      # Replacement for golint
+    - unconvert       # Remove unnecessary type conversions
+    - unparam         # Reports unused function parameters
+
+    # Performance
+    - prealloc        # Finds slice declarations that could potentially be preallocated
+
+    # Complexity
+    - funlen          # Tool for detection of long functions
+    - gocognit        # Computes and checks cognitive complexity
+    - nestif          # Reports deeply nested if statements
+
+    # Testing
+    - thelper         # Detects tests helpers without t.Helper() call
+    - tparallel       # Detects inappropriate usage of t.Parallel()
+
+# Linters settings
+linters-settings:
+  # errcheck: Check for unchecked errors
+  errcheck:
+    # Report about not checking of errors in type assertions: `a := b.(MyStruct)`
+    check-type-assertions: true
+
+    # Report about assignment of errors to blank identifier: `num, _ := strconv.Atoi(s)`
+    check-blank: true
+
+    # Exclude functions to skip (useful for defer Close())
+    exclude-functions:
+      - (io.Closer).Close
+      - (*database/sql.Rows).Close
+      - (*database/sql.Stmt).Close
+
+  # govet: Official Go tool
+  govet:
+    # Report about shadowed variables
+    check-shadowing: true
+
+    # Settings per analyzer
+    settings:
+      printf:
+        # Run printf checks
+        funcs:
+          - (github.com/golangci/golangci-lint/pkg/logutils.Log).Infof
+          - (github.com/golangci/golangci-lint/pkg/logutils.Log).Warnf
+          - (github.com/golangci/golangci-lint/pkg/logutils.Log).Errorf
+          - (github.com/golangci/golangci-lint/pkg/logutils.Log).Fatalf
+
+    # Enable all analyzers
+    enable-all: true
+
+  # gocyclo: Cyclomatic complexity
+  gocyclo:
+    # Minimal cyclomatic complexity to report
+    min-complexity: 15
+
+  # gocognit: Cognitive complexity
+  gocognit:
+    # Minimal cognitive complexity to report
+    min-complexity: 20
+
+  # goconst: Repeated strings
+  goconst:
+    # Minimal length of string constant
+    min-len: 3
+
+    # Minimal occurrences count to trigger detection
+    min-occurrences: 3
+
+    # Ignore test files
+    ignore-tests: false
+
+    # Look for existing constants matching the values
+    match-constant: true
+
+    # Search also for duplicated numbers
+    numbers: true
+
+    # Minimum value, only works with goconst.numbers
+    min: 3
+
+    # Maximum value, only works with goconst.numbers
+    max: 100
+
+  # funlen: Function length
+  funlen:
+    # Lines of code
+    lines: 100
+
+    # Count of statements
+    statements: 50
+
+  # nestif: Nested if statements
+  nestif:
+    # Minimal complexity of if statements to report
+    min-complexity: 5
+
+  # gocritic: Comprehensive linter
+  gocritic:
+    # Enable multiple checks by tags
+    enabled-tags:
+      - diagnostic
+      - style
+      - performance
+      - experimental
+      - opinionated
+
+    # Disable specific checks
+    disabled-checks:
+      - whyNoLint  # We'll handle linter comments our way
+      - unnamedResult  # We allow unnamed returns in some cases
+
+  # revive: Replacement for golint
+  revive:
+    # Maximum number of open files at the same time
+    max-open-files: 2048
+
+    # Enable all rules by default, disable specific ones below
+    enable-all-rules: true
+
+    rules:
+      # Disabled rules
+      - name: add-constant
+        disabled: true  # We use goconst for this
+      - name: argument-limit
+        disabled: false
+        arguments: [5]  # Max 5 arguments per function
+      - name: cognitive-complexity
+        disabled: false
+        arguments: [20]  # Max cognitive complexity
+      - name: cyclomatic
+        disabled: false
+        arguments: [15]  # Max cyclomatic complexity
+      - name: file-header
+        disabled: true  # We don't enforce file headers
+      - name: function-length
+        disabled: false
+        arguments: [50, 0]  # Max 50 statements
+      - name: line-length-limit
+        disabled: false
+        arguments: [120]  # Max 120 characters per line
+      - name: max-public-structs
+        disabled: true  # No limit on public structs
+
+  # gosec: Security
+  gosec:
+    # Available rules: https://github.com/securego/gosec#available-rules
+    includes:
+      - G101  # Look for hard coded credentials
+      - G102  # Bind to all interfaces
+      - G103  # Audit the use of unsafe block
+      - G104  # Audit errors not checked
+      - G106  # Audit the use of ssh.InsecureIgnoreHostKey
+      - G107  # Url provided to HTTP request as taint input
+      - G108  # Profiling endpoint automatically exposed
+      - G109  # Potential Integer overflow made by strconv.Atoi result conversion
+      - G110  # Potential DoS vulnerability via decompression bomb
+      - G201  # SQL query construction using format string
+      - G202  # SQL query construction using string concatenation
+      - G203  # Use of unescaped data in HTML templates
+      - G204  # Audit use of command execution
+      - G301  # Poor file permissions used when creating a directory
+      - G302  # Poor file permissions used when creation file or using chmod
+      - G303  # Creating tempfile using a predictable path
+      - G304  # File path provided as taint input
+      - G305  # File traversal when extracting zip archive
+      - G306  # Poor file permissions used when writing to a new file
+      - G307  # Deferring a method which returns an error
+      - G401  # Detect the usage of DES, RC4, MD5 or SHA1
+      - G402  # Look for bad TLS connection settings
+      - G403  # Ensure minimum RSA key length of 2048 bits
+      - G404  # Insecure random number source (rand)
+      - G501  # Import blocklist: crypto/md5
+      - G502  # Import blocklist: crypto/des
+      - G503  # Import blocklist: crypto/rc4
+      - G504  # Import blocklist: net/http/cgi
+      - G505  # Import blocklist: crypto/sha1
+      - G601  # Implicit memory aliasing in for loop
+
+  # stylecheck: Style guidelines
+  stylecheck:
+    # Select checks to enable
+    checks: ["all", "-ST1000", "-ST1003", "-ST1016", "-ST1020", "-ST1021", "-ST1022"]
+    # ST1000: Incorrect or missing package comment
+    # ST1003: Poorly chosen identifier (we allow some variations)
+    # ST1016: methods on the same type should have the same receiver name
+    # ST1020: comment should be of the form "Package packagename ..."
+    # ST1021: comment should be of the form "Type typename ..."
+    # ST1022: comment should be of the form "Var varname ..."
+
+    # Enable dot-imports checking
+    dot-import-whitelist: []
+
+    # Enforce initialisms (HTTP, API, ID, etc.)
+    initialisms:
+      - ACL
+      - API
+      - ASCII
+      - CPU
+      - CSS
+      - DNS
+      - EOF
+      - GUID
+      - HTML
+      - HTTP
+      - HTTPS
+      - ID
+      - IP
+      - JSON
+      - QPS
+      - RAM
+      - RPC
+      - SLA
+      - SMTP
+      - SQL
+      - SSH
+      - TCP
+      - TLS
+      - TTL
+      - UDP
+      - UI
+      - GID
+      - UID
+      - UUID
+      - URI
+      - URL
+      - UTF8
+      - VM
+      - XML
+      - XMPP
+      - XSRF
+      - XSS
+      - HMAC
+
+  # misspell: Common misspellings
+  misspell:
+    # Locale to use (US or UK)
+    locale: US
+
+# Issues configuration
+issues:
+  # Exclude known issues
+  exclude-rules:
+    # Exclude some linters from running on test files
+    - path: _test\.go
+      linters:
+        - gocyclo
+        - errcheck
+        - dupl
+        - gosec
+        - funlen
+        - gocognit
+    # Exclude lll issues for long lines with go:generate
+    - linters:
+        - lll
+      source: "^//go:generate "
+
+    # Exclude some staticcheck messages
+    - linters:
+        - staticcheck
+      text: "SA9003:"
+
+    # Exclude godot for TODO/FIXME comments
+    - linters:
+        - godot
+      source: "^// (TODO|FIXME):"
+
+  # Show only new issues: if there are unstaged changes or untracked files,
+  # only those changes are analyzed
+  new: false
+
+  # Fix found issues (if it's supported by the linter)
+  fix: false
+
+  # Maximum issues count per one linter
+  max-issues-per-linter: 0
+
+  # Maximum count of issues with the same text
+  max-same-issues: 0
+
+  # Show all issues from a linter
+  exclude-use-default: false
+
+severity:
+  # Default severity for issues
+  default-severity: error
+
+  # Rules for calculating severity
+  rules:
+    - linters:
+        - errcheck
+        - gosec
+        - govet
+      severity: error
+
+    - linters:
+        - staticcheck
+        - unused
+        - ineffassign
+      severity: warning
+
+    - linters:
+        - misspell
+        - godot
+      severity: info
