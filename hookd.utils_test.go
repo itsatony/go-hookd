@@ -386,3 +386,336 @@ func TestEdgeCases(t *testing.T) {
 		assert.Equal(t, 100*time.Millisecond, backoff)
 	})
 }
+
+// =============================================================================
+// COMPLEX POINTER HELPERS TESTS
+// =============================================================================
+
+func TestStringSlicePtr(t *testing.T) {
+	t.Run("nil slice", func(t *testing.T) {
+		var nilSlice []string
+		result := StringSlicePtr(nilSlice)
+		require.NotNil(t, result)
+		assert.Nil(t, *result)
+	})
+
+	t.Run("empty slice", func(t *testing.T) {
+		result := StringSlicePtr([]string{})
+		require.NotNil(t, result)
+		assert.Empty(t, *result)
+	})
+
+	t.Run("with elements", func(t *testing.T) {
+		input := []string{"order.created", "order.updated", "order.deleted"}
+		result := StringSlicePtr(input)
+		require.NotNil(t, result)
+		assert.Equal(t, input, *result)
+	})
+}
+
+func TestStringMapPtr(t *testing.T) {
+	t.Run("nil map", func(t *testing.T) {
+		var nilMap map[string]string
+		result := StringMapPtr(nilMap)
+		require.NotNil(t, result)
+		assert.Nil(t, *result)
+	})
+
+	t.Run("empty map", func(t *testing.T) {
+		result := StringMapPtr(map[string]string{})
+		require.NotNil(t, result)
+		assert.Empty(t, *result)
+	})
+
+	t.Run("with entries", func(t *testing.T) {
+		input := map[string]string{
+			"X-Custom-Header": "value1",
+			"Authorization":   "Bearer token",
+		}
+		result := StringMapPtr(input)
+		require.NotNil(t, result)
+		assert.Equal(t, input, *result)
+	})
+}
+
+func TestInterfaceMapPtr(t *testing.T) {
+	t.Run("nil map", func(t *testing.T) {
+		var nilMap map[string]interface{}
+		result := InterfaceMapPtr(nilMap)
+		require.NotNil(t, result)
+		assert.Nil(t, *result)
+	})
+
+	t.Run("empty map", func(t *testing.T) {
+		result := InterfaceMapPtr(map[string]interface{}{})
+		require.NotNil(t, result)
+		assert.Empty(t, *result)
+	})
+
+	t.Run("with mixed types", func(t *testing.T) {
+		input := map[string]interface{}{
+			"string": "value",
+			"int":    42,
+			"bool":   true,
+			"float":  3.14,
+		}
+		result := InterfaceMapPtr(input)
+		require.NotNil(t, result)
+		assert.Equal(t, input, *result)
+	})
+}
+
+// =============================================================================
+// VALUE HELPERS TESTS
+// =============================================================================
+
+func TestStringValue(t *testing.T) {
+	t.Run("nil pointer", func(t *testing.T) {
+		result := StringValue(nil)
+		assert.Equal(t, "", result)
+	})
+
+	t.Run("empty string", func(t *testing.T) {
+		result := StringValue(StringPtr(""))
+		assert.Equal(t, "", result)
+	})
+
+	t.Run("non-empty string", func(t *testing.T) {
+		result := StringValue(StringPtr("hello world"))
+		assert.Equal(t, "hello world", result)
+	})
+}
+
+func TestIntValue(t *testing.T) {
+	t.Run("nil pointer", func(t *testing.T) {
+		result := IntValue(nil)
+		assert.Equal(t, 0, result)
+	})
+
+	t.Run("zero", func(t *testing.T) {
+		result := IntValue(IntPtr(0))
+		assert.Equal(t, 0, result)
+	})
+
+	t.Run("positive", func(t *testing.T) {
+		result := IntValue(IntPtr(42))
+		assert.Equal(t, 42, result)
+	})
+
+	t.Run("negative", func(t *testing.T) {
+		result := IntValue(IntPtr(-10))
+		assert.Equal(t, -10, result)
+	})
+}
+
+func TestBoolValue(t *testing.T) {
+	t.Run("nil pointer", func(t *testing.T) {
+		result := BoolValue(nil)
+		assert.Equal(t, false, result)
+	})
+
+	t.Run("false", func(t *testing.T) {
+		result := BoolValue(BoolPtr(false))
+		assert.Equal(t, false, result)
+	})
+
+	t.Run("true", func(t *testing.T) {
+		result := BoolValue(BoolPtr(true))
+		assert.Equal(t, true, result)
+	})
+}
+
+// =============================================================================
+// COPY HELPERS TESTS
+// =============================================================================
+
+func TestCopyStringSlice(t *testing.T) {
+	t.Run("nil slice", func(t *testing.T) {
+		result := CopyStringSlice(nil)
+		assert.Nil(t, result)
+	})
+
+	t.Run("empty slice", func(t *testing.T) {
+		result := CopyStringSlice([]string{})
+		assert.NotNil(t, result)
+		assert.Empty(t, result)
+	})
+
+	t.Run("deep copy verification", func(t *testing.T) {
+		original := []string{"a", "b", "c"}
+		copied := CopyStringSlice(original)
+
+		// Verify values are equal
+		assert.Equal(t, original, copied)
+
+		// Modify copy - should not affect original
+		copied[0] = "modified"
+		assert.Equal(t, "a", original[0], "Original should not be modified")
+		assert.Equal(t, "modified", copied[0], "Copy should be modified")
+	})
+}
+
+func TestCopyStringMap(t *testing.T) {
+	t.Run("nil map", func(t *testing.T) {
+		result := CopyStringMap(nil)
+		assert.Nil(t, result)
+	})
+
+	t.Run("empty map", func(t *testing.T) {
+		result := CopyStringMap(map[string]string{})
+		assert.NotNil(t, result)
+		assert.Empty(t, result)
+	})
+
+	t.Run("deep copy verification", func(t *testing.T) {
+		original := map[string]string{
+			"key1": "value1",
+			"key2": "value2",
+		}
+		copied := CopyStringMap(original)
+
+		// Verify values are equal
+		assert.Equal(t, original, copied)
+
+		// Modify copy - should not affect original
+		copied["key1"] = "modified"
+		copied["key3"] = "new"
+
+		assert.Equal(t, "value1", original["key1"], "Original should not be modified")
+		assert.Equal(t, "modified", copied["key1"], "Copy should be modified")
+		assert.NotContains(t, original, "key3", "Original should not have new key")
+		assert.Contains(t, copied, "key3", "Copy should have new key")
+	})
+}
+
+func TestCopyInterfaceMap(t *testing.T) {
+	t.Run("nil map", func(t *testing.T) {
+		result := CopyInterfaceMap(nil)
+		assert.Nil(t, result)
+	})
+
+	t.Run("empty map", func(t *testing.T) {
+		result := CopyInterfaceMap(map[string]interface{}{})
+		assert.NotNil(t, result)
+		assert.Empty(t, result)
+	})
+
+	t.Run("shallow copy verification", func(t *testing.T) {
+		original := map[string]interface{}{
+			"string": "value",
+			"int":    42,
+			"bool":   true,
+		}
+		copied := CopyInterfaceMap(original)
+
+		// Verify values are equal
+		assert.Equal(t, original, copied)
+
+		// Modify copy - should not affect original map structure
+		copied["string"] = "modified"
+		copied["new_key"] = "new_value"
+
+		assert.Equal(t, "value", original["string"], "Original value should not be modified")
+		assert.Equal(t, "modified", copied["string"], "Copy should be modified")
+		assert.NotContains(t, original, "new_key", "Original should not have new key")
+		assert.Contains(t, copied, "new_key", "Copy should have new key")
+	})
+}
+
+// =============================================================================
+// INTEGRATION TESTS FOR NEW HELPERS
+// =============================================================================
+
+func TestHelpers_UpdateSubscriptionRequestUsage(t *testing.T) {
+	// Real-world usage: constructing UpdateSubscriptionRequest with new helpers
+	req := &UpdateSubscriptionRequest{
+		URL:        StringPtr("https://new-endpoint.example.com/webhook"),
+		EventTypes: StringSlicePtr([]string{"order.created", "order.updated"}),
+		Headers: StringMapPtr(map[string]string{
+			"X-Custom-Header": "custom-value",
+			"Authorization":   "Bearer secret-token",
+		}),
+		Metadata: InterfaceMapPtr(map[string]interface{}{
+			"environment": "production",
+			"version":     2,
+			"enabled":     true,
+		}),
+	}
+
+	// Verify all fields set correctly
+	require.NotNil(t, req.URL)
+	assert.Equal(t, "https://new-endpoint.example.com/webhook", *req.URL)
+
+	require.NotNil(t, req.EventTypes)
+	assert.Len(t, *req.EventTypes, 2)
+	assert.Equal(t, "order.created", (*req.EventTypes)[0])
+
+	require.NotNil(t, req.Headers)
+	assert.Equal(t, "custom-value", (*req.Headers)["X-Custom-Header"])
+
+	require.NotNil(t, req.Metadata)
+	assert.Equal(t, "production", (*req.Metadata)["environment"])
+	assert.Equal(t, 2, (*req.Metadata)["version"])
+	assert.Equal(t, true, (*req.Metadata)["enabled"])
+}
+
+func TestHelpers_RoundTripConversions(t *testing.T) {
+	t.Run("string round-trip", func(t *testing.T) {
+		original := "test-value"
+		ptr := StringPtr(original)
+		result := StringValue(ptr)
+		assert.Equal(t, original, result)
+	})
+
+	t.Run("int round-trip", func(t *testing.T) {
+		original := 42
+		ptr := IntPtr(original)
+		result := IntValue(ptr)
+		assert.Equal(t, original, result)
+	})
+
+	t.Run("bool round-trip", func(t *testing.T) {
+		original := true
+		ptr := BoolPtr(original)
+		result := BoolValue(ptr)
+		assert.Equal(t, original, result)
+	})
+}
+
+func TestHelpers_ConcurrentSafety(t *testing.T) {
+	// Verify helpers work correctly in concurrent scenarios
+	t.Run("concurrent StringPtr", func(t *testing.T) {
+		done := make(chan bool, 10)
+		for i := 0; i < 10; i++ {
+			go func(val int) {
+				defer func() { done <- true }()
+				str := string(rune('A' + val))
+				ptr := StringPtr(str)
+				assert.NotNil(t, ptr)
+				assert.Equal(t, str, *ptr)
+			}(i)
+		}
+		for i := 0; i < 10; i++ {
+			<-done
+		}
+	})
+
+	t.Run("concurrent CopyStringSlice", func(t *testing.T) {
+		original := []string{"a", "b", "c", "d", "e"}
+		done := make(chan bool, 10)
+		for i := 0; i < 10; i++ {
+			go func() {
+				defer func() { done <- true }()
+				copied := CopyStringSlice(original)
+				assert.Equal(t, original, copied)
+				// Modify without affecting original
+				copied[0] = "modified"
+			}()
+		}
+		for i := 0; i < 10; i++ {
+			<-done
+		}
+		// Original should be unchanged
+		assert.Equal(t, "a", original[0])
+	})
+}

@@ -92,7 +92,7 @@ type CreateSubscriptionRequestHTTP struct {
 	Secret      string                 `json:"secret"`
 	Headers     map[string]string      `json:"headers,omitempty"`
 	Metadata    map[string]interface{} `json:"metadata,omitempty"`
-	RetryPolicy *hookd.RetryPolicy  `json:"retry_policy,omitempty"`
+	RetryPolicy *hookd.RetryPolicy     `json:"retry_policy,omitempty"`
 }
 
 func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request) {
@@ -140,7 +140,7 @@ type UpdateSubscriptionRequestHTTP struct {
 	EventTypes  *[]string               `json:"event_types,omitempty"`
 	Headers     *map[string]string      `json:"headers,omitempty"`
 	Metadata    *map[string]interface{} `json:"metadata,omitempty"`
-	RetryPolicy *hookd.RetryPolicy   `json:"retry_policy,omitempty"`
+	RetryPolicy *hookd.RetryPolicy      `json:"retry_policy,omitempty"`
 	Status      *string                 `json:"status,omitempty"`
 }
 

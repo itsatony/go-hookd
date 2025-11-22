@@ -108,6 +108,92 @@ func DurationPtr(d time.Duration) *time.Duration {
 	return &d
 }
 
+// StringSlicePtr returns a pointer to the given string slice.
+// Useful for optional []string fields in UpdateSubscriptionRequest.
+func StringSlicePtr(s []string) *[]string {
+	return &s
+}
+
+// StringMapPtr returns a pointer to the given string map.
+// Useful for optional map[string]string fields in UpdateSubscriptionRequest.
+func StringMapPtr(m map[string]string) *map[string]string {
+	return &m
+}
+
+// InterfaceMapPtr returns a pointer to the given interface map.
+// Useful for optional map[string]interface{} fields in UpdateSubscriptionRequest.
+func InterfaceMapPtr(m map[string]interface{}) *map[string]interface{} {
+	return &m
+}
+
+// Value Helpers
+//
+// These functions safely dereference pointers with default values,
+// useful when consuming optional fields from request structs.
+
+// StringValue returns the string value of a pointer, or empty string if nil.
+func StringValue(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+// IntValue returns the int value of a pointer, or 0 if nil.
+func IntValue(i *int) int {
+	if i == nil {
+		return 0
+	}
+	return *i
+}
+
+// BoolValue returns the bool value of a pointer, or false if nil.
+func BoolValue(b *bool) bool {
+	if b == nil {
+		return false
+	}
+	return *b
+}
+
+// Copy Helpers
+//
+// These functions create deep copies of complex types to avoid shared state.
+
+// CopyStringSlice creates a deep copy of a string slice.
+func CopyStringSlice(src []string) []string {
+	if src == nil {
+		return nil
+	}
+	dst := make([]string, len(src))
+	copy(dst, src)
+	return dst
+}
+
+// CopyStringMap creates a deep copy of a string map.
+func CopyStringMap(src map[string]string) map[string]string {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[string]string, len(src))
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
+}
+
+// CopyInterfaceMap creates a shallow copy of an interface map.
+// Note: Values are not deep-copied, only the map structure.
+func CopyInterfaceMap(src map[string]interface{}) map[string]interface{} {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[string]interface{}, len(src))
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
+}
+
 // Signature and Cryptographic Functions
 
 // calculateSignature calculates the HMAC-SHA256 signature for a webhook payload.
