@@ -158,8 +158,8 @@ func TestErrorCategoryCheckers(t *testing.T) {
 // TestShouldRetry tests the retry logic function.
 func TestShouldRetry(t *testing.T) {
 	tests := []struct {
-		name        string
 		err         error
+		name        string
 		shouldRetry bool
 	}{
 		{

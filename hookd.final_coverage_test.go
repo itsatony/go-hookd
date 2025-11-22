@@ -101,8 +101,8 @@ func TestMarshalJSONB_ErrorPath(t *testing.T) {
 	t.Run("circular references should fail", func(t *testing.T) {
 		// Create a circular reference
 		type Node struct {
-			Value int
 			Next  *Node
+			Value int
 		}
 		n1 := &Node{Value: 1}
 		n2 := &Node{Value: 2}

@@ -22,19 +22,14 @@ import (
 // Note: This implementation is intended for testing and development only.
 // Data is not persisted and will be lost when the process exits.
 type MockRepository struct {
-	mu sync.RWMutex
-
-	subscriptions       map[string]*Subscription
-	deliveries          map[string]*Delivery
-	deliveryAttempts    map[string][]*DeliveryAttempt // Key: deliveryID
-	idempotencyKeys     map[string]idempotencyEntry   // Key: "{key}:{subscriptionID}"
-	circuitBreakerState map[string]*CircuitBreakerState
-
-	// Locked deliveries for SKIP LOCKED simulation
-	lockedDeliveries map[string]bool
-
-	// Error injection for testing
 	injectError                   error
+	lockedDeliveries              map[string]bool
+	deliveries                    map[string]*Delivery
+	deliveryAttempts              map[string][]*DeliveryAttempt
+	idempotencyKeys               map[string]idempotencyEntry
+	circuitBreakerState           map[string]*CircuitBreakerState
+	subscriptions                 map[string]*Subscription
+	mu                            sync.RWMutex
 	injectErrorOnCreate           bool
 	injectErrorOnUpdate           bool
 	injectErrorOnClose            bool
@@ -43,12 +38,12 @@ type MockRepository struct {
 	injectErrorOnStoreIdempotency bool
 }
 
-// idempotencyEntry stores idempotency key data
+// idempotencyEntry stores idempotency key data.
 type idempotencyEntry struct {
-	Key            string
-	SubscriptionID string
 	ExpiresAt      time.Time
 	CreatedAt      time.Time
+	Key            string
+	SubscriptionID string
 }
 
 // NewMockRepository creates a new in-memory mock repository.
@@ -67,7 +62,7 @@ func NewMockRepository() *MockRepository {
 // HELPER FUNCTIONS
 // =============================================================================
 
-// copySubscription creates a deep copy of a subscription to prevent external modifications
+// copySubscription creates a deep copy of a subscription to prevent external modifications.
 func copySubscription(sub *Subscription) *Subscription {
 	if sub == nil {
 		return nil
@@ -112,7 +107,7 @@ func copySubscription(sub *Subscription) *Subscription {
 	return copied
 }
 
-// copyDelivery creates a deep copy of a delivery to prevent external modifications
+// copyDelivery creates a deep copy of a delivery to prevent external modifications.
 func copyDelivery(dlv *Delivery) *Delivery {
 	if dlv == nil {
 		return nil
@@ -149,7 +144,7 @@ func copyDelivery(dlv *Delivery) *Delivery {
 	return copied
 }
 
-// copyDeliveryAttempt creates a deep copy of a delivery attempt
+// copyDeliveryAttempt creates a deep copy of a delivery attempt.
 func copyDeliveryAttempt(att *DeliveryAttempt) *DeliveryAttempt {
 	if att == nil {
 		return nil
@@ -176,7 +171,7 @@ func copyDeliveryAttempt(att *DeliveryAttempt) *DeliveryAttempt {
 	return copied
 }
 
-// copyCircuitBreakerState creates a deep copy of circuit breaker state
+// copyCircuitBreakerState creates a deep copy of circuit breaker state.
 func copyCircuitBreakerState(state *CircuitBreakerState) *CircuitBreakerState {
 	if state == nil {
 		return nil
@@ -193,7 +188,7 @@ func copyCircuitBreakerState(state *CircuitBreakerState) *CircuitBreakerState {
 	}
 }
 
-// matchesEventTypes checks if any of the provided event types match the subscription's event types
+// matchesEventTypes checks if any of the provided event types match the subscription's event types.
 func matchesEventTypes(subEventTypes []string, filterEventTypes []string) bool {
 	for _, filter := range filterEventTypes {
 		for _, subType := range subEventTypes {
@@ -802,18 +797,16 @@ func (r *MockRepository) Close() error {
 
 // MockRepositoryTx implements RepositoryTx using copy-on-write semantics.
 type MockRepositoryTx struct {
-	mu     sync.RWMutex
-	parent *MockRepository
-
+	parent              *MockRepository
 	subscriptions       map[string]*Subscription
 	deliveries          map[string]*Delivery
 	deliveryAttempts    map[string][]*DeliveryAttempt
 	idempotencyKeys     map[string]idempotencyEntry
 	circuitBreakerState map[string]*CircuitBreakerState
 	lockedDeliveries    map[string]bool
-
-	committed  bool
-	rolledBack bool
+	mu                  sync.RWMutex
+	committed           bool
+	rolledBack          bool
 }
 
 // Commit commits the transaction by copying changes back to the parent repository.

@@ -13,10 +13,10 @@ import (
 // TestCreateSubscriptionRequest_Validate tests the validation logic for CreateSubscriptionRequest.
 func TestCreateSubscriptionRequest_Validate(t *testing.T) {
 	tests := []struct {
-		name    string
 		request *CreateSubscriptionRequest
-		wantErr bool
+		name    string
 		errMsg  string
+		wantErr bool
 	}{
 		{
 			name: "valid request",
@@ -167,10 +167,10 @@ func TestCreateSubscriptionRequest_Validate(t *testing.T) {
 // TestUpdateSubscriptionRequest_Validate tests the validation logic for UpdateSubscriptionRequest.
 func TestUpdateSubscriptionRequest_Validate(t *testing.T) {
 	tests := []struct {
-		name    string
 		request *UpdateSubscriptionRequest
-		wantErr bool
+		name    string
 		errMsg  string
+		wantErr bool
 	}{
 		{
 			name: "valid update",
@@ -257,10 +257,10 @@ func TestUpdateSubscriptionRequest_Validate(t *testing.T) {
 // TestQueueDeliveryRequest_Validate tests the validation logic for QueueDeliveryRequest.
 func TestQueueDeliveryRequest_Validate(t *testing.T) {
 	tests := []struct {
-		name    string
 		request *QueueDeliveryRequest
-		wantErr bool
+		name    string
 		errMsg  string
+		wantErr bool
 	}{
 		{
 			name: "valid request",
@@ -357,10 +357,10 @@ func TestQueueDeliveryRequest_Validate(t *testing.T) {
 // TestRetryPolicy_Validate tests the validation logic for RetryPolicy.
 func TestRetryPolicy_Validate(t *testing.T) {
 	tests := []struct {
-		name    string
 		policy  *RetryPolicy
-		wantErr bool
+		name    string
 		errMsg  string
+		wantErr bool
 	}{
 		{
 			name: "valid policy",

@@ -17,25 +17,25 @@ import (
 //
 // These can be used for error type checking with standard error comparison.
 var (
-	// ErrSubscriptionNotFound indicates a subscription was not found
+	// ErrSubscriptionNotFound indicates a subscription was not found.
 	ErrSubscriptionNotFound = cuserr.NewNotFoundError("subscription", "")
 
-	// ErrDeliveryNotFound indicates a delivery was not found
+	// ErrDeliveryNotFound indicates a delivery was not found.
 	ErrDeliveryNotFound = cuserr.NewNotFoundError("delivery", "")
 
-	// ErrCircuitBreakerNotFound indicates circuit breaker state was not found
+	// ErrCircuitBreakerNotFound indicates circuit breaker state was not found.
 	ErrCircuitBreakerNotFound = cuserr.NewNotFoundError("circuit_breaker", "")
 
-	// ErrCircuitBreakerOpen indicates the circuit breaker is open (fast-fail)
+	// ErrCircuitBreakerOpen indicates the circuit breaker is open (fast-fail).
 	ErrCircuitBreakerOpen = cuserr.NewExternalError("circuit_breaker", "webhook", nil)
 
-	// ErrSubscriptionNotActive indicates the subscription is not in active status
+	// ErrSubscriptionNotActive indicates the subscription is not in active status.
 	ErrSubscriptionNotActive = cuserr.NewValidationError("subscription", ErrMsgSubscriptionNotActive)
 
-	// ErrDeliveryAlreadyCompleted indicates the delivery has already completed
+	// ErrDeliveryAlreadyCompleted indicates the delivery has already completed.
 	ErrDeliveryAlreadyCompleted = cuserr.NewConflictError("delivery", "status", ErrMsgDeliveryAlreadyCompleted)
 
-	// ErrDuplicateSubscription indicates a subscription already exists for tenant+URL
+	// ErrDuplicateSubscription indicates a subscription already exists for tenant+URL.
 	ErrDuplicateSubscription = cuserr.NewConflictError("subscription", "url", ErrMsgSubscriptionExists)
 )
 
@@ -159,7 +159,7 @@ func IsRateLimitError(err error) bool {
 // - Validation errors: NO (4xx status codes)
 // - Not found errors: NO
 // - Conflict errors: NO
-// - Internal errors: NO (our bug, not endpoint's fault)
+// - Internal errors: NO (our bug, not endpoint's fault).
 func ShouldRetry(err error) bool {
 	if err == nil {
 		return false

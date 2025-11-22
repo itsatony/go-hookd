@@ -38,10 +38,10 @@ func TestNewConfig(t *testing.T) {
 // TestConfig_Validate tests configuration validation.
 func TestConfig_Validate(t *testing.T) {
 	tests := []struct {
-		name    string
 		cfg     *Config
-		wantErr bool
+		name    string
 		errMsg  string
+		wantErr bool
 	}{
 		{
 			name:    "valid configuration",

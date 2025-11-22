@@ -35,21 +35,17 @@ type EventBus interface {
 
 // Manager is the main webhook management orchestrator.
 type Manager struct {
-	config     *Config
 	repo       Repository
 	eventBus   EventBus
+	ctx        context.Context
+	config     *Config
 	logger     *zap.Logger
 	httpClient *http.Client
-
-	// Lifecycle
-	ctx       context.Context
-	cancel    context.CancelFunc
-	wg        sync.WaitGroup
-	started   bool
-	startedMu sync.RWMutex
-
-	// Worker pool
-	workerSem chan struct{} // Semaphore for worker concurrency control
+	cancel     context.CancelFunc
+	workerSem  chan struct{}
+	wg         sync.WaitGroup
+	startedMu  sync.RWMutex
+	started    bool
 }
 
 // ManagerOption is a functional option for configuring the Manager.
@@ -246,7 +242,7 @@ func (m *Manager) IsStarted() bool {
 // - Processes deliveries (with circuit breaker checks)
 // - Updates delivery status
 // - Publishes events
-// - Handles retries and dead letter queue
+// - Handles retries and dead letter queue.
 func (m *Manager) workerLoop(workerID int) {
 	defer m.wg.Done()
 

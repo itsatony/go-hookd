@@ -29,7 +29,7 @@ import (
 // GenerateSubscriptionID generates a prefixed nanoID for subscriptions.
 //
 // Format: sub_{nanoID}
-// Example: sub_6ByTSYmGzT2c8K3xN1fP2
+// Example: sub_6ByTSYmGzT2c8K3xN1fP2.
 func GenerateSubscriptionID() (string, error) {
 	id, err := gonanoid.New()
 	if err != nil {
@@ -43,7 +43,7 @@ func GenerateSubscriptionID() (string, error) {
 // GenerateDeliveryID generates a prefixed nanoID for deliveries.
 //
 // Format: dlv_{nanoID}
-// Example: dlv_9Kj2BxYzT3c5K8xM4fQ7
+// Example: dlv_9Kj2BxYzT3c5K8xM4fQ7.
 func GenerateDeliveryID() (string, error) {
 	id, err := gonanoid.New()
 	if err != nil {
@@ -57,7 +57,7 @@ func GenerateDeliveryID() (string, error) {
 // GenerateAttemptID generates a prefixed nanoID for delivery attempts.
 //
 // Format: att_{nanoID}
-// Example: att_2Mz5CxZyT4d7K9xP1gR3
+// Example: att_2Mz5CxZyT4d7K9xP1gR3.
 func GenerateAttemptID() (string, error) {
 	id, err := gonanoid.New()
 	if err != nil {

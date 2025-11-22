@@ -19,38 +19,17 @@ import (
 // A subscription defines where webhooks should be delivered, which event types
 // to subscribe to, retry behavior, and custom headers/metadata.
 type Subscription struct {
-	// ID is the unique subscription identifier (format: sub_<nanoID>)
-	ID string `json:"id" db:"id"`
-
-	// TenantID identifies the tenant owning this subscription
-	TenantID string `json:"tenant_id" db:"tenant_id"`
-
-	// URL is the webhook endpoint URL (must be http or https)
-	URL string `json:"url" db:"url"`
-
-	// Secret is used for HMAC signature generation (never exposed in JSON)
-	Secret string `json:"-" db:"secret"`
-
-	// EventTypes is the list of event types this subscription receives
-	EventTypes []string `json:"event_types" db:"event_types"`
-
-	// Status is the current subscription status (active, paused, disabled)
-	Status string `json:"status" db:"status"`
-
-	// RetryPolicy defines the retry behavior for failed deliveries
-	RetryPolicy *RetryPolicy `json:"retry_policy" db:"retry_policy"`
-
-	// Headers are custom HTTP headers to include in webhook requests
-	Headers map[string]string `json:"headers,omitempty" db:"headers"`
-
-	// Metadata contains arbitrary key-value pairs for application use
-	Metadata map[string]any `json:"metadata,omitempty" db:"metadata"`
-
-	// CreatedAt is the timestamp when the subscription was created
-	CreatedAt time.Time `json:"created_at" db:"created_at"`
-
-	// UpdatedAt is the timestamp when the subscription was last updated
-	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
+	CreatedAt   time.Time         `json:"created_at" db:"created_at"`
+	UpdatedAt   time.Time         `json:"updated_at" db:"updated_at"`
+	RetryPolicy *RetryPolicy      `json:"retry_policy" db:"retry_policy"`
+	Headers     map[string]string `json:"headers,omitempty" db:"headers"`
+	Metadata    map[string]any    `json:"metadata,omitempty" db:"metadata"`
+	ID          string            `json:"id" db:"id"`
+	TenantID    string            `json:"tenant_id" db:"tenant_id"`
+	URL         string            `json:"url" db:"url"`
+	Secret      string            `json:"-" db:"secret"`
+	Status      string            `json:"status" db:"status"`
+	EventTypes  []string          `json:"event_types" db:"event_types"`
 }
 
 // Delivery represents a webhook delivery instance.
@@ -58,38 +37,17 @@ type Subscription struct {
 // A delivery is created when an event matching a subscription occurs.
 // It tracks the delivery lifecycle, retry attempts, and completion status.
 type Delivery struct {
-	// ID is the unique delivery identifier (format: dlv_<nanoID>)
-	ID string `json:"id" db:"id"`
-
-	// SubscriptionID references the subscription for this delivery
-	SubscriptionID string `json:"subscription_id" db:"subscription_id"`
-
-	// TenantID identifies the tenant (copied from subscription for filtering)
-	TenantID string `json:"tenant_id" db:"tenant_id"`
-
-	// EventType is the type of event being delivered
-	EventType string `json:"event_type" db:"event_type"`
-
-	// Payload is the event data to be delivered as JSON
-	Payload map[string]any `json:"payload" db:"payload"`
-
-	// Status is the current delivery status (pending, success, failed, dead_letter)
-	Status string `json:"status" db:"status"`
-
-	// AttemptCount is the number of delivery attempts made
-	AttemptCount int `json:"attempt_count" db:"attempt_count"`
-
-	// MaxAttempts is the maximum number of attempts allowed (from RetryPolicy)
-	MaxAttempts int `json:"max_attempts" db:"max_attempts"`
-
-	// NextRetryAt is the timestamp for the next retry attempt (nil if completed)
-	NextRetryAt *time.Time `json:"next_retry_at,omitempty" db:"next_retry_at"`
-
-	// CompletedAt is the timestamp when the delivery completed (success or dead letter)
-	CompletedAt *time.Time `json:"completed_at,omitempty" db:"completed_at"`
-
-	// CreatedAt is the timestamp when the delivery was created
-	CreatedAt time.Time `json:"created_at" db:"created_at"`
+	CreatedAt      time.Time      `json:"created_at" db:"created_at"`
+	Payload        map[string]any `json:"payload" db:"payload"`
+	NextRetryAt    *time.Time     `json:"next_retry_at,omitempty" db:"next_retry_at"`
+	CompletedAt    *time.Time     `json:"completed_at,omitempty" db:"completed_at"`
+	ID             string         `json:"id" db:"id"`
+	SubscriptionID string         `json:"subscription_id" db:"subscription_id"`
+	TenantID       string         `json:"tenant_id" db:"tenant_id"`
+	EventType      string         `json:"event_type" db:"event_type"`
+	Status         string         `json:"status" db:"status"`
+	AttemptCount   int            `json:"attempt_count" db:"attempt_count"`
+	MaxAttempts    int            `json:"max_attempts" db:"max_attempts"`
 }
 
 // DeliveryAttempt represents a single delivery attempt.
@@ -97,32 +55,15 @@ type Delivery struct {
 // Each time a delivery is attempted, a DeliveryAttempt record is created
 // with the HTTP response details, duration, and any errors.
 type DeliveryAttempt struct {
-	// ID is the unique attempt identifier (format: att_<nanoID>)
-	ID string `json:"id" db:"id"`
-
-	// DeliveryID references the parent delivery
-	DeliveryID string `json:"delivery_id" db:"delivery_id"`
-
-	// AttemptNumber is the 1-based attempt number
-	AttemptNumber int `json:"attempt_number" db:"attempt_number"`
-
-	// StatusCode is the HTTP status code received (0 if network error)
-	StatusCode int `json:"status_code,omitempty" db:"status_code"`
-
-	// ResponseBody is the HTTP response body (truncated if too large)
-	ResponseBody string `json:"response_body,omitempty" db:"response_body"`
-
-	// ResponseHeaders are the HTTP response headers received
+	AttemptedAt     time.Time         `json:"attempted_at" db:"attempted_at"`
 	ResponseHeaders map[string]string `json:"response_headers,omitempty" db:"response_headers"`
-
-	// Error is the error message if the attempt failed
-	Error string `json:"error,omitempty" db:"error"`
-
-	// DurationMs is the attempt duration in milliseconds
-	DurationMs int64 `json:"duration_ms" db:"duration_ms"`
-
-	// AttemptedAt is the timestamp when this attempt was made
-	AttemptedAt time.Time `json:"attempted_at" db:"attempted_at"`
+	ID              string            `json:"id" db:"id"`
+	DeliveryID      string            `json:"delivery_id" db:"delivery_id"`
+	ResponseBody    string            `json:"response_body,omitempty" db:"response_body"`
+	Error           string            `json:"error,omitempty" db:"error"`
+	AttemptNumber   int               `json:"attempt_number" db:"attempt_number"`
+	StatusCode      int               `json:"status_code,omitempty" db:"status_code"`
+	DurationMs      int64             `json:"duration_ms" db:"duration_ms"`
 }
 
 // RetryPolicy defines retry behavior for failed deliveries.
@@ -147,53 +88,25 @@ type RetryPolicy struct {
 // Circuit breakers prevent cascading failures by temporarily blocking requests
 // to failing endpoints.
 type CircuitBreakerState struct {
-	// Endpoint is the URL being monitored
-	Endpoint string `json:"endpoint" db:"endpoint"`
-
-	// State is the current circuit state (closed, half_open, open)
-	State string `json:"state" db:"state"`
-
-	// FailureCount is the consecutive failure count
-	FailureCount int `json:"failure_count" db:"failure_count"`
-
-	// SuccessCount is the consecutive success count (used in half-open)
-	SuccessCount int `json:"success_count" db:"success_count"`
-
-	// LastFailure is the timestamp of the most recent failure
-	LastFailure time.Time `json:"last_failure,omitempty" db:"last_failure"`
-
-	// OpenedAt is the timestamp when the circuit opened
-	OpenedAt time.Time `json:"opened_at,omitempty" db:"opened_at"`
-
-	// NextRetryAt is the timestamp when half-open testing should begin
-	NextRetryAt time.Time `json:"next_retry_at,omitempty" db:"next_retry_at"`
+	LastFailure  time.Time `json:"last_failure,omitempty" db:"last_failure"`
+	OpenedAt     time.Time `json:"opened_at,omitempty" db:"opened_at"`
+	NextRetryAt  time.Time `json:"next_retry_at,omitempty" db:"next_retry_at"`
+	Endpoint     string    `json:"endpoint" db:"endpoint"`
+	State        string    `json:"state" db:"state"`
+	FailureCount int       `json:"failure_count" db:"failure_count"`
+	SuccessCount int       `json:"success_count" db:"success_count"`
 }
 
 // CreateSubscriptionRequest is the request to create a new subscription.
 type CreateSubscriptionRequest struct {
-	// TenantID identifies the tenant creating the subscription
-	TenantID string `json:"tenant_id"`
-
-	// URL is the webhook endpoint URL
-	URL string `json:"url"`
-
-	// Secret is used for HMAC signature generation
-	Secret string `json:"secret"`
-
-	// EventTypes is the list of event types to subscribe to
-	EventTypes []string `json:"event_types"`
-
-	// RetryPolicy defines retry behavior (optional, uses defaults if nil)
-	RetryPolicy *RetryPolicy `json:"retry_policy,omitempty"`
-
-	// Headers are custom HTTP headers to include in requests (optional)
-	Headers map[string]string `json:"headers,omitempty"`
-
-	// Metadata contains arbitrary key-value pairs (optional)
-	Metadata map[string]any `json:"metadata,omitempty"`
-
-	// IdempotencyKey ensures this request is processed exactly once (optional)
-	IdempotencyKey string `json:"idempotency_key,omitempty"`
+	RetryPolicy    *RetryPolicy      `json:"retry_policy,omitempty"`
+	Headers        map[string]string `json:"headers,omitempty"`
+	Metadata       map[string]any    `json:"metadata,omitempty"`
+	TenantID       string            `json:"tenant_id"`
+	URL            string            `json:"url"`
+	Secret         string            `json:"secret"`
+	IdempotencyKey string            `json:"idempotency_key,omitempty"`
+	EventTypes     []string          `json:"event_types"`
 }
 
 // Validate implements the Validator interface for CreateSubscriptionRequest.
@@ -399,77 +312,39 @@ type SubscriptionFilter struct {
 
 // DeliveryFilter defines filtering criteria for listing deliveries.
 type DeliveryFilter struct {
-	// TenantID filters by tenant (optional but recommended)
-	TenantID string `json:"tenant_id,omitempty"`
-
-	// SubscriptionID filters by subscription (optional)
 	SubscriptionID *string `json:"subscription_id,omitempty"`
-
-	// Status filters by delivery status (optional)
-	Status *string `json:"status,omitempty"`
-
-	// EventType filters by event type (optional)
-	EventType *string `json:"event_type,omitempty"`
-
-	// Limit is the maximum number of results (optional, default: 100)
-	Limit int `json:"limit"`
-
-	// Offset is the number of results to skip (optional, default: 0)
-	Offset int `json:"offset"`
+	Status         *string `json:"status,omitempty"`
+	EventType      *string `json:"event_type,omitempty"`
+	TenantID       string  `json:"tenant_id,omitempty"`
+	Limit          int     `json:"limit"`
+	Offset         int     `json:"offset"`
 }
 
 // DeliveryEvent is published to the event bus for delivery lifecycle events.
 type DeliveryEvent struct {
-	// DeliveryID is the delivery identifier
-	DeliveryID string `json:"delivery_id"`
-
-	// SubscriptionID is the subscription identifier
-	SubscriptionID string `json:"subscription_id"`
-
-	// TenantID is the tenant identifier
-	TenantID string `json:"tenant_id"`
-
-	// EventType is the event type being delivered
-	EventType string `json:"event_type"`
-
-	// Status is the current delivery status
-	Status string `json:"status"`
-
-	// Timestamp is when this event occurred
-	Timestamp time.Time `json:"timestamp"`
-
-	// Metadata contains additional event-specific data
-	Metadata map[string]any `json:"metadata,omitempty"`
+	Timestamp      time.Time      `json:"timestamp"`
+	Metadata       map[string]any `json:"metadata,omitempty"`
+	DeliveryID     string         `json:"delivery_id"`
+	SubscriptionID string         `json:"subscription_id"`
+	TenantID       string         `json:"tenant_id"`
+	EventType      string         `json:"event_type"`
+	Status         string         `json:"status"`
 }
 
 // AuditEvent is published to the event bus for audit trail.
 type AuditEvent struct {
-	// Type is the audit event type (e.g., "subscription_created")
-	Type string `json:"type"`
-
-	// ResourceID is the identifier of the affected resource
-	ResourceID string `json:"resource_id"`
-
-	// TenantID is the tenant identifier
-	TenantID string `json:"tenant_id"`
-
-	// Timestamp is when this event occurred
-	Timestamp time.Time `json:"timestamp"`
-
-	// Metadata contains additional audit data
-	Metadata map[string]any `json:"metadata,omitempty"`
+	Timestamp  time.Time      `json:"timestamp"`
+	Metadata   map[string]any `json:"metadata,omitempty"`
+	Type       string         `json:"type"`
+	ResourceID string         `json:"resource_id"`
+	TenantID   string         `json:"tenant_id"`
 }
 
 // CircuitBreakerEvent is published to the event bus for circuit breaker state changes.
 type CircuitBreakerEvent struct {
-	// Endpoint is the URL being monitored
-	Endpoint string `json:"endpoint"`
-
-	// State is the new circuit breaker state
-	State string `json:"state"`
-
-	// Timestamp is when this event occurred
 	Timestamp time.Time `json:"timestamp"`
+	Endpoint  string    `json:"endpoint"`
+	State     string    `json:"state"`
 }
 
 // Validate validates a RetryPolicy.

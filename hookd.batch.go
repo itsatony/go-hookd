@@ -18,17 +18,10 @@ import (
 
 // BatchResult represents the result of a batch operation.
 type BatchResult[T any] struct {
-	// Success indicates whether the operation succeeded
-	Success bool `json:"success"`
-
-	// Result contains the successful result (nil if failed)
-	Result *T `json:"result,omitempty"`
-
-	// Error contains the error if the operation failed
-	Error error `json:"error,omitempty"`
-
-	// Index is the position in the original batch request
-	Index int `json:"index"`
+	Error   error `json:"error,omitempty"`
+	Result  *T    `json:"result,omitempty"`
+	Index   int   `json:"index"`
+	Success bool  `json:"success"`
 }
 
 // QueueDeliveriesRequest contains multiple delivery requests to be queued.
@@ -39,17 +32,10 @@ type QueueDeliveriesRequest struct {
 
 // QueueDeliveriesResponse contains the results of a batch delivery operation.
 type QueueDeliveriesResponse struct {
-	// TotalRequested is the number of deliveries requested
-	TotalRequested int `json:"total_requested"`
-
-	// TotalSucceeded is the number of deliveries successfully queued
-	TotalSucceeded int `json:"total_succeeded"`
-
-	// TotalFailed is the number of deliveries that failed
-	TotalFailed int `json:"total_failed"`
-
-	// Results contains the individual results for each delivery
-	Results []*BatchResult[Delivery] `json:"results"`
+	Results        []*BatchResult[Delivery] `json:"results"`
+	TotalRequested int                      `json:"total_requested"`
+	TotalSucceeded int                      `json:"total_succeeded"`
+	TotalFailed    int                      `json:"total_failed"`
 }
 
 // QueueDeliveries queues multiple webhook deliveries in a single operation.
@@ -64,9 +50,9 @@ type QueueDeliveriesResponse struct {
 //
 // Returns:
 //   - QueueDeliveriesResponse with individual results
-//   - error if the entire batch operation fails (e.g., validation error)
+//   - error if the entire batch operation fails (e.g., validation error).
 //
-// Thread-safe: Yes
+// Thread-safe: Yes.
 func (m *Manager) QueueDeliveries(ctx context.Context, req *QueueDeliveriesRequest) (*QueueDeliveriesResponse, error) {
 	if req == nil {
 		return nil, cuserr.NewValidationError("request", ErrMsgRequestRequired)
@@ -131,17 +117,10 @@ type CreateSubscriptionsRequest struct {
 
 // CreateSubscriptionsResponse contains the results of a batch subscription creation.
 type CreateSubscriptionsResponse struct {
-	// TotalRequested is the number of subscriptions requested
-	TotalRequested int `json:"total_requested"`
-
-	// TotalSucceeded is the number of subscriptions successfully created
-	TotalSucceeded int `json:"total_succeeded"`
-
-	// TotalFailed is the number of subscriptions that failed
-	TotalFailed int `json:"total_failed"`
-
-	// Results contains the individual results for each subscription
-	Results []*BatchResult[Subscription] `json:"results"`
+	Results        []*BatchResult[Subscription] `json:"results"`
+	TotalRequested int                          `json:"total_requested"`
+	TotalSucceeded int                          `json:"total_succeeded"`
+	TotalFailed    int                          `json:"total_failed"`
 }
 
 // CreateSubscriptions creates multiple webhook subscriptions in a single operation.
@@ -156,9 +135,9 @@ type CreateSubscriptionsResponse struct {
 //
 // Returns:
 //   - CreateSubscriptionsResponse with individual results
-//   - error if the entire batch operation fails (e.g., validation error)
+//   - error if the entire batch operation fails (e.g., validation error).
 //
-// Thread-safe: Yes
+// Thread-safe: Yes.
 func (m *Manager) CreateSubscriptions(ctx context.Context, req *CreateSubscriptionsRequest) (*CreateSubscriptionsResponse, error) {
 	if req == nil {
 		return nil, cuserr.NewValidationError("request", ErrMsgRequestRequired)

@@ -1309,10 +1309,10 @@ func TestManager_EdgeCases(t *testing.T) {
 // HELPER TYPES AND FUNCTIONS
 // =============================================================================
 
-// testEventBus is a simple event bus for testing
+// testEventBus is a simple event bus for testing.
 type testEventBus struct {
-	mu     sync.Mutex
 	events []any
+	mu     sync.Mutex
 }
 
 func (t *testEventBus) Publish(topic string, data any) {
