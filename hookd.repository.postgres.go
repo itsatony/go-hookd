@@ -70,7 +70,7 @@ func marshalJSONB(v interface{}) ([]byte, error) {
 	}
 	data, err := json.Marshal(v)
 	if err != nil {
-		return nil, cuserr.NewInternalError("jsonb_marshaler", err,
+		return nil, cuserr.NewExternalError("database", "jsonb_marshal", err,
 			cuserr.WithMetadata("operation", "marshal"),
 		)
 	}
@@ -84,7 +84,7 @@ func unmarshalJSONB(data []byte, target interface{}) error {
 		return nil
 	}
 	if err := json.Unmarshal(data, target); err != nil {
-		return cuserr.NewInternalError("jsonb_unmarshaler", err,
+		return cuserr.NewExternalError("database", "jsonb_unmarshal", err,
 			cuserr.WithMetadata("operation", "unmarshal"),
 		)
 	}
@@ -284,17 +284,17 @@ func (r *PostgresRepository) CreateSubscription(ctx context.Context, sub *Subscr
 	// Marshal JSONB fields
 	retryPolicyJSON, err := marshalJSONB(sub.RetryPolicy)
 	if err != nil {
-		return cuserr.NewInternalError("database", err)
+		return err // Already wrapped as ExternalError by marshalJSONB
 	}
 
 	headersJSON, err := marshalJSONB(sub.Headers)
 	if err != nil {
-		return cuserr.NewInternalError("database", err)
+		return err // Already wrapped as ExternalError by marshalJSONB
 	}
 
 	metadataJSON, err := marshalJSONB(sub.Metadata)
 	if err != nil {
-		return cuserr.NewInternalError("database", err)
+		return err // Already wrapped as ExternalError by marshalJSONB
 	}
 
 	query := `
@@ -386,17 +386,17 @@ func (r *PostgresRepository) UpdateSubscription(ctx context.Context, sub *Subscr
 	// Marshal JSONB fields
 	retryPolicyJSON, err := marshalJSONB(sub.RetryPolicy)
 	if err != nil {
-		return cuserr.NewInternalError("database", err)
+		return err // Already wrapped as ExternalError by marshalJSONB
 	}
 
 	headersJSON, err := marshalJSONB(sub.Headers)
 	if err != nil {
-		return cuserr.NewInternalError("database", err)
+		return err // Already wrapped as ExternalError by marshalJSONB
 	}
 
 	metadataJSON, err := marshalJSONB(sub.Metadata)
 	if err != nil {
-		return cuserr.NewInternalError("database", err)
+		return err // Already wrapped as ExternalError by marshalJSONB
 	}
 
 	query := `
@@ -431,7 +431,9 @@ func (r *PostgresRepository) UpdateSubscription(ctx context.Context, sub *Subscr
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		return cuserr.NewInternalError("database", err)
+		return cuserr.NewExternalError("database", "postgres", err,
+			cuserr.WithMetadata("operation", "rows_affected"),
+		)
 	}
 
 	if rowsAffected == 0 {
@@ -456,7 +458,9 @@ func (r *PostgresRepository) DeleteSubscription(ctx context.Context, id string) 
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		return cuserr.NewInternalError("database", err)
+		return cuserr.NewExternalError("database", "postgres", err,
+			cuserr.WithMetadata("operation", "rows_affected"),
+		)
 	}
 
 	if rowsAffected == 0 {
@@ -550,7 +554,7 @@ func (r *PostgresRepository) CreateDelivery(ctx context.Context, delivery *Deliv
 	// Marshal payload JSONB
 	payloadJSON, err := marshalJSONB(delivery.Payload)
 	if err != nil {
-		return cuserr.NewInternalError("database", err)
+		return err // Already wrapped as ExternalError by marshalJSONB
 	}
 
 	query := `
@@ -616,7 +620,7 @@ func (r *PostgresRepository) UpdateDelivery(ctx context.Context, delivery *Deliv
 	// Marshal payload JSONB
 	payloadJSON, err := marshalJSONB(delivery.Payload)
 	if err != nil {
-		return cuserr.NewInternalError("database", err)
+		return err // Already wrapped as ExternalError by marshalJSONB
 	}
 
 	query := `
@@ -653,7 +657,9 @@ func (r *PostgresRepository) UpdateDelivery(ctx context.Context, delivery *Deliv
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		return cuserr.NewInternalError("database", err)
+		return cuserr.NewExternalError("database", "postgres", err,
+			cuserr.WithMetadata("operation", "rows_affected"),
+		)
 	}
 
 	if rowsAffected == 0 {
@@ -731,7 +737,9 @@ func (r *PostgresRepository) MoveToDeadLetter(ctx context.Context, deliveryID st
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		return cuserr.NewInternalError("database", err)
+		return cuserr.NewExternalError("database", "postgres", err,
+			cuserr.WithMetadata("operation", "rows_affected"),
+		)
 	}
 
 	if rowsAffected == 0 {
@@ -750,7 +758,7 @@ func (r *PostgresRepository) CreateDeliveryAttempt(ctx context.Context, attempt 
 	// Marshal response headers JSONB
 	responseHeadersJSON, err := marshalJSONB(attempt.ResponseHeaders)
 	if err != nil {
-		return cuserr.NewInternalError("database", err)
+		return err // Already wrapped as ExternalError by marshalJSONB
 	}
 
 	query := `
