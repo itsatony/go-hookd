@@ -133,40 +133,41 @@ logger = logger.With(versionInfo.LogFields()...)
 
 **versions.yaml** is the single source of truth for all version info.
 
-### 3. go-pubbing (v0.4.0) - Internal Event Bus
-**High-performance in-memory pub/sub** for component coordination:
+### 3. EventBus Pattern (Optional Observability)
+**Flexible event abstraction** for observability and monitoring:
 ```go
-// Create broker
-broker, err := pubbing.New(
-    pubbing.WithLogger(logger),
-    pubbing.WithRetentionCount(10000),
-    pubbing.WithRetentionAge(1*time.Hour),
-)
+// EventBus interface (defined in hookd.manager.go)
+type EventBus interface {
+    Publish(topic string, data interface{})
+    Subscribe(topic string, handler func(interface{})) func()
+}
 
-// Type-safe publishing
-pubbing.PublishTyped(broker, "delivery.success", DeliveryEvent{
-    DeliveryID:     delivery.ID,
-    SubscriptionID: delivery.SubscriptionID,
-    Status:         "success",
-    Timestamp:      time.Now(),
-})
+// Zero-cost default: noOpEventBus (does nothing)
+manager, err := NewManager(config, repo) // No events
 
-// Type-safe subscription
-pubbing.SubscribeTyped[DeliveryEvent](
-    broker,
-    ctx,
-    "delivery.>", // Wildcard pattern
-    func(event DeliveryEvent) error {
-        // Handle event
-        return nil
-    },
+// Custom implementation example (see examples/monitoring)
+type CustomEventBus struct {
+    subscribers map[string][]func(interface{})
+    mu sync.RWMutex
+}
+
+manager, err := NewManager(config, repo,
+    WithEventBus(&CustomEventBus{}),
 )
 ```
+
+**Design Decision**:
+- **NOT using go-pubbing directly** - The EventBus interface provides flexibility
+- Default is no-op (zero cost for users who don't need events)
+- Users can implement EventBus with ANY event system (go-pubbing, NATS, Kafka, logs, metrics)
+- Examples show custom implementations for monitoring and metrics
 
 **Event Topics**:
 - `delivery.queued`, `delivery.success`, `delivery.failed`, `delivery.dead_letter`
 - `circuit.opened`, `circuit.half_open`, `circuit.closed`
 - `metrics.*`, `audit.*`
+
+**Note**: go-pubbing v0.5.2 is a dev dependency for potential future use, but the EventBus abstraction is intentionally decoupled.
 
 ---
 
@@ -488,9 +489,9 @@ pubbing.PublishTyped(broker, EventTopicDeliverySuccess, DeliveryEvent{
 
 ## Key Architectural Decisions
 
-1. **PostgreSQL-native queue** - Use SKIP LOCKED, no external broker
+1. **PostgreSQL-native queue** - Use `FOR UPDATE SKIP LOCKED`, no external broker
 2. **Interface-first design** - Repository interface, not concrete implementations
-3. **Event-driven coordination** - go-pubbing for internal communication
+3. **EventBus abstraction** - Flexible interface, NOT hardcoded to go-pubbing
 4. **Per-endpoint circuit breakers** - Prevent cascading failures
 5. **Exponential backoff with jitter** - Prevent thundering herd
 6. **Idempotency by default** - Content-based and key-based deduplication
