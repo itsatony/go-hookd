@@ -85,7 +85,8 @@ func TestMarshalJSONB_ErrorPath(t *testing.T) {
 		result, err := marshalJSONB(ch)
 		assert.Error(t, err)
 		assert.Nil(t, result)
-		assert.Contains(t, err.Error(), "failed to marshal JSONB")
+		// Error is returned directly from go-cuserr (not wrapped per Phase 1.3 changes)
+		assert.Contains(t, err.Error(), "internal error")
 	})
 
 	t.Run("functions cannot be marshaled", func(t *testing.T) {

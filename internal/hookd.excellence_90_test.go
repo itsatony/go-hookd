@@ -55,10 +55,10 @@ func TestGetDeliveryAttempts_ErrorPaths(t *testing.T) {
 		// Call GetDeliveryAttempts - should handle error
 		attempts, err := manager.GetDeliveryAttempts(ctx, delivery.ID)
 
-		// Verify error is returned and wrapped
+		// Verify error is returned directly (not wrapped per Phase 1.3 changes)
 		assert.Error(t, err)
 		assert.Nil(t, attempts)
-		assert.Contains(t, err.Error(), "failed to get delivery attempts")
+		assert.Contains(t, err.Error(), "database connection failed")
 
 		// Clear error
 		repo.injectError = nil
@@ -315,7 +315,8 @@ func TestCreateSubscription_RepositoryErrors(t *testing.T) {
 
 		assert.Error(t, err)
 		assert.Nil(t, sub)
-		assert.Contains(t, err.Error(), "failed to create subscription")
+		// Repository error is returned directly (not wrapped per Phase 1.3 changes)
+		assert.Contains(t, err.Error(), "internal error")
 
 		// Clear error
 		repo.injectErrorOnCreate = false
@@ -358,7 +359,8 @@ func TestQueueDelivery_ErrorPaths(t *testing.T) {
 
 		assert.Error(t, err)
 		assert.Nil(t, delivery)
-		assert.Contains(t, err.Error(), "failed to check idempotency")
+		// Repository error is returned directly (not wrapped per Phase 1.3 changes)
+		assert.Contains(t, err.Error(), "internal error")
 
 		// Clear error
 		repo.injectErrorOnIdempotencyCheck = false
@@ -394,7 +396,8 @@ func TestQueueDelivery_ErrorPaths(t *testing.T) {
 
 		assert.Error(t, err)
 		assert.Nil(t, delivery)
-		assert.Contains(t, err.Error(), "failed to create delivery")
+		// Repository error is returned directly (not wrapped per Phase 1.3 changes)
+		assert.Contains(t, err.Error(), "internal error")
 
 		// Clear error
 		repo.injectErrorOnCreateDelivery = false
@@ -551,7 +554,8 @@ func TestStop_InFlightDeliveries(t *testing.T) {
 		err = manager.Stop()
 
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "close error")
+		// Repository error is returned directly (not wrapped per Phase 1.3 changes)
+		assert.Contains(t, err.Error(), "internal error")
 
 		// Clear error
 		repo.injectErrorOnClose = false

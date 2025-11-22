@@ -76,7 +76,9 @@ func TestErrorConstructors(t *testing.T) {
 		err := NewDeliveryTimeoutError("https://example.com", "30s", originalErr)
 		assert.Error(t, err)
 		assert.True(t, IsTimeoutError(err))
-		assert.Contains(t, err.Error(), "30s")
+		// go-cuserr metadata is not included in error string by default
+		assert.Contains(t, err.Error(), "webhook-delivery")
+		assert.Contains(t, err.Error(), "timed out")
 	})
 
 	t.Run("NewRateLimitError", func(t *testing.T) {
