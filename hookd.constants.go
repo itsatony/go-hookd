@@ -228,6 +228,9 @@ const (
 
 	// MaxResponseBodyLength is the maximum length of response body to store
 	MaxResponseBodyLength = 10240 // 10KB
+
+	// MaxBatchSize is the maximum number of items in a batch operation
+	MaxBatchSize = 100
 )
 
 // Validation Constants - Patterns
