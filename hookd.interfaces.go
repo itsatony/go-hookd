@@ -63,6 +63,10 @@ type Repository interface {
 	// Returns up to 'limit' deliveries ordered by created_at.
 	GetPendingDeliveries(ctx context.Context, limit int) ([]*Delivery, error)
 
+	// ListDeliveries retrieves deliveries matching the given filter.
+	// Returns an empty slice if no deliveries match.
+	ListDeliveries(ctx context.Context, filter *DeliveryFilter) ([]*Delivery, error)
+
 	// MoveToDeadLetter moves a delivery to the dead letter queue.
 	// This is called when a delivery exhausts all retry attempts.
 	MoveToDeadLetter(ctx context.Context, deliveryID string, reason string) error

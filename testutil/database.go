@@ -439,6 +439,13 @@ func (r *TransactionalRepository) GetPendingDeliveries(ctx context.Context, limi
 	return deliveries, rows.Err()
 }
 
+// ListDeliveries retrieves deliveries matching a filter (stub implementation for testutil)
+func (r *TransactionalRepository) ListDeliveries(ctx context.Context, filter *hookd.DeliveryFilter) ([]*hookd.Delivery, error) {
+	// This is a simplified test implementation
+	// For production testing, use the actual PostgresRepository
+	return nil, fmt.Errorf("ListDeliveries not implemented in testutil TransactionalRepository")
+}
+
 // GetSubscriptionByTenantAndURL retrieves a subscription by tenant and URL
 func (r *TransactionalRepository) GetSubscriptionByTenantAndURL(ctx context.Context, tenantID, url string) (*hookd.Subscription, error) {
 	query := `

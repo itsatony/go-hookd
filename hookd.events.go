@@ -282,3 +282,52 @@ func (m *Manager) RetryDelivery(ctx context.Context, deliveryID string) (*Delive
 
 	return delivery, nil
 }
+
+// ListDeliveries retrieves deliveries matching the given filter.
+//
+// This operation supports filtering by:
+// - Tenant ID (optional but recommended)
+// - Subscription ID (optional)
+// - Status (optional)
+// - Event type (optional)
+//
+// Results are ordered by created_at DESC (newest first) and support
+// pagination via Limit and Offset parameters.
+//
+// Parameters:
+//   - ctx: Context for cancellation and timeout
+//   - filter: Filter criteria
+//
+// Returns a list of deliveries matching the filter.
+//
+// Errors:
+//   - ValidationError: If filter is invalid
+//   - DatabaseError: If retrieval fails
+//
+// Example:
+//
+//	deliveries, err := manager.ListDeliveries(ctx, &DeliveryFilter{
+//	    TenantID:       "tenant_123",
+//	    Status:         StringPtr("success"),
+//	    Limit:          50,
+//	    Offset:         0,
+//	})
+func (m *Manager) ListDeliveries(ctx context.Context, filter *DeliveryFilter) ([]*Delivery, error) {
+	// Validate filter
+	if filter == nil {
+		return nil, NewValidationError("filter", ErrMsgFilterRequired)
+	}
+
+	// List deliveries
+	deliveries, err := m.repo.ListDeliveries(ctx, filter)
+	if err != nil {
+		m.logger.Error("failed to list deliveries",
+			zap.Error(err),
+			zap.String("tenant_id", filter.TenantID),
+		)
+		// Repository already returns cuserr errors
+		return nil, err
+	}
+
+	return deliveries, nil
+}

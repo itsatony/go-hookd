@@ -471,6 +471,63 @@ func (r *MockRepository) UnlockAllDeliveries() {
 	r.lockedDeliveries = make(map[string]bool)
 }
 
+// ListDeliveries retrieves deliveries matching the given filter.
+func (r *MockRepository) ListDeliveries(ctx context.Context, filter *DeliveryFilter) ([]*Delivery, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Error injection for testing
+	if r.injectError != nil {
+		return nil, r.injectError
+	}
+
+	results := []*Delivery{}
+
+	// Collect matching deliveries
+	for _, delivery := range r.deliveries {
+		// Apply filters
+		if filter.TenantID != "" && delivery.TenantID != filter.TenantID {
+			continue
+		}
+
+		if filter.SubscriptionID != nil && *filter.SubscriptionID != "" &&
+			delivery.SubscriptionID != *filter.SubscriptionID {
+			continue
+		}
+
+		if filter.Status != nil && *filter.Status != "" &&
+			delivery.Status != *filter.Status {
+			continue
+		}
+
+		if filter.EventType != nil && *filter.EventType != "" &&
+			delivery.EventType != *filter.EventType {
+			continue
+		}
+
+		results = append(results, copyDelivery(delivery))
+	}
+
+	// Sort by created_at descending (newest first)
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].CreatedAt.After(results[j].CreatedAt)
+	})
+
+	// Apply offset
+	if filter.Offset > 0 && filter.Offset < len(results) {
+		results = results[filter.Offset:]
+	} else if filter.Offset >= len(results) {
+		results = []*Delivery{}
+	}
+
+	// Apply limit
+	if filter.Limit > 0 && filter.Limit < len(results) {
+		results = results[:filter.Limit]
+	}
+
+	return results, nil
+}
+
 // MoveToDeadLetter moves a delivery to the dead letter queue.
 func (r *MockRepository) MoveToDeadLetter(ctx context.Context, deliveryID string, reason string) error {
 	r.mu.Lock()
@@ -1032,6 +1089,58 @@ func (tx *MockRepositoryTx) GetPendingDeliveries(ctx context.Context, limit int)
 	for i := 0; i < len(candidates) && i < limit; i++ {
 		results = append(results, copyDelivery(candidates[i]))
 		tx.lockedDeliveries[candidates[i].ID] = true
+	}
+
+	return results, nil
+}
+
+// ListDeliveries retrieves deliveries matching the given filter within the transaction.
+func (tx *MockRepositoryTx) ListDeliveries(ctx context.Context, filter *DeliveryFilter) ([]*Delivery, error) {
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
+
+	results := []*Delivery{}
+
+	// Collect matching deliveries
+	for _, delivery := range tx.deliveries {
+		// Apply filters
+		if filter.TenantID != "" && delivery.TenantID != filter.TenantID {
+			continue
+		}
+
+		if filter.SubscriptionID != nil && *filter.SubscriptionID != "" &&
+			delivery.SubscriptionID != *filter.SubscriptionID {
+			continue
+		}
+
+		if filter.Status != nil && *filter.Status != "" &&
+			delivery.Status != *filter.Status {
+			continue
+		}
+
+		if filter.EventType != nil && *filter.EventType != "" &&
+			delivery.EventType != *filter.EventType {
+			continue
+		}
+
+		results = append(results, copyDelivery(delivery))
+	}
+
+	// Sort by created_at descending (newest first)
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].CreatedAt.After(results[j].CreatedAt)
+	})
+
+	// Apply offset
+	if filter.Offset > 0 && filter.Offset < len(results) {
+		results = results[filter.Offset:]
+	} else if filter.Offset >= len(results) {
+		results = []*Delivery{}
+	}
+
+	// Apply limit
+	if filter.Limit > 0 && filter.Limit < len(results) {
+		results = results[:filter.Limit]
 	}
 
 	return results, nil

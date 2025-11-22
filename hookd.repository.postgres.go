@@ -714,6 +714,88 @@ func (r *PostgresRepository) GetPendingDeliveries(ctx context.Context, limit int
 	return deliveries, nil
 }
 
+// ListDeliveries retrieves deliveries matching the given filter.
+// Returns an empty slice if no deliveries match.
+func (r *PostgresRepository) ListDeliveries(ctx context.Context, filter *DeliveryFilter) ([]*Delivery, error) {
+	query := `
+		SELECT id, subscription_id, tenant_id, event_type, payload,
+		       status, attempt_count, max_attempts, next_retry_at,
+		       completed_at, created_at
+		FROM deliveries
+		WHERE 1=1`
+
+	args := []interface{}{}
+	argCount := 1
+
+	// Apply filters
+	if filter.TenantID != "" {
+		query += fmt.Sprintf(" AND tenant_id = $%d", argCount)
+		args = append(args, filter.TenantID)
+		argCount++
+	}
+
+	if filter.SubscriptionID != nil && *filter.SubscriptionID != "" {
+		query += fmt.Sprintf(" AND subscription_id = $%d", argCount)
+		args = append(args, *filter.SubscriptionID)
+		argCount++
+	}
+
+	if filter.Status != nil && *filter.Status != "" {
+		query += fmt.Sprintf(" AND status = $%d", argCount)
+		args = append(args, *filter.Status)
+		argCount++
+	}
+
+	if filter.EventType != nil && *filter.EventType != "" {
+		query += fmt.Sprintf(" AND event_type = $%d", argCount)
+		args = append(args, *filter.EventType)
+		argCount++
+	}
+
+	// Order by created_at descending (newest first)
+	query += " ORDER BY created_at DESC"
+
+	// Apply limit if specified
+	if filter.Limit > 0 {
+		query += fmt.Sprintf(" LIMIT $%d", argCount)
+		args = append(args, filter.Limit)
+		argCount++
+	}
+
+	// Apply offset if specified
+	if filter.Offset > 0 {
+		query += fmt.Sprintf(" OFFSET $%d", argCount)
+		args = append(args, filter.Offset)
+	}
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, cuserr.NewExternalError("database", "postgres", err,
+			cuserr.WithMetadata("operation", "list_deliveries"),
+		)
+	}
+	defer rows.Close()
+
+	deliveries := []*Delivery{}
+	for rows.Next() {
+		delivery, err := scanDelivery(rows)
+		if err != nil {
+			return nil, cuserr.NewExternalError("database", "postgres", err,
+				cuserr.WithMetadata("operation", "scan_delivery"),
+			)
+		}
+		deliveries = append(deliveries, delivery)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, cuserr.NewExternalError("database", "postgres", err,
+			cuserr.WithMetadata("operation", "list_deliveries_rows"),
+		)
+	}
+
+	return deliveries, nil
+}
+
 // MoveToDeadLetter moves a delivery to the dead letter queue.
 // This is called when a delivery exhausts all retry attempts.
 func (r *PostgresRepository) MoveToDeadLetter(ctx context.Context, deliveryID string, reason string) error {
