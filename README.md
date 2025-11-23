@@ -1,253 +1,264 @@
 # go-hookd
 
-Production-ready webhook management system for Go applications with reliable delivery, circuit breakers, and comprehensive retry logic.
+A webhook delivery management library for Go applications. Handles webhook subscriptions, reliable delivery with retries, circuit breakers, and idempotency.
 
 [![Go Version](https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat&logo=go)](https://golang.org)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Test Coverage](https://img.shields.io/badge/coverage-70%25+-brightgreen.svg)](https://github.com/itsatony/go-hookd)
+[![Test Coverage](https://img.shields.io/badge/coverage-62.1%25-yellow.svg)](https://github.com/itsatony/go-hookd)
 
-## Overview
+> **Status**: Pre-MVP Development
+> This library is under active development. Core functionality is implemented and tested, but breaking changes may occur before v1.0.
 
-go-hookd is a high-performance webhook delivery system that handles the complexity of reliable webhook delivery, including:
+## What is go-hookd?
 
-- **Reliable Delivery**: Automatic retries with exponential backoff
-- **Circuit Breakers**: Per-endpoint failure detection and recovery
-- **Idempotency**: Prevent duplicate deliveries with idempotency keys
-- **Multi-tenancy**: Isolated webhook subscriptions per tenant
-- **HMAC Signatures**: Secure payload signing (HMAC-SHA256)
-- **PostgreSQL Backend**: Durable storage with SKIP LOCKED for concurrency
-- **Event System**: Pluggable event bus for monitoring and observability
+go-hookd is a Go library that manages webhook subscriptions and deliveries. It provides the infrastructure to:
+- Store webhook subscriptions with configuration
+- Queue and deliver webhook HTTP requests
+- Retry failed deliveries with exponential backoff
+- Track delivery attempts and responses
+- Prevent duplicate deliveries via idempotency keys
+- Circuit-break failing endpoints automatically
+
+**What go-hookd is NOT:**
+- Not a standalone service (it's a library you integrate)
+- Not an HTTP server (you provide your own API endpoints)
+- Not a message queue replacement (it uses PostgreSQL for persistence)
 
 ## Features
 
-### Core Capabilities
+### Implemented and Tested
 
-- ✅ **Subscription Management**: Full CRUD for webhook subscriptions
-- ✅ **Delivery Queue**: Persistent queue with configurable retry policies
-- ✅ **Worker Pool**: Concurrent delivery processing with semaphore control
-- ✅ **Circuit Breaker**: Automatic endpoint health tracking (closed/half-open/open)
-- ✅ **Idempotency**: Duplicate detection with configurable TTL
-- ✅ **Status Tracking**: Detailed delivery attempts with response capture
-- ✅ **Dead Letter Queue**: Failed deliveries after retry exhaustion
-- ✅ **Graceful Shutdown**: Context-based cancellation with worker synchronization
+- **Subscription Management**: Create, read, update, delete webhook subscriptions with filtering
+- **Delivery Queue**: Queue webhook deliveries with validation and status tracking
+- **Worker Pool**: Configurable concurrent workers for processing deliveries
+- **Retry Logic**: Exponential backoff with configurable attempts and timing
+- **Circuit Breaker**: Per-endpoint failure detection (closed → half-open → open states)
+- **Idempotency**: Duplicate prevention using idempotency keys with TTL
+- **Status Tracking**: Detailed delivery attempts with HTTP responses
+- **Event System**: Internal event bus for observability (delivery, circuit breaker, metrics events)
+- **Graceful Shutdown**: Context-based cancellation with in-flight request completion
+- **Signature Verification**: HMAC-SHA256 payload signing for webhook authenticity
 
-### Technical Highlights
+### Current Limitations
 
-- **Zero Magic Strings**: 200+ constants, type-safe throughout
-- **Type-Safe Errors**: Comprehensive error types with go-cuserr
-- **Thread-Safe**: Lock-free design with proper synchronization
-- **Observable**: Event-driven architecture for metrics and monitoring
-- **Testable**: 5,400+ lines of tests with 70%+ coverage
-- **Production-Ready**: Battle-tested architecture
+- **No Migrations Included**: You need to create database schema based on repository interface
+- **PostgreSQL Only**: No support for other databases yet
+- **No Built-in API**: You implement HTTP handlers for your use case
+- **Limited Observability**: Event bus works, but metrics/tracing require integration
+- **No Admin UI**: Library-only, bring your own dashboard
 
-## Quick Start
-
-### Installation
+## Installation
 
 ```bash
 go get github.com/itsatony/go-hookd
 ```
 
-### Basic Usage
+**Dependencies:**
+- Go 1.24+
+- PostgreSQL 13+ (for production use)
+- Or use `MockRepository` for testing/development
+
+## Quick Start
+
+### Basic Example (with Mock Repository)
+
+Perfect for testing and development without a database:
 
 ```go
 package main
 
 import (
-    "context"
-    "log"
+	"context"
+	"fmt"
+	"log"
+	"time"
 
-    "github.com/itsatony/go-hookd"
+	"github.com/itsatony/go-hookd"
 )
 
 func main() {
-    // Configure manager
-    config := hookd.NewConfig("postgres://localhost:5432/hookd?sslmode=disable")
-    config.WorkerCount = 10
-    config.QueuePollInterval = 1000 // milliseconds
+	// Configure (PostgreSQL connection not required for mock)
+	config := hookd.NewConfig("")
+	config.WorkerCount = 2
+	config.QueuePollInterval = 500 // milliseconds
 
-    // Create repository
-    repo, err := hookd.NewPostgresRepository(context.Background(), config)
-    if err != nil {
-        log.Fatal(err)
-    }
+	// Use mock repository (in-memory, no database needed)
+	repo := hookd.NewMockRepository()
 
-    // Initialize manager
-    manager, err := hookd.NewManager(config, repo)
-    if err != nil {
-        log.Fatal(err)
-    }
+	// Create manager
+	manager, err := hookd.NewManager(config, repo)
+	if err != nil {
+		log.Fatal(err)
+	}
 
-    // Start processing
-    ctx := context.Background()
-    if err := manager.Start(ctx); err != nil {
-        log.Fatal(err)
-    }
-    defer manager.Stop()
+	// Start workers
+	ctx := context.Background()
+	if err := manager.Start(ctx); err != nil {
+		log.Fatal(err)
+	}
+	defer manager.Stop()
 
-    // Create subscription
-    sub, err := manager.CreateSubscription(ctx, &hookd.CreateSubscriptionRequest{
-        TenantID:   "tenant_123",
-        URL:        "https://example.com/webhook",
-        EventTypes: []string{"user.created", "user.updated"},
-        Secret:     "your_secret_key",
-    })
-    if err != nil {
-        log.Fatal(err)
-    }
+	// Create webhook subscription
+	sub, err := manager.CreateSubscription(ctx, &hookd.CreateSubscriptionRequest{
+		TenantID:   "tenant_001",
+		URL:        "https://webhook.site/unique-id",
+		EventTypes: []string{"user.created"},
+		Secret:     "your_webhook_secret",
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
 
-    // Queue delivery
-    delivery, err := manager.QueueDelivery(ctx, &hookd.QueueDeliveryRequest{
-        SubscriptionID: sub.ID,
-        EventType:      "user.created",
-        Payload: map[string]interface{}{
-            "user_id": "123",
-            "email":   "user@example.com",
-        },
-        IdempotencyKey: "evt_user_123_created",
-    })
-    if err != nil {
-        log.Fatal(err)
-    }
+	fmt.Printf("Created subscription: %s\n", sub.ID)
 
-    log.Printf("Delivery queued: %s", delivery.ID)
+	// Queue a delivery
+	delivery, err := manager.QueueDelivery(ctx, &hookd.QueueDeliveryRequest{
+		SubscriptionID: sub.ID,
+		EventType:      "user.created",
+		Payload: map[string]any{
+			"user_id": "12345",
+			"email":   "user@example.com",
+		},
+		IdempotencyKey: "user_12345_created_at_" + time.Now().Format("20060102"),
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Printf("Queued delivery: %s (status: %s)\n", delivery.ID, delivery.Status)
+
+	// Wait a moment for delivery processing
+	time.Sleep(3 * time.Second)
+
+	// Check delivery status
+	updated, err := manager.GetDelivery(ctx, delivery.ID)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Printf("Final delivery status: %s\n", updated.Status)
+	if updated.Status == hookd.DeliveryStatusSuccess {
+		fmt.Println("✓ Webhook delivered successfully!")
+	}
 }
 ```
 
-## Architecture
+### Production Example (with PostgreSQL)
 
-### System Components
+```go
+package main
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                         Manager                              │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
-│  │ Subscription │  │   Delivery   │  │    Worker    │     │
-│  │     CRUD     │  │    Queue     │  │     Pool     │     │
-│  └──────────────┘  └──────────────┘  └──────────────┘     │
-│                                                              │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
-│  │   Circuit    │  │  Idempotency │  │    Event     │     │
-│  │   Breaker    │  │    Keys      │  │     Bus      │     │
-│  └──────────────┘  └──────────────┘  └──────────────┘     │
-└─────────────────────────────────────────────────────────────┘
-                          │
-                          ▼
-┌─────────────────────────────────────────────────────────────┐
-│                   PostgreSQL Repository                      │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │  Subscriptions  │  Deliveries  │  Attempts  │  Keys  │  │
-│  └──────────────────────────────────────────────────────┘  │
-│                                                              │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │         Circuit Breaker State (per endpoint)          │  │
-│  └──────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
+import (
+	"context"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
+
+	"github.com/itsatony/go-hookd"
+)
+
+func main() {
+	// PostgreSQL connection
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		log.Fatal("DATABASE_URL environment variable required")
+	}
+
+	// Configure
+	config := hookd.NewConfig(dbURL)
+	config.WorkerCount = 10
+	config.QueuePollInterval = 1000
+	config.DefaultMaxRetries = 3
+
+	// Create repository
+	repo, err := hookd.NewPostgresRepository(context.Background(), config)
+	if err != nil {
+		log.Fatalf("Failed to connect to database: %v", err)
+	}
+
+	// Create manager
+	manager, err := hookd.NewManager(config, repo)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Start processing
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := manager.Start(ctx); err != nil {
+		log.Fatal(err)
+	}
+
+	log.Println("go-hookd manager started")
+
+	// Graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	<-sigChan
+
+	log.Println("Shutting down gracefully...")
+	cancel()
+	manager.Stop()
+}
 ```
 
-### Delivery Flow
-
-```
-Queue Delivery → Validate Request → Check Subscription → Check Idempotency
-      │                                                           │
-      ▼                                                           ▼
-Create Delivery → Store in DB → Worker Picks Up → Check Circuit Breaker
-      │                                                           │
-      ▼                                                           ▼
-Execute HTTP Request ─────┬─────► Success → Update Status → Publish Event
-                          │
-                          └─────► Failure → Retryable?
-                                      │            │
-                                      Yes          No (4xx)
-                                      │            └──► Dead Letter
-                                      ▼
-                                 Max Attempts?
-                                      │            │
-                                      No           Yes
-                                      │            └──► Dead Letter
-                                      ▼
-                              Schedule Retry (Exponential Backoff)
-```
+**See `examples/` directory for:**
+- `basic/` - Simple usage with mock repository
+- `http-server/` - REST API integration example
+- `monitoring/` - Event bus integration for metrics
+- `helpers/` - Common utility functions
 
 ## Configuration
 
-### Config Options
+### Config Options Explained
 
 ```go
-config := hookd.NewConfig("postgres://localhost:5432/hookd")
+config := hookd.NewConfig(databaseURL)
 
 // Worker Configuration
-config.WorkerCount = 10                    // Concurrent workers
-config.QueuePollInterval = 1000            // Poll interval (ms)
-config.MaxBatchSize = 100                  // Max deliveries per poll
+config.WorkerCount = 10                    // Number of concurrent delivery workers
+config.QueuePollInterval = 1000            // How often to check for pending deliveries (ms)
+config.MaxBatchSize = 100                  // Max deliveries to fetch per poll
 
 // Retry Configuration
-config.MaxRetries = 3                      // Max retry attempts
-config.InitialBackoffMs = 1000             // Initial backoff (ms)
-config.MaxBackoffMs = 60000                // Max backoff (ms)
-config.BackoffFactor = 2.0                 // Exponential factor
+config.DefaultMaxRetries = 3               // Default retry attempts (overridable per subscription)
+config.DefaultInitialBackoffMs = 1000      // First retry after 1s
+config.DefaultMaxBackoffMs = 60000         // Max retry delay of 60s
+config.DefaultBackoffFactor = 2.0          // Double the delay each retry
 
 // Circuit Breaker Configuration
-config.CircuitBreakerThreshold = 5         // Failures to open
-config.CircuitBreakerTimeoutMs = 60000     // Open timeout (ms)
-config.CircuitBreakerHalfOpenRequests = 3  // Successes to close
+config.CircuitBreakerThreshold = 5         // Open circuit after 5 consecutive failures
+config.CircuitBreakerTimeoutMs = 60000     // Keep circuit open for 60s
+config.CircuitBreakerHalfOpenRequests = 3  // Need 3 successes to close circuit
 
-// Delivery Configuration
-config.DeliveryTimeoutMs = 30000           // HTTP timeout (ms)
+// HTTP Configuration
+config.DeliveryTimeoutMs = 30000           // Timeout for webhook HTTP requests (30s)
 
 // Idempotency Configuration
-config.IdempotencyTTLHours = 24            // Key TTL (hours)
+config.IdempotencyTTLHours = 24            // How long to remember idempotency keys
 
 // Shutdown Configuration
-config.ShutdownTimeoutMs = 30000           // Graceful shutdown (ms)
+config.ShutdownTimeoutMs = 30000           // Max time to wait for graceful shutdown
 ```
 
-### Custom Options
+### Understanding Retry Logic
 
-```go
-// Custom logger
-logger, _ := zap.NewProduction()
-manager, err := hookd.NewManager(config, repo,
-    hookd.WithLogger(logger),
-)
+When a delivery fails:
+1. **Check if retryable**: 5xx status codes and network errors → retry, 4xx → don't retry
+2. **Check attempts**: If attempts < MaxRetries → schedule retry
+3. **Calculate backoff**: `delay = min(InitialBackoff * (Factor ^ attempt), MaxBackoff)`
+4. **Schedule**: Delivery moves to `pending` status with `next_attempt_at` timestamp
+5. **Retry**: Worker picks it up when `next_attempt_at` is reached
 
-// Custom event bus
-eventBus := &MyEventBus{}
-manager, err := hookd.NewManager(config, repo,
-    hookd.WithEventBus(eventBus),
-)
+### Understanding Circuit Breaker
 
-// Custom HTTP client
-httpClient := &http.Client{
-    Timeout: 10 * time.Second,
-}
-manager, err := hookd.NewManager(config, repo,
-    hookd.WithHTTPClient(httpClient),
-)
-```
-
-## Database Schema
-
-### Setup
-
-```bash
-# Start PostgreSQL with Docker Compose
-docker-compose up -d
-
-# Run migrations
-psql -h localhost -p 54321 -U hookd -d hookd -f migrations/postgres/000001_create_tables.up.sql
-
-# Or use the helper script
-./scripts/db-dev.sh bootstrap
-```
-
-### Tables
-
-- **subscriptions**: Webhook subscription configuration
-- **deliveries**: Delivery queue and status tracking
-- **delivery_attempts**: Individual HTTP attempts with responses
-- **idempotency_keys**: Duplicate prevention with TTL
-- **circuit_breaker_state**: Per-endpoint health status
+Per-endpoint state machine:
+- **Closed** (normal): Requests go through normally
+- **Open** (failing): After `Threshold` consecutive failures, all requests fast-fail
+- **Half-Open** (testing): After `TimeoutMs`, allow `HalfOpenRequests` to test recovery
+- **Closed** (recovered): If half-open requests succeed, resume normal operation
 
 ## API Reference
 
@@ -256,180 +267,434 @@ psql -h localhost -p 54321 -U hookd -d hookd -f migrations/postgres/000001_creat
 ```go
 // Create subscription
 sub, err := manager.CreateSubscription(ctx, &hookd.CreateSubscriptionRequest{
-    TenantID:   "tenant_123",
-    URL:        "https://example.com/webhook",
-    EventTypes: []string{"user.created"},
-    Secret:     "webhook_secret",
-    RetryPolicy: &hookd.RetryPolicy{
-        MaxAttempts:    5,
-        InitialBackoff: 2 * time.Second,
-        MaxBackoff:     2 * time.Minute,
-        BackoffFactor:  2.0,
-    },
-    Headers: map[string]string{
-        "X-Custom-Header": "value",
-    },
-    Metadata: map[string]interface{}{
-        "team": "engineering",
-    },
+	TenantID:   "tenant_123",             // Multi-tenancy identifier
+	URL:        "https://api.example.com/webhook",
+	EventTypes: []string{"user.created", "user.updated"},
+	Secret:     "webhook_signing_secret",  // For HMAC signature
+	RetryPolicy: &hookd.RetryPolicy{       // Optional: override defaults
+		MaxAttempts:    5,
+		InitialBackoff: 2 * time.Second,
+		MaxBackoff:     5 * time.Minute,
+		BackoffFactor:  2.0,
+	},
+	Headers: map[string]string{            // Optional: custom headers
+		"X-API-Key": "your-api-key",
+	},
+	Metadata: map[string]any{              // Optional: arbitrary data
+		"customer_id": "cust_123",
+		"environment": "production",
+	},
 })
 
-// Get subscription
+// Get subscription by ID
 sub, err := manager.GetSubscription(ctx, subscriptionID)
 
-// Update subscription
+// Update subscription (all fields optional via pointers)
 updated, err := manager.UpdateSubscription(ctx, subscriptionID, &hookd.UpdateSubscriptionRequest{
-    EventTypes: &[]string{"user.created", "user.updated"},
-    Status:     hookd.StringPtr("paused"),
+	EventTypes: &[]string{"user.created", "user.updated", "user.deleted"},
+	Status:     hookd.StringPtr(hookd.SubscriptionStatusPaused),
+	Headers:    &map[string]string{"X-API-Key": "new-key"},
 })
 
-// List subscriptions
+// List subscriptions with filters
 subs, err := manager.ListSubscriptions(ctx, &hookd.SubscriptionFilter{
-    TenantID:   "tenant_123",
-    Status:     hookd.SubscriptionStatusActive,
-    EventTypes: []string{"user.created"},
+	TenantID:   "tenant_123",             // Filter by tenant
+	Status:     hookd.SubscriptionStatusActive,  // Only active subscriptions
+	EventTypes: []string{"user.created"}, // Subscriptions for this event
+	Limit:      100,                      // Pagination
+	Offset:     0,
 })
 
-// Pause/Resume/Disable
-paused, err := manager.PauseSubscription(ctx, subscriptionID)
-resumed, err := manager.ResumeSubscription(ctx, subscriptionID)
-disabled, err := manager.DisableSubscription(ctx, subscriptionID)
+// Lifecycle management
+paused, err := manager.PauseSubscription(ctx, subscriptionID)   // Pause delivery
+resumed, err := manager.ResumeSubscription(ctx, subscriptionID) // Resume delivery
+disabled, err := manager.DisableSubscription(ctx, subscriptionID) // Soft delete
 
-// Delete subscription
+// Hard delete (removes from database)
 err := manager.DeleteSubscription(ctx, subscriptionID)
 ```
 
 ### Delivery Management
 
 ```go
-// Queue delivery
+// Queue a delivery
 delivery, err := manager.QueueDelivery(ctx, &hookd.QueueDeliveryRequest{
-    SubscriptionID: subscriptionID,
-    EventType:      "user.created",
-    Payload: map[string]interface{}{
-        "user_id": "123",
-        "email":   "user@example.com",
-    },
-    IdempotencyKey: "evt_user_123_created",
+	SubscriptionID: subscriptionID,
+	EventType:      "user.created",
+	Payload: map[string]any{
+		"user_id":    "12345",
+		"email":      "user@example.com",
+		"created_at": time.Now(),
+	},
+	IdempotencyKey: "user_12345_created", // Optional: prevent duplicates
 })
 
-// Get delivery status
+// Check delivery status
 delivery, err := manager.GetDelivery(ctx, deliveryID)
+fmt.Printf("Status: %s, Attempts: %d\n", delivery.Status, delivery.AttemptCount)
 
-// Get delivery attempts
+// Get all delivery attempts
 attempts, err := manager.GetDeliveryAttempts(ctx, deliveryID)
+for _, attempt := range attempts {
+	fmt.Printf("Attempt %d: %d %s (duration: %dms)\n",
+		attempt.AttemptNumber,
+		attempt.ResponseStatusCode,
+		attempt.ResponseBody,
+		attempt.ResponseDuration,
+	)
+}
 
-// Manual retry
+// Manually retry a failed delivery
 retried, err := manager.RetryDelivery(ctx, deliveryID)
+
+// List deliveries with filters
+deliveries, err := manager.ListDeliveries(ctx, &hookd.DeliveryFilter{
+	SubscriptionID: subscriptionID,       // Deliveries for specific subscription
+	Status:         hookd.DeliveryStatusFailed,  // Only failed deliveries
+	EventType:      "user.created",       // Specific event type
+	Limit:          50,
+	Offset:         0,
+})
 ```
 
-## Event System
+### Delivery Statuses
 
-Subscribe to internal events for monitoring, metrics, and observability:
+| Status | Description | Next Action |
+|--------|-------------|-------------|
+| `pending` | Queued, waiting for worker | Worker will pick up |
+| `processing` | Currently being delivered | Wait for completion |
+| `success` | Delivered successfully (2xx response) | Done |
+| `failed` | Delivery failed, will retry | Automatic retry scheduled |
+| `dead_letter` | Failed after max retries | Manual intervention needed |
+
+## Event System for Observability
+
+go-hookd publishes internal events that you can subscribe to for monitoring:
 
 ```go
+type EventBus interface {
+	Publish(topic string, data any)
+	Subscribe(topic string, handler func(any)) func()
+}
+
+// Implement your event bus
 type MyEventBus struct {
-    subscribers map[string][]func(interface{})
+	handlers map[string][]func(any)
+	mu       sync.RWMutex
 }
 
-func (b *MyEventBus) Publish(topic string, data interface{}) {
-    // Send to metrics, logging, alerting, etc.
-    for _, handler := range b.subscribers[topic] {
-        go handler(data)
-    }
+func (b *MyEventBus) Publish(topic string, data any) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	for _, handler := range b.handlers[topic] {
+		go handler(data) // Handle async to not block delivery
+	}
 }
 
-func (b *MyEventBus) Subscribe(topic string, handler func(interface{})) func() {
-    b.subscribers[topic] = append(b.subscribers[topic], handler)
-    return func() { /* Unsubscribe logic */ }
+func (b *MyEventBus) Subscribe(topic string, handler func(any)) func() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	b.handlers[topic] = append(b.handlers[topic], handler)
+
+	return func() { /* unsubscribe logic */ }
 }
+
+// Use with manager
+eventBus := &MyEventBus{handlers: make(map[string][]func(any))}
+manager, err := hookd.NewManager(config, repo,
+	hookd.WithEventBus(eventBus),
+)
+
+// Subscribe to events
+eventBus.Subscribe("delivery.success", func(data any) {
+	// Increment success counter, log, send to metrics system, etc.
+	log.Printf("Delivery succeeded: %+v", data)
+})
+
+eventBus.Subscribe("delivery.failed", func(data any) {
+	// Increment failure counter, alert on-call, etc.
+	log.Printf("Delivery failed: %+v", data)
+})
+
+eventBus.Subscribe("circuit.opened", func(data any) {
+	// Alert: endpoint is failing
+	log.Printf("Circuit breaker opened: %+v", data)
+})
 ```
 
-### Available Events
+### Available Event Topics
 
-- `delivery.queued`, `delivery.started`, `delivery.success`, `delivery.failed`, `delivery.dead_letter`
-- `circuit.opened`, `circuit.half_open`, `circuit.closed`
-- `metrics.delivery_attempt`, `metrics.retry_triggered`, `metrics.queue_depth`
-- `audit.subscription_created`, `audit.subscription_updated`, `audit.subscription_deleted`
+**Delivery Events:**
+- `delivery.queued` - New delivery queued
+- `delivery.started` - Worker started processing
+- `delivery.success` - Delivered successfully (2xx)
+- `delivery.failed` - Delivery failed (will retry or dead letter)
+- `delivery.dead_letter` - Moved to dead letter queue
+
+**Circuit Breaker Events:**
+- `circuit.opened` - Circuit opened due to failures
+- `circuit.half_open` - Testing recovery
+- `circuit.closed` - Circuit closed, normal operation
+
+**Metrics Events:**
+- `metrics.delivery_attempt` - Delivery attempt completed (success or failure)
+- `metrics.retry_triggered` - Retry scheduled
+- `metrics.queue_depth` - Periodic queue depth measurement
+
+**Audit Events:**
+- `audit.subscription_created`
+- `audit.subscription_updated`
+- `audit.subscription_deleted`
 
 ## Webhook Signature Verification
 
-### Receiver Side
+go-hookd signs all webhook payloads with HMAC-SHA256. Recipients should verify signatures:
+
+### Receiver Implementation
 
 ```go
 import (
-    "crypto/hmac"
-    "crypto/sha256"
-    "encoding/hex"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"io"
+	"net/http"
+	"strings"
 )
 
-func verifySignature(payload []byte, signature string, secret string) bool {
-    mac := hmac.New(sha256.New, []byte(secret))
-    mac.Write(payload)
-    expectedSignature := "sha256=" + hex.EncodeToString(mac.Sum(nil))
-    return hmac.Equal([]byte(signature), []byte(expectedSignature))
-}
-
-// In your webhook handler
 func handleWebhook(w http.ResponseWriter, r *http.Request) {
-    signature := r.Header.Get("X-Webhook-Signature")
-    payload, _ := io.ReadAll(r.Body)
+	// Extract signature header
+	signature := r.Header.Get("X-Webhook-Signature")
+	timestamp := r.Header.Get("X-Webhook-Timestamp")
+	deliveryID := r.Header.Get("X-Webhook-Delivery-ID")
 
-    if !verifySignature(payload, signature, secret) {
-        http.Error(w, "Invalid signature", http.StatusUnauthorized)
-        return
-    }
+	// Read body
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Cannot read body", http.StatusBadRequest)
+		return
+	}
 
-    // Process webhook...
+	// Verify signature
+	secret := "your_webhook_secret" // From subscription
+	if !verifySignature(timestamp, body, signature, secret) {
+		http.Error(w, "Invalid signature", http.StatusUnauthorized)
+		return
+	}
+
+	// Process webhook
+	// ... your business logic ...
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"status":"received"}`))
+}
+
+func verifySignature(timestamp string, payload []byte, signature, secret string) bool {
+	// Construct signed message: timestamp.payload
+	message := timestamp + "." + string(payload)
+
+	// Calculate HMAC-SHA256
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(message))
+	expectedMAC := hex.EncodeToString(mac.Sum(nil))
+
+	// Compare signatures (constant-time comparison)
+	return hmac.Equal([]byte(signature), []byte(expectedMAC))
 }
 ```
 
-## Performance
+### Signature Headers
 
-### Benchmarks
+go-hookd includes these headers in webhook requests:
 
+| Header | Description | Example |
+|--------|-------------|---------|
+| `X-Webhook-Signature` | HMAC-SHA256 hex signature | `a3f2...` |
+| `X-Webhook-Timestamp` | Unix timestamp (string) | `1635789456` |
+| `X-Webhook-Delivery-ID` | Unique delivery ID | `dlv_abc123` |
+
+**Signature Format:**
 ```
-BenchmarkQueueDelivery-8          50000    35000 ns/op    4200 B/op    85 allocs/op
-BenchmarkProcessDelivery-8        10000   150000 ns/op   12000 B/op   180 allocs/op
-BenchmarkSubscriptionCRUD-8      100000    20000 ns/op    3500 B/op    70 allocs/op
+HMAC-SHA256(secret, timestamp + "." + payload)
 ```
 
-### Scaling Guidelines
+## Database Schema
 
-- **Workers**: 1 worker per CPU core recommended
-- **Batch Size**: 50-100 deliveries per batch
-- **PostgreSQL**: Connection pool = workers × 2
-- **Circuit Breaker**: Adjust threshold based on endpoint reliability
+### Required Tables
+
+go-hookd requires these PostgreSQL tables. You need to create them:
+
+```sql
+-- Subscriptions
+CREATE TABLE subscriptions (
+    id VARCHAR(50) PRIMARY KEY,
+    tenant_id VARCHAR(100) NOT NULL,
+    url TEXT NOT NULL,
+    event_types TEXT[] NOT NULL,
+    secret TEXT NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'active',
+    retry_policy JSONB,
+    headers JSONB,
+    metadata JSONB,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+-- Deliveries
+CREATE TABLE deliveries (
+    id VARCHAR(50) PRIMARY KEY,
+    subscription_id VARCHAR(50) REFERENCES subscriptions(id),
+    tenant_id VARCHAR(100) NOT NULL,
+    event_type VARCHAR(100) NOT NULL,
+    payload JSONB NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at TIMESTAMP,
+    idempotency_key VARCHAR(200),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+-- Delivery Attempts
+CREATE TABLE delivery_attempts (
+    id VARCHAR(50) PRIMARY KEY,
+    delivery_id VARCHAR(50) REFERENCES deliveries(id),
+    attempt_number INTEGER NOT NULL,
+    response_status_code INTEGER,
+    response_body TEXT,
+    response_duration INTEGER,
+    error_message TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+-- Circuit Breaker State
+CREATE TABLE circuit_breaker_state (
+    endpoint VARCHAR(500) PRIMARY KEY,
+    state VARCHAR(20) NOT NULL DEFAULT 'closed',
+    failure_count INTEGER NOT NULL DEFAULT 0,
+    last_failure_at TIMESTAMP,
+    opened_at TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+-- Idempotency Keys
+CREATE TABLE idempotency_keys (
+    key VARCHAR(200) PRIMARY KEY,
+    delivery_id VARCHAR(50),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMP NOT NULL
+);
+
+-- Indexes for performance
+CREATE INDEX idx_deliveries_status ON deliveries(status);
+CREATE INDEX idx_deliveries_next_attempt ON deliveries(next_attempt_at) WHERE status = 'pending';
+CREATE INDEX idx_deliveries_subscription ON deliveries(subscription_id);
+CREATE INDEX idx_deliveries_tenant ON deliveries(tenant_id);
+CREATE INDEX idx_idempotency_expires ON idempotency_keys(expires_at);
+```
+
+**Note:** This schema is a guideline. Adapt it to your database conventions.
 
 ## Testing
 
 ```bash
-# Unit tests
-go test ./internal/ -v
+# Run all unit tests
+go test . -v
 
-# With race detector
-go test -race ./internal/
+# Run with race detector
+go test -race .
 
-# With coverage
-go test -cover ./internal/
+# Run with coverage
+go test -cover .
 
-# Coverage report
-go test -coverprofile=coverage.out ./internal/
+# Generate coverage report
+go test -coverprofile=coverage.out .
 go tool cover -html=coverage.out
 ```
 
-## Project Statistics
+## Performance Considerations
 
-- **29 Files Created**: 25 Go files + 4 supporting files
-- **Production Code**: 6,191 LOC
-- **Test Code**: 5,403 LOC
-- **Total**: 11,594 LOC
-- **Test Coverage**: 70%+ on core functionality
-- **Zero Race Conditions**: Verified with `go test -race`
+### Scaling Guidelines
+
+**Worker Count:**
+- Start with 1-2 workers per CPU core
+- Monitor queue depth - if growing, increase workers
+- Too many workers can overwhelm database connection pool
+
+**Batch Size:**
+- Default: 100 deliveries per poll
+- Higher = more efficient polling, but longer processing cycles
+- Lower = faster reaction time, but more database queries
+
+**PostgreSQL Connection Pool:**
+- Set connection pool size ≥ WorkerCount × 2
+- Each worker needs connections for: fetch delivery, update status, insert attempts
+
+**Queue Poll Interval:**
+- Default: 1000ms (1 second)
+- Lower = faster delivery start, but more database load
+- Higher = less database load, but slower to pick up new deliveries
+
+### Monitoring Recommendations
+
+Essential metrics to track via event bus:
+1. Queue depth (pending deliveries)
+2. Delivery success/failure rates
+3. Average delivery duration
+4. Circuit breaker state changes
+5. Worker utilization
+6. Dead letter queue size
+
+## Limitations and Known Issues
+
+### Current Limitations
+
+1. **Database**: PostgreSQL only (no MySQL, SQLite, etc.)
+2. **No Migrations**: You must create schema manually
+3. **No HTTP Server**: Library only, bring your own API
+4. **Single-Region**: No built-in multi-region support
+5. **No Webhooks Registry**: No centralized webhook discovery
+6. **Limited Filtering**: Basic subscription filtering only
+
+### Known Issues
+
+- Integration tests require Docker/PostgreSQL setup
+- Circuit breaker state is per-manager (not distributed)
+- No automatic cleanup of old delivery attempts
+- Event bus is synchronous (can block delivery if slow)
 
 ## Contributing
 
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Contributions welcome! This project follows:
+- Conventional commits
+- 100% test coverage on new code
+- go-cuserr for error handling
+- No magic strings (use constants)
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for full guidelines.
+
+## Project Status
+
+**Current Version**: Pre-1.0 (under development)
+
+**What's Working:**
+- ✓ Core subscription and delivery management
+- ✓ Retry logic with exponential backoff
+- ✓ Circuit breaker per endpoint
+- ✓ Idempotency with keys
+- ✓ Event bus for observability
+- ✓ Signature verification
+- ✓ Graceful shutdown
+
+**What's Coming:**
+- Database migrations
+- Distributed circuit breaker (Redis)
+- Prometheus metrics integration
+- Dead letter queue management UI
+- Delivery replay functionality
+- Webhook testing tools
 
 ## License
 
@@ -437,10 +702,20 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 ## Credits
 
-Built with ❤️ by [@itsatony](https://github.com/itsatony)
+Created by [@itsatony](https://github.com/itsatony)
 
-**Dependencies:**
-- [go-cuserr](https://github.com/itsatony/go-cuserr) - Custom error types
+**Core Dependencies:**
+- [go-cuserr](https://github.com/itsatony/go-cuserr) - Structured error handling
+- [go-version](https://github.com/itsatony/go-version) - Version management
 - [zap](https://github.com/uber-go/zap) - Structured logging
-- [nanoid](https://github.com/matoous/go-nanoid) - ID generation
+- [nanoid](https://github.com/matoous/go-nanoid) - Unique ID generation
 - [lib/pq](https://github.com/lib/pq) - PostgreSQL driver
+
+---
+
+**Documentation:**
+- [Implementation Guide](docs/implementation_guide.md) - Architecture and design
+- [Code Rules](docs/code_rules.md) - Development standards
+- [Production Readiness](PRODUCTION_READINESS_ASSESSMENT.md) - Quality assessment
+
+**Need Help?** Check the `examples/` directory or open an issue.
