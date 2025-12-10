@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/itsatony/go-cuserr"
@@ -256,6 +257,89 @@ func calculateSignature(secret, timestamp string, payload []byte) string {
 func VerifySignature(secret, timestamp string, payload []byte, signature string) bool {
 	expectedSignature := calculateSignature(secret, timestamp, payload)
 	return hmac.Equal([]byte(expectedSignature), []byte(signature))
+}
+
+// MatchEventType checks if an event type matches a pattern.
+//
+// Supported patterns:
+//   - "*" matches any event type
+//   - "prefix.*" matches any event type starting with "prefix."
+//   - Exact string matches the event type exactly
+//
+// Examples:
+//
+//	MatchEventType("*", "order.created") // true
+//	MatchEventType("order.*", "order.created") // true
+//	MatchEventType("order.*", "order.updated") // true
+//	MatchEventType("order.*", "user.created") // false
+//	MatchEventType("order.created", "order.created") // true
+//	MatchEventType("order.created", "order.updated") // false
+func MatchEventType(pattern, eventType string) bool {
+	// Universal wildcard matches everything
+	if pattern == WildcardAll {
+		return true
+	}
+
+	// Prefix wildcard (e.g., "order.*")
+	if strings.HasSuffix(pattern, WildcardSuffix) {
+		prefix := strings.TrimSuffix(pattern, WildcardSuffix)
+		return strings.HasPrefix(eventType, prefix+".")
+	}
+
+	// Exact match
+	return pattern == eventType
+}
+
+// MatchesAnyEventType checks if an event type matches any pattern in the list.
+//
+// This is used to validate that an event type matches at least one of the
+// subscription's configured event types.
+//
+// Returns true if at least one pattern matches.
+func MatchesAnyEventType(patterns []string, eventType string) bool {
+	for _, pattern := range patterns {
+		if MatchEventType(pattern, eventType) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsWildcardPattern returns true if the pattern contains wildcards.
+func IsWildcardPattern(pattern string) bool {
+	return pattern == WildcardAll || strings.HasSuffix(pattern, WildcardSuffix)
+}
+
+// MatchesMetadata checks if event metadata contains all required filter values.
+//
+// Returns true if ALL filter key-values match the corresponding metadata values.
+// An empty filter map always returns true (no filtering applied).
+//
+// Examples:
+//
+//	filters := map[string]string{"status": "failed", "type": "job"}
+//	MatchesMetadata(filters, map[string]any{"status": "failed", "type": "job"}) // true
+//	MatchesMetadata(filters, map[string]any{"status": "success", "type": "job"}) // false
+//	MatchesMetadata(nil, map[string]any{"anything": "value"}) // true (no filters)
+func MatchesMetadata(filters map[string]string, metadata map[string]any) bool {
+	if len(filters) == 0 {
+		return true // No filters means always match
+	}
+
+	for key, expectedValue := range filters {
+		actualValue, exists := metadata[key]
+		if !exists {
+			return false // Required key missing
+		}
+
+		// Convert to string for comparison
+		actualStr := fmt.Sprintf("%v", actualValue)
+		if actualStr != expectedValue {
+			return false // Value mismatch
+		}
+	}
+
+	return true
 }
 
 // calculateBackoff calculates the next retry delay using exponential backoff.

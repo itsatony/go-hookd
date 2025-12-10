@@ -71,6 +71,11 @@ type Repository interface {
 	// This is called when a delivery exhausts all retry attempts.
 	MoveToDeadLetter(ctx context.Context, deliveryID string, reason string) error
 
+	// DeleteDelivery permanently deletes a delivery and its attempts.
+	// This is used for purging dead letter deliveries.
+	// Returns ErrDeliveryNotFound if the delivery does not exist.
+	DeleteDelivery(ctx context.Context, id string) error
+
 	// Delivery Attempt Operations
 
 	// CreateDeliveryAttempt records a delivery attempt.

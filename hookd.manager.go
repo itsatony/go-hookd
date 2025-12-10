@@ -294,33 +294,50 @@ func (m *Manager) processDeliveries(workerID int) {
 
 // processDelivery processes a single delivery.
 func (m *Manager) processDelivery(ctx context.Context, delivery *Delivery) {
-	// Get subscription
-	sub, err := m.repo.GetSubscription(ctx, delivery.SubscriptionID)
-	if err != nil {
-		m.logger.Error("failed to get subscription",
-			zap.String("delivery_id", delivery.ID),
-			zap.String("subscription_id", delivery.SubscriptionID),
-			zap.Error(err),
-		)
-		return
+	var sub *Subscription
+	var targetURL string
+
+	// Check if this is an inline delivery (no subscription)
+	if delivery.SubscriptionID == "" {
+		// Inline delivery - URL and Secret are on the delivery itself
+		if delivery.URL == "" {
+			m.logger.Error("inline delivery missing URL",
+				zap.String("delivery_id", delivery.ID),
+			)
+			return
+		}
+		targetURL = delivery.URL
+	} else {
+		// Subscription-based delivery
+		var err error
+		sub, err = m.repo.GetSubscription(ctx, delivery.SubscriptionID)
+		if err != nil {
+			m.logger.Error("failed to get subscription",
+				zap.String("delivery_id", delivery.ID),
+				zap.String("subscription_id", delivery.SubscriptionID),
+				zap.Error(err),
+			)
+			return
+		}
+
+		// Check if subscription is active
+		if sub.Status != SubscriptionStatusActive {
+			m.logger.Warn("skipping delivery for inactive subscription",
+				zap.String("delivery_id", delivery.ID),
+				zap.String("subscription_id", delivery.SubscriptionID),
+				zap.String("status", sub.Status),
+			)
+			return
+		}
+		targetURL = sub.URL
 	}
 
-	// Check if subscription is active
-	if sub.Status != SubscriptionStatusActive {
-		m.logger.Warn("skipping delivery for inactive subscription",
-			zap.String("delivery_id", delivery.ID),
-			zap.String("subscription_id", delivery.SubscriptionID),
-			zap.String("status", sub.Status),
-		)
-		return
-	}
-
-	// Check circuit breaker
-	cbState, err := m.repo.GetCircuitBreakerState(ctx, sub.URL)
+	// Check circuit breaker (using target URL)
+	cbState, err := m.repo.GetCircuitBreakerState(ctx, targetURL)
 	if err != nil {
 		m.logger.Error("failed to get circuit breaker state",
 			zap.String("delivery_id", delivery.ID),
-			zap.String("url", sub.URL),
+			zap.String("url", targetURL),
 			zap.Error(err),
 		)
 	}
@@ -330,7 +347,7 @@ func (m *Manager) processDelivery(ctx context.Context, delivery *Delivery) {
 		if cbState.NextRetryAt.After(time.Now()) {
 			m.logger.Debug("circuit breaker open, skipping delivery",
 				zap.String("delivery_id", delivery.ID),
-				zap.String("url", sub.URL),
+				zap.String("url", targetURL),
 				zap.Time("next_retry_at", cbState.NextRetryAt),
 			)
 			return
@@ -347,21 +364,28 @@ func (m *Manager) processDelivery(ctx context.Context, delivery *Delivery) {
 		}
 	}
 
-	// Attempt delivery
+	// Attempt delivery (sub may be nil for inline deliveries)
 	m.attemptDelivery(ctx, delivery, sub)
 }
 
 // attemptDelivery attempts to deliver a webhook to the subscription endpoint.
+// For inline deliveries, sub may be nil - delivery.URL and delivery.Secret are used instead.
 func (m *Manager) attemptDelivery(ctx context.Context, delivery *Delivery, sub *Subscription) {
 	delivery.AttemptCount++
 	attemptNumber := delivery.AttemptCount
 
-	m.logger.Info("attempting delivery",
+	// Build log fields (subscription_id may be empty for inline deliveries)
+	logFields := []zap.Field{
 		zap.String("delivery_id", delivery.ID),
-		zap.String("subscription_id", sub.ID),
 		zap.Int("attempt_number", attemptNumber),
 		zap.Int("max_attempts", delivery.MaxAttempts),
-	)
+	}
+	if sub != nil {
+		logFields = append(logFields, zap.String("subscription_id", sub.ID))
+	} else {
+		logFields = append(logFields, zap.String("url", delivery.URL))
+	}
+	m.logger.Info("attempting delivery", logFields...)
 
 	// Publish delivery started event
 	m.publishDeliveryEvent(EventTopicDeliveryStarted, delivery, sub, nil)
@@ -428,6 +452,7 @@ func (m *Manager) attemptDelivery(ctx context.Context, delivery *Delivery, sub *
 }
 
 // executeWebhookRequest makes the HTTP request to the webhook endpoint.
+// For inline deliveries, sub may be nil - delivery.URL and delivery.Secret are used instead.
 func (m *Manager) executeWebhookRequest(ctx context.Context, delivery *Delivery, sub *Subscription) (int, string, map[string]string, error) {
 	// Marshal payload
 	payloadJSON, err := marshalJSONB(delivery.Payload)
@@ -436,12 +461,25 @@ func (m *Manager) executeWebhookRequest(ctx context.Context, delivery *Delivery,
 		return 0, "", nil, err
 	}
 
+	// Determine target URL and secret (subscription-based or inline delivery)
+	var targetURL, secret string
+	var customHeaders map[string]string
+	if sub != nil {
+		targetURL = sub.URL
+		secret = sub.Secret
+		customHeaders = sub.Headers
+	} else {
+		// Inline delivery - use delivery fields
+		targetURL = delivery.URL
+		secret = delivery.Secret
+	}
+
 	// Create request with payload body
-	req, err := http.NewRequestWithContext(ctx, "POST", sub.URL, bytes.NewReader(payloadJSON))
+	req, err := http.NewRequestWithContext(ctx, "POST", targetURL, bytes.NewReader(payloadJSON))
 	if err != nil {
 		return 0, "", nil, cuserr.NewInternalError("http_client", err,
 			cuserr.WithMetadata("operation", "create_request"),
-			cuserr.WithMetadata("url", sub.URL),
+			cuserr.WithMetadata("url", targetURL),
 		)
 	}
 
@@ -449,17 +487,20 @@ func (m *Manager) executeWebhookRequest(ctx context.Context, delivery *Delivery,
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "go-hookd/0.1.0")
 
-	// Add custom headers from subscription
-	for key, value := range sub.Headers {
+	// Add custom headers from subscription (if any)
+	for key, value := range customHeaders {
 		req.Header.Set(key, value)
 	}
 
 	// Calculate and add signature
 	timestamp := fmt.Sprintf("%d", time.Now().Unix())
-	signature := calculateSignature(sub.Secret, timestamp, payloadJSON)
+	signature := calculateSignature(secret, timestamp, payloadJSON)
 	req.Header.Set(HeaderSignature, signature)
 	req.Header.Set(HeaderTimestamp, timestamp)
 	req.Header.Set(HeaderDeliveryID, delivery.ID)
+	req.Header.Set(HeaderSubscriptionID, delivery.SubscriptionID) // Empty for inline
+	req.Header.Set(HeaderEventType, delivery.EventType)
+	req.Header.Set(HeaderAttemptNumber, fmt.Sprintf("%d", delivery.AttemptCount))
 
 	// Make request
 	resp, err := m.httpClient.Do(req)
@@ -486,6 +527,7 @@ func (m *Manager) executeWebhookRequest(ctx context.Context, delivery *Delivery,
 }
 
 // handleDeliverySuccess handles a successful delivery.
+// For inline deliveries, sub may be nil.
 func (m *Manager) handleDeliverySuccess(ctx context.Context, delivery *Delivery, sub *Subscription, attempt *DeliveryAttempt) {
 	m.logger.Info("delivery succeeded",
 		zap.String("delivery_id", delivery.ID),
@@ -505,14 +547,21 @@ func (m *Manager) handleDeliverySuccess(ctx context.Context, delivery *Delivery,
 		)
 	}
 
-	// Update circuit breaker (record success)
-	m.updateCircuitBreakerSuccess(ctx, sub.URL)
+	// Update circuit breaker (record success) - use sub.URL or delivery.URL for inline
+	var endpoint string
+	if sub != nil {
+		endpoint = sub.URL
+	} else {
+		endpoint = delivery.URL
+	}
+	m.updateCircuitBreakerSuccess(ctx, endpoint)
 
 	// Publish success event
 	m.publishDeliveryEvent(EventTopicDeliverySuccess, delivery, sub, attempt)
 }
 
 // handleDeliveryFailure handles a failed delivery.
+// For inline deliveries, sub may be nil.
 func (m *Manager) handleDeliveryFailure(ctx context.Context, delivery *Delivery, sub *Subscription, attempt *DeliveryAttempt, err error) {
 	m.logger.Warn("delivery failed",
 		zap.String("delivery_id", delivery.ID),
@@ -521,8 +570,14 @@ func (m *Manager) handleDeliveryFailure(ctx context.Context, delivery *Delivery,
 		zap.Error(err),
 	)
 
-	// Update circuit breaker (record failure)
-	m.updateCircuitBreakerFailure(ctx, sub.URL)
+	// Update circuit breaker (record failure) - use sub.URL or delivery.URL for inline
+	var endpoint string
+	if sub != nil {
+		endpoint = sub.URL
+	} else {
+		endpoint = delivery.URL
+	}
+	m.updateCircuitBreakerFailure(ctx, endpoint)
 
 	// Check if status code is non-retryable (4xx except 408, 429)
 	isNonRetryable := attempt.StatusCode >= 400 && attempt.StatusCode < 500 &&
@@ -556,8 +611,11 @@ func (m *Manager) handleDeliveryFailure(ctx context.Context, delivery *Delivery,
 		// Publish dead letter event
 		m.publishDeliveryEvent(EventTopicDeliveryDeadLetter, delivery, sub, attempt)
 	} else {
-		// Schedule retry
-		retryPolicy := sub.RetryPolicy
+		// Schedule retry - use subscription retry policy if available, else default
+		var retryPolicy *RetryPolicy
+		if sub != nil {
+			retryPolicy = sub.RetryPolicy
+		}
 		if retryPolicy == nil {
 			retryPolicy = DefaultRetryPolicy()
 		}

@@ -113,6 +113,23 @@ const (
 	EventTopicAuditSubscriptionDeleted = "audit.subscription_deleted"
 )
 
+// Test Event Types.
+const (
+	// EventTypeTestPing is the event type used for TestSubscription ping requests.
+	// Webhook endpoints should handle this gracefully (return 200 OK).
+	EventTypeTestPing = "test.ping"
+)
+
+// Wildcard Event Type Patterns.
+const (
+	// WildcardAll matches any event type ("*").
+	WildcardAll = "*"
+
+	// WildcardSuffix is the suffix for prefix wildcards (".*").
+	// A pattern like "order.*" matches "order.created", "order.updated", etc.
+	WildcardSuffix = ".*"
+)
+
 // HTTP Headers - Webhook Delivery.
 const (
 	// HeaderSignature is the HMAC signature of the payload.
@@ -129,6 +146,12 @@ const (
 
 	// HeaderEventType is the event type being delivered.
 	HeaderEventType = "X-Webhook-Event-Type"
+
+	// HeaderSubscriptionID is the subscription identifier.
+	HeaderSubscriptionID = "X-Webhook-Subscription-ID"
+
+	// HeaderIdempotencyKey is the idempotency key (if provided during queueing).
+	HeaderIdempotencyKey = "X-Webhook-Idempotency-Key"
 )
 
 // Database Table Names.
@@ -324,6 +347,12 @@ const (
 
 	// ErrMsgSubscriptionNotActive is the error message for inactive subscription.
 	ErrMsgSubscriptionNotActive = "subscription is not active"
+
+	// ErrMsgEventTypeMismatch is the error message when event type doesn't match subscription patterns.
+	ErrMsgEventTypeMismatch = "event type does not match subscription's configured event types"
+
+	// ErrMsgMetadataFilterMismatch is the error message when event metadata doesn't match subscription filters.
+	ErrMsgMetadataFilterMismatch = "event metadata does not match subscription's filter criteria"
 
 	// ErrMsgDeliveryAlreadyCompleted is the error message for completed delivery.
 	ErrMsgDeliveryAlreadyCompleted = "delivery already completed"

@@ -484,6 +484,31 @@ func (r *TransactionalRepository) MoveToDeadLetter(ctx context.Context, delivery
 	return nil
 }
 
+func (r *TransactionalRepository) DeleteDelivery(ctx context.Context, id string) error {
+	// Delete attempts first (foreign key constraint)
+	_, err := r.tx.ExecContext(ctx, `DELETE FROM delivery_attempts WHERE delivery_id = $1`, id)
+	if err != nil {
+		return err
+	}
+
+	// Delete the delivery
+	result, err := r.tx.ExecContext(ctx, `DELETE FROM deliveries WHERE id = $1`, id)
+	if err != nil {
+		return err
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if rows == 0 {
+		return hookd.NewDeliveryNotFoundError(id)
+	}
+
+	return nil
+}
+
 func (r *TransactionalRepository) CheckIdempotency(ctx context.Context, key, subscriptionID string) (bool, error) {
 	return false, nil
 }

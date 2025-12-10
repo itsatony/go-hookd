@@ -5,7 +5,12 @@
 package hookd
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
 	"time"
 
 	"go.uber.org/zap"
@@ -100,6 +105,7 @@ func (m *Manager) CreateSubscription(ctx context.Context, req *CreateSubscriptio
 		RetryPolicy: retryPolicy,
 		Headers:     req.Headers,
 		Metadata:    req.Metadata,
+		Filters:     req.Filters,
 		Status:      SubscriptionStatusActive,
 		CreatedAt:   now,
 		UpdatedAt:   now,
@@ -237,6 +243,11 @@ func (m *Manager) UpdateSubscription(ctx context.Context, id string, req *Update
 
 	if req.Metadata != nil {
 		sub.Metadata = *req.Metadata
+		updated = true
+	}
+
+	if req.Filters != nil {
+		sub.Filters = *req.Filters
 		updated = true
 	}
 
@@ -461,6 +472,132 @@ func (m *Manager) DisableSubscription(ctx context.Context, id string) (*Subscrip
 	return m.UpdateSubscription(ctx, id, &UpdateSubscriptionRequest{
 		Status: &status,
 	})
+}
+
+// TestSubscription tests a subscription's webhook endpoint connectivity.
+//
+// This method sends a test ping to the subscription's URL and returns the result.
+// The test uses the same signing and headers as real deliveries, but:
+// - Does NOT queue a delivery in the database
+// - Does NOT affect circuit breaker state
+// - Does NOT retry on failure
+// - Returns the result immediately
+//
+// This is useful for validating endpoint connectivity before enabling a subscription
+// or for debugging delivery failures.
+//
+// Parameters:
+//   - ctx: Context for cancellation and timeout
+//   - subscriptionID: ID of the subscription to test
+//
+// Returns a TestResult with success status, response code, and timing information.
+//
+// Errors:
+//   - NotFoundError: If the subscription doesn't exist
+//
+// Example:
+//
+//	result, err := manager.TestSubscription(ctx, "sub_6ByTSYmGzT2c8K3xN1fP2")
+//	if err != nil {
+//	    return err
+//	}
+//	if result.Success {
+//	    fmt.Printf("Endpoint OK: %dms response time\n", result.ResponseTime.Milliseconds())
+//	} else {
+//	    fmt.Printf("Endpoint failed: %s\n", result.Error)
+//	}
+func (m *Manager) TestSubscription(ctx context.Context, subscriptionID string) (*TestResult, error) {
+	// Get subscription
+	sub, err := m.GetSubscription(ctx, subscriptionID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create test payload
+	testPayload := map[string]any{
+		"type":      EventTypeTestPing,
+		"timestamp": time.Now().Unix(),
+		"message":   "This is a test ping from go-hookd. Your webhook endpoint is being verified.",
+	}
+
+	// Marshal payload
+	payloadJSON, err := json.Marshal(testPayload)
+	if err != nil {
+		return &TestResult{
+			Success: false,
+			Error:   "failed to marshal test payload: " + err.Error(),
+		}, nil
+	}
+
+	// Create HTTP request
+	req, err := http.NewRequestWithContext(ctx, "POST", sub.URL, bytes.NewReader(payloadJSON))
+	if err != nil {
+		return &TestResult{
+			Success: false,
+			Error:   "failed to create request: " + err.Error(),
+		}, nil
+	}
+
+	// Set headers (same as real deliveries)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "go-hookd/0.1.0")
+
+	// Add custom headers from subscription
+	for key, value := range sub.Headers {
+		req.Header.Set(key, value)
+	}
+
+	// Calculate and add signature
+	timestamp := fmt.Sprintf("%d", time.Now().Unix())
+	signature := calculateSignature(sub.Secret, timestamp, payloadJSON)
+	req.Header.Set(HeaderSignature, signature)
+	req.Header.Set(HeaderTimestamp, timestamp)
+	req.Header.Set(HeaderDeliveryID, "test_ping")
+	req.Header.Set(HeaderSubscriptionID, sub.ID)
+	req.Header.Set(HeaderEventType, EventTypeTestPing)
+	req.Header.Set(HeaderAttemptNumber, "1")
+
+	// Execute request with timing
+	startTime := time.Now()
+	resp, err := m.httpClient.Do(req)
+	responseTime := time.Since(startTime)
+
+	if err != nil {
+		return &TestResult{
+			Success:      false,
+			StatusCode:   0,
+			ResponseTime: responseTime,
+			Error:        err.Error(),
+		}, nil
+	}
+	defer resp.Body.Close()
+
+	// Read response body (limited to prevent memory issues)
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+	responseBody := string(body)
+
+	// Determine success (2xx status codes)
+	success := resp.StatusCode >= 200 && resp.StatusCode < 300
+
+	result := &TestResult{
+		Success:      success,
+		StatusCode:   resp.StatusCode,
+		ResponseTime: responseTime,
+		ResponseBody: responseBody,
+	}
+
+	if !success {
+		result.Error = fmt.Sprintf("endpoint returned status %d", resp.StatusCode)
+	}
+
+	m.logger.Info("subscription test completed",
+		zap.String("subscription_id", subscriptionID),
+		zap.Bool("success", success),
+		zap.Int("status_code", resp.StatusCode),
+		zap.Duration("response_time", responseTime),
+	)
+
+	return result, nil
 }
 
 // publishAuditEvent publishes an audit event for subscription operations.

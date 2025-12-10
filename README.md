@@ -4,10 +4,10 @@ A webhook delivery management library for Go applications. Handles webhook subsc
 
 [![Go Version](https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat&logo=go)](https://golang.org)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Test Coverage](https://img.shields.io/badge/coverage-62.1%25-yellow.svg)](https://github.com/itsatony/go-hookd)
+[![Test Coverage](https://img.shields.io/badge/coverage-80%25+-green.svg)](https://github.com/itsatony/go-hookd)
 
-> **Status**: Pre-MVP Development
-> This library is under active development. Core functionality is implemented and tested, but breaking changes may occur before v1.0.
+> **Status**: Production Ready (v0.3.0)
+> Core functionality is implemented, tested, and production-ready. The API is stable with comprehensive test coverage.
 
 ## What is go-hookd?
 
@@ -38,14 +38,20 @@ go-hookd is a Go library that manages webhook subscriptions and deliveries. It p
 - **Event System**: Internal event bus for observability (delivery, circuit breaker, metrics events)
 - **Graceful Shutdown**: Context-based cancellation with in-flight request completion
 - **Signature Verification**: HMAC-SHA256 payload signing for webhook authenticity
+- **Wildcard Event Types**: Pattern matching for event subscriptions (`*`, `job.*`)
+- **Metadata Filtering**: Filter deliveries based on event metadata fields
+- **Inline Deliveries**: One-off webhooks without pre-created subscriptions
+- **Dead Letter Queue Management**: List, retry, and purge failed deliveries
+- **Migration Helper**: Programmatic PostgreSQL schema migrations
+- **Prometheus Metrics**: Optional `prometheus/` subpackage for metrics collection
+- **Signature Verification Package**: `verify/` subpackage with replay protection
 
 ### Current Limitations
 
-- **No Migrations Included**: You need to create database schema based on repository interface
 - **PostgreSQL Only**: No support for other databases yet
 - **No Built-in API**: You implement HTTP handlers for your use case
-- **Limited Observability**: Event bus works, but metrics/tracing require integration
 - **No Admin UI**: Library-only, bring your own dashboard
+- **Single-Region Circuit Breaker**: Per-manager state (not distributed)
 
 ## Installation
 
@@ -357,6 +363,102 @@ deliveries, err := manager.ListDeliveries(ctx, &hookd.DeliveryFilter{
 })
 ```
 
+### Inline Deliveries (Without Subscriptions)
+
+For one-off webhooks without creating a subscription:
+
+```go
+// Queue an inline delivery (no subscription required)
+delivery, err := manager.QueueInlineDelivery(ctx, &hookd.QueueInlineDeliveryRequest{
+	URL:            "https://example.com/callback",
+	Secret:         "webhook_secret",        // For HMAC signature
+	TenantID:       "tenant_123",
+	EventType:      "job.completed",
+	Payload: map[string]any{
+		"job_id": "job_456",
+		"status": "success",
+	},
+	MaxRetries:     3,                       // Optional, uses defaults if not specified
+	IdempotencyKey: "job_456_completed",     // Optional, prevents duplicates
+})
+```
+
+### Dead Letter Queue Management
+
+Manage failed deliveries that exceeded retry limits:
+
+```go
+// List dead letter deliveries
+deadLetters, err := manager.ListDeadLetters(ctx, &hookd.DeadLetterFilter{
+	TenantID:  "tenant_123",
+	EventType: "order.created",
+	Limit:     100,
+})
+
+// Retry a single dead letter delivery
+retried, err := manager.RetryDeadLetter(ctx, deliveryID)
+
+// Bulk retry dead letters
+count, err := manager.RetryDeadLetters(ctx, &hookd.DeadLetterFilter{
+	TenantID:  "tenant_123",
+	EventType: "order.created",
+})
+fmt.Printf("Retried %d dead letter deliveries\n", count)
+
+// Purge old dead letters
+purged, err := manager.PurgeDeadLetters(ctx, &hookd.PurgeFilter{
+	TenantID:  "tenant_123",
+	OlderThan: time.Now().AddDate(0, 0, -30), // 30 days old
+})
+fmt.Printf("Purged %d dead letter deliveries\n", purged)
+```
+
+### Wildcard Event Types
+
+Subscribe to multiple event types with patterns:
+
+```go
+sub, err := manager.CreateSubscription(ctx, &hookd.CreateSubscriptionRequest{
+	TenantID:   "tenant_123",
+	URL:        "https://api.example.com/webhook",
+	EventTypes: []string{
+		"user.*",           // Matches user.created, user.updated, user.deleted
+		"order.completed",  // Exact match
+		"*",                // Matches everything (use carefully!)
+	},
+	Secret: "your_secret",
+})
+```
+
+### Metadata Filtering
+
+Filter deliveries based on event metadata:
+
+```go
+// Create subscription with metadata filters
+sub, err := manager.CreateSubscription(ctx, &hookd.CreateSubscriptionRequest{
+	TenantID:   "tenant_123",
+	URL:        "https://api.example.com/webhook",
+	EventTypes: []string{"job.*"},
+	Secret:     "your_secret",
+	Filters: map[string]string{
+		"corpus_id": "corpus_abc",   // Only receive events for this corpus
+		"status":    "failed",       // Only receive failed job events
+	},
+})
+
+// Queue delivery with metadata
+delivery, err := manager.QueueDelivery(ctx, &hookd.QueueDeliveryRequest{
+	SubscriptionID: subID,
+	EventType:      "job.completed",
+	Payload:        payload,
+	Metadata: map[string]any{       // Must match subscription filters
+		"corpus_id": "corpus_abc",
+		"status":    "failed",
+	},
+})
+```
+
 ### Delivery Statuses
 
 | Status | Description | Next Action |
@@ -448,11 +550,74 @@ eventBus.Subscribe("circuit.opened", func(data any) {
 - `audit.subscription_updated`
 - `audit.subscription_deleted`
 
+### Prometheus Metrics Integration
+
+Use the optional `prometheus/` subpackage for production metrics:
+
+```go
+import (
+	"github.com/itsatony/go-hookd"
+	hookdprom "github.com/itsatony/go-hookd/prometheus"
+	"github.com/prometheus/client_golang/prometheus"
+)
+
+func main() {
+	// Create Prometheus registry
+	registry := prometheus.NewRegistry()
+
+	// Create metrics collector (implements EventBus interface)
+	collector := hookdprom.NewCollector(registry)
+
+	// Create manager with Prometheus metrics
+	config := hookd.NewConfig(dbURL)
+	manager, err := hookd.NewManager(config, repo,
+		hookd.WithEventBus(collector),
+	)
+}
+```
+
+**Exported Metrics:**
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `hookd_deliveries_total` | Counter | Total deliveries by status, event_type, delivery_type |
+| `hookd_delivery_attempts_total` | Counter | Delivery attempts by status_code, event_type |
+| `hookd_delivery_duration_seconds` | Histogram | Delivery duration by status, event_type |
+| `hookd_circuit_breaker_state` | Gauge | Circuit breaker state per endpoint (0=closed, 1=half-open, 2=open) |
+| `hookd_queue_depth` | Gauge | Number of pending deliveries |
+| `hookd_dead_letter_queue_size` | Gauge | Number of dead letter deliveries |
+
 ## Webhook Signature Verification
 
-go-hookd signs all webhook payloads with HMAC-SHA256. Recipients should verify signatures:
+go-hookd signs all webhook payloads with HMAC-SHA256. Recipients should verify signatures.
 
-### Receiver Implementation
+### Using the verify Package (Recommended)
+
+```go
+import "github.com/itsatony/go-hookd/verify"
+
+func handleWebhook(w http.ResponseWriter, r *http.Request) {
+	body, _ := io.ReadAll(r.Body)
+
+	valid, err := verify.Signature(verify.SignatureParams{
+		Secret:    "your_webhook_secret",
+		Signature: r.Header.Get("X-Webhook-Signature"),
+		Timestamp: r.Header.Get("X-Webhook-Timestamp"),
+		Payload:   body,
+		MaxAge:    5 * time.Minute, // Reject signatures older than 5 minutes
+	})
+
+	if err != nil || !valid {
+		http.Error(w, "Invalid signature", http.StatusUnauthorized)
+		return
+	}
+
+	// Process webhook...
+	w.WriteHeader(http.StatusOK)
+}
+```
+
+### Manual Verification
 
 ```go
 import (
@@ -522,9 +687,30 @@ HMAC-SHA256(secret, timestamp + "." + payload)
 
 ## Database Schema
 
-### Required Tables
+### Using the Migration Helper
 
-go-hookd requires these PostgreSQL tables. You need to create them:
+go-hookd includes embedded PostgreSQL migrations:
+
+```go
+import "github.com/itsatony/go-hookd"
+
+// Run migrations programmatically
+err := hookd.Migrate(ctx, dbURL, hookd.MigrateUp)
+if err != nil {
+	log.Fatalf("Migration failed: %v", err)
+}
+
+// Check migration status
+status, err := hookd.MigrationStatus(ctx, dbURL)
+fmt.Printf("Current version: %d, Pending: %d\n", status.Version, status.Pending)
+
+// Rollback if needed
+err = hookd.Migrate(ctx, dbURL, hookd.MigrateDown)
+```
+
+### Manual Schema Creation
+
+Alternatively, run the SQL migrations manually from `migrations/postgres/`:
 
 ```sql
 -- Subscriptions
@@ -652,18 +838,16 @@ Essential metrics to track via event bus:
 ### Current Limitations
 
 1. **Database**: PostgreSQL only (no MySQL, SQLite, etc.)
-2. **No Migrations**: You must create schema manually
-3. **No HTTP Server**: Library only, bring your own API
-4. **Single-Region**: No built-in multi-region support
-5. **No Webhooks Registry**: No centralized webhook discovery
-6. **Limited Filtering**: Basic subscription filtering only
+2. **No HTTP Server**: Library only, bring your own API
+3. **Single-Region**: No built-in multi-region support
+4. **No Webhooks Registry**: No centralized webhook discovery
 
 ### Known Issues
 
 - Integration tests require Docker/PostgreSQL setup
 - Circuit breaker state is per-manager (not distributed)
 - No automatic cleanup of old delivery attempts
-- Event bus is synchronous (can block delivery if slow)
+- Event bus handlers should be non-blocking
 
 ## Contributing
 
@@ -677,24 +861,29 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for full guidelines.
 
 ## Project Status
 
-**Current Version**: Pre-1.0 (under development)
+**Current Version**: v0.3.0 (Production Ready)
 
-**What's Working:**
+**What's Implemented:**
 - ✓ Core subscription and delivery management
 - ✓ Retry logic with exponential backoff
 - ✓ Circuit breaker per endpoint
 - ✓ Idempotency with keys
 - ✓ Event bus for observability
-- ✓ Signature verification
+- ✓ Signature verification with `verify/` package
 - ✓ Graceful shutdown
+- ✓ Wildcard event type subscriptions
+- ✓ Metadata filtering for deliveries
+- ✓ Inline deliveries (without subscriptions)
+- ✓ Dead letter queue management API
+- ✓ PostgreSQL migration helper
+- ✓ Prometheus metrics (`prometheus/` package)
+- ✓ Subscription testing endpoint
 
 **What's Coming:**
-- Database migrations
 - Distributed circuit breaker (Redis)
-- Prometheus metrics integration
-- Dead letter queue management UI
+- Admin UI dashboard
 - Delivery replay functionality
-- Webhook testing tools
+- OpenTelemetry tracing integration
 
 ## License
 
@@ -710,12 +899,12 @@ Created by [@itsatony](https://github.com/itsatony)
 - [zap](https://github.com/uber-go/zap) - Structured logging
 - [nanoid](https://github.com/matoous/go-nanoid) - Unique ID generation
 - [lib/pq](https://github.com/lib/pq) - PostgreSQL driver
+- [prometheus/client_golang](https://github.com/prometheus/client_golang) - Metrics (optional)
 
 ---
 
 **Documentation:**
 - [Implementation Guide](docs/implementation_guide.md) - Architecture and design
 - [Code Rules](docs/code_rules.md) - Development standards
-- [Production Readiness](PRODUCTION_READINESS_ASSESSMENT.md) - Quality assessment
 
 **Need Help?** Check the `examples/` directory or open an issue.

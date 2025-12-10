@@ -833,6 +833,55 @@ func (r *PostgresRepository) MoveToDeadLetter(ctx context.Context, deliveryID st
 	return nil
 }
 
+// DeleteDelivery permanently deletes a delivery and its attempts.
+// This is used for purging dead letter deliveries.
+func (r *PostgresRepository) DeleteDelivery(ctx context.Context, id string) error {
+	// Use a transaction to ensure both the delivery and its attempts are deleted atomically
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return cuserr.NewExternalError("database", "postgres", err,
+			cuserr.WithMetadata("operation", "begin_tx"),
+		)
+	}
+	defer tx.Rollback() //nolint:errcheck // Rollback is a no-op if already committed
+
+	// Delete attempts first (foreign key constraint)
+	_, err = tx.ExecContext(ctx, "DELETE FROM delivery_attempts WHERE delivery_id = $1", id)
+	if err != nil {
+		return cuserr.NewExternalError("database", "postgres", err,
+			cuserr.WithMetadata("operation", "delete_attempts"),
+		)
+	}
+
+	// Delete the delivery
+	result, err := tx.ExecContext(ctx, "DELETE FROM deliveries WHERE id = $1", id)
+	if err != nil {
+		return cuserr.NewExternalError("database", "postgres", err,
+			cuserr.WithMetadata("operation", "delete_delivery"),
+		)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return cuserr.NewExternalError("database", "postgres", err,
+			cuserr.WithMetadata("operation", "rows_affected"),
+		)
+	}
+
+	if rowsAffected == 0 {
+		return ErrDeliveryNotFound
+	}
+
+	// Commit the transaction
+	if err := tx.Commit(); err != nil {
+		return cuserr.NewExternalError("database", "postgres", err,
+			cuserr.WithMetadata("operation", "commit"),
+		)
+	}
+
+	return nil
+}
+
 // =============================================================================
 // DELIVERY ATTEMPT OPERATIONS
 // =============================================================================

@@ -79,6 +79,26 @@ func (m *Manager) QueueDelivery(ctx context.Context, req *QueueDeliveryRequest) 
 		return nil, NewValidationError("subscription", ErrMsgSubscriptionNotActive)
 	}
 
+	// Validate event type matches subscription's patterns (supports wildcards)
+	if !MatchesAnyEventType(sub.EventTypes, req.EventType) {
+		m.logger.Warn("event type does not match subscription",
+			zap.String("subscription_id", sub.ID),
+			zap.String("event_type", req.EventType),
+			zap.Strings("subscription_event_types", sub.EventTypes),
+		)
+		return nil, NewValidationError("event_type", ErrMsgEventTypeMismatch)
+	}
+
+	// Check metadata filters (if subscription has filters configured)
+	if len(sub.Filters) > 0 && !MatchesMetadata(sub.Filters, req.Metadata) {
+		m.logger.Debug("metadata does not match subscription filters",
+			zap.String("subscription_id", sub.ID),
+			zap.Any("filters", sub.Filters),
+			zap.Any("metadata", req.Metadata),
+		)
+		return nil, NewValidationError("metadata", ErrMsgMetadataFilterMismatch)
+	}
+
 	// Store idempotency key FIRST to prevent race condition (TOCTOU)
 	// The database unique constraint will enforce atomicity
 	if req.IdempotencyKey != "" {
@@ -148,6 +168,122 @@ func (m *Manager) QueueDelivery(ctx context.Context, req *QueueDeliveryRequest) 
 
 	// Publish delivery queued event
 	m.publishDeliveryEvent(EventTopicDeliveryQueued, delivery, sub, nil)
+
+	return delivery, nil
+}
+
+// QueueInlineDelivery queues a webhook delivery without a pre-created subscription.
+//
+// Inline deliveries are useful for one-off callbacks where creating a subscription
+// would be overhead (e.g., job completion webhooks, password reset callbacks).
+//
+// The delivery will use the global default retry policy from config, unless
+// MaxRetries is specified in the request.
+//
+// Circuit breaker and idempotency work the same as subscription-based deliveries.
+//
+// Parameters:
+//   - ctx: Context for cancellation and timeout
+//   - req: The inline delivery request
+//
+// Returns the created delivery or an error.
+//
+// Example:
+//
+//	delivery, err := manager.QueueInlineDelivery(ctx, &QueueInlineDeliveryRequest{
+//	    URL:        "https://example.com/callback",
+//	    Secret:     "webhook_secret",
+//	    TenantID:   "tenant_123",
+//	    EventType:  "job.completed",
+//	    Payload:    map[string]any{"job_id": "job_456", "status": "success"},
+//	    MaxRetries: 3,
+//	})
+func (m *Manager) QueueInlineDelivery(ctx context.Context, req *QueueInlineDeliveryRequest) (*Delivery, error) {
+	// Validate request
+	if req == nil {
+		return nil, NewValidationError("request", ErrMsgRequestRequired)
+	}
+	if err := req.Validate(); err != nil {
+		m.logger.Error("invalid inline delivery request",
+			zap.Error(err),
+			zap.String("url", req.URL),
+		)
+		return nil, err
+	}
+
+	// Handle idempotency
+	if req.IdempotencyKey != "" {
+		expiresAt := time.Now().Add(time.Duration(m.config.IdempotencyTTLHours) * time.Hour)
+		// Use URL as "subscription_id" substitute for idempotency scope
+		err := m.repo.StoreIdempotencyKey(ctx, req.IdempotencyKey, req.URL, expiresAt)
+		if err != nil {
+			if IsConflictError(err) {
+				m.logger.Info("idempotent inline delivery request detected",
+					zap.String("idempotency_key", req.IdempotencyKey),
+					zap.String("url", req.URL),
+				)
+				return nil, NewIdempotencyError(req.IdempotencyKey)
+			}
+			m.logger.Error("failed to store idempotency key",
+				zap.Error(err),
+				zap.String("idempotency_key", req.IdempotencyKey),
+			)
+			return nil, err
+		}
+	}
+
+	// Generate delivery ID
+	id, err := GenerateDeliveryID()
+	if err != nil {
+		m.logger.Error("failed to generate delivery ID",
+			zap.Error(err),
+		)
+		return nil, err
+	}
+
+	// Determine max attempts
+	maxAttempts := m.config.DefaultMaxRetries
+	if req.MaxRetries > 0 {
+		maxAttempts = req.MaxRetries
+	}
+
+	// Create delivery
+	now := time.Now()
+	delivery := &Delivery{
+		ID:           id,
+		TenantID:     req.TenantID,
+		EventType:    req.EventType,
+		Payload:      req.Payload,
+		Status:       DeliveryStatusPending,
+		AttemptCount: 0,
+		MaxAttempts:  maxAttempts,
+		NextRetryAt:  &now,
+		CreatedAt:    now,
+		// Inline delivery fields
+		URL:    normalizeURL(req.URL),
+		Secret: req.Secret,
+		// SubscriptionID is empty for inline deliveries
+	}
+
+	// Persist delivery
+	if err := m.repo.CreateDelivery(ctx, delivery); err != nil {
+		m.logger.Error("failed to create inline delivery",
+			zap.Error(err),
+			zap.String("url", req.URL),
+			zap.String("event_type", req.EventType),
+		)
+		return nil, err
+	}
+
+	m.logger.Info("inline delivery queued",
+		zap.String("delivery_id", delivery.ID),
+		zap.String("url", delivery.URL),
+		zap.String("tenant_id", delivery.TenantID),
+		zap.String("event_type", delivery.EventType),
+	)
+
+	// Publish delivery queued event (no subscription)
+	m.publishDeliveryEvent(EventTopicDeliveryQueued, delivery, nil, nil)
 
 	return delivery, nil
 }

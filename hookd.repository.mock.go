@@ -104,6 +104,13 @@ func copySubscription(sub *Subscription) *Subscription {
 		}
 	}
 
+	if sub.Filters != nil {
+		copied.Filters = make(map[string]string)
+		for k, v := range sub.Filters {
+			copied.Filters[k] = v
+		}
+	}
+
 	return copied
 }
 
@@ -122,6 +129,9 @@ func copyDelivery(dlv *Delivery) *Delivery {
 		AttemptCount:   dlv.AttemptCount,
 		MaxAttempts:    dlv.MaxAttempts,
 		CreatedAt:      dlv.CreatedAt,
+		// Inline delivery fields
+		URL:    dlv.URL,
+		Secret: dlv.Secret,
 	}
 
 	if dlv.Payload != nil {
@@ -385,6 +395,27 @@ func (r *MockRepository) UpdateDelivery(ctx context.Context, delivery *Delivery)
 
 	// Unlock delivery after update (simulates transaction commit releasing row lock)
 	delete(r.lockedDeliveries, delivery.ID)
+
+	return nil
+}
+
+// DeleteDelivery permanently deletes a delivery and its attempts.
+func (r *MockRepository) DeleteDelivery(ctx context.Context, id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, exists := r.deliveries[id]; !exists {
+		return ErrDeliveryNotFound
+	}
+
+	// Delete the delivery
+	delete(r.deliveries, id)
+
+	// Delete associated attempts
+	delete(r.deliveryAttempts, id)
+
+	// Clean up any locks
+	delete(r.lockedDeliveries, id)
 
 	return nil
 }
@@ -1153,6 +1184,27 @@ func (tx *MockRepositoryTx) MoveToDeadLetter(ctx context.Context, deliveryID str
 	now := time.Now()
 	delivery.CompletedAt = &now
 	delete(tx.lockedDeliveries, deliveryID)
+	return nil
+}
+
+// DeleteDelivery permanently deletes a delivery and its attempts within the transaction.
+func (tx *MockRepositoryTx) DeleteDelivery(ctx context.Context, id string) error {
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
+
+	if _, exists := tx.deliveries[id]; !exists {
+		return ErrDeliveryNotFound
+	}
+
+	// Delete the delivery
+	delete(tx.deliveries, id)
+
+	// Delete associated attempts
+	delete(tx.deliveryAttempts, id)
+
+	// Clean up any locks
+	delete(tx.lockedDeliveries, id)
+
 	return nil
 }
 

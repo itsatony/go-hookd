@@ -9,6 +9,7 @@ package hookd
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/itsatony/go-cuserr"
 )
@@ -148,6 +149,22 @@ func IsTimeoutError(err error) bool {
 // IsRateLimitError checks if an error is a rate limit error.
 func IsRateLimitError(err error) bool {
 	return cuserr.IsErrorCategory(err, cuserr.ErrorCategoryRateLimit)
+}
+
+// IsIdempotencyError checks if an error is an idempotency conflict error.
+// This occurs when a duplicate idempotency key is used within the TTL window.
+func IsIdempotencyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Check if it's a conflict error and contains idempotency-related message
+	if cuserr.IsErrorCategory(err, cuserr.ErrorCategoryConflict) {
+		// Check if error message contains duplicate delivery text
+		errStr := err.Error()
+		return strings.Contains(errStr, ErrMsgDuplicateDelivery) ||
+			strings.Contains(errStr, "idempotency")
+	}
+	return false
 }
 
 // ShouldRetry determines if an error should trigger a retry.

@@ -24,30 +24,40 @@ type Subscription struct {
 	RetryPolicy *RetryPolicy      `json:"retry_policy" db:"retry_policy"`
 	Headers     map[string]string `json:"headers,omitempty" db:"headers"`
 	Metadata    map[string]any    `json:"metadata,omitempty" db:"metadata"`
-	ID          string            `json:"id" db:"id"`
-	TenantID    string            `json:"tenant_id" db:"tenant_id"`
-	URL         string            `json:"url" db:"url"`
-	Secret      string            `json:"-" db:"secret"`
-	Status      string            `json:"status" db:"status"`
-	EventTypes  []string          `json:"event_types" db:"event_types"`
+	// Filters enables metadata-based event filtering.
+	// Only events whose metadata contains ALL filter key-values will be delivered.
+	// Uses simple equality matching: filter["status"]="failed" matches metadata["status"]="failed".
+	Filters    map[string]string `json:"filters,omitempty" db:"filters"`
+	ID         string            `json:"id" db:"id"`
+	TenantID   string            `json:"tenant_id" db:"tenant_id"`
+	URL        string            `json:"url" db:"url"`
+	Secret     string            `json:"-" db:"secret"`
+	Status     string            `json:"status" db:"status"`
+	EventTypes []string          `json:"event_types" db:"event_types"`
 }
 
 // Delivery represents a webhook delivery instance.
 //
-// A delivery is created when an event matching a subscription occurs.
+// A delivery is created when an event matching a subscription occurs,
+// or as an inline delivery (without a pre-created subscription).
 // It tracks the delivery lifecycle, retry attempts, and completion status.
 type Delivery struct {
-	CreatedAt      time.Time      `json:"created_at" db:"created_at"`
-	Payload        map[string]any `json:"payload" db:"payload"`
-	NextRetryAt    *time.Time     `json:"next_retry_at,omitempty" db:"next_retry_at"`
-	CompletedAt    *time.Time     `json:"completed_at,omitempty" db:"completed_at"`
-	ID             string         `json:"id" db:"id"`
-	SubscriptionID string         `json:"subscription_id" db:"subscription_id"`
-	TenantID       string         `json:"tenant_id" db:"tenant_id"`
-	EventType      string         `json:"event_type" db:"event_type"`
-	Status         string         `json:"status" db:"status"`
-	AttemptCount   int            `json:"attempt_count" db:"attempt_count"`
-	MaxAttempts    int            `json:"max_attempts" db:"max_attempts"`
+	CreatedAt   time.Time      `json:"created_at" db:"created_at"`
+	Payload     map[string]any `json:"payload" db:"payload"`
+	NextRetryAt *time.Time     `json:"next_retry_at,omitempty" db:"next_retry_at"`
+	CompletedAt *time.Time     `json:"completed_at,omitempty" db:"completed_at"`
+	ID          string         `json:"id" db:"id"`
+	// SubscriptionID is the subscription this delivery belongs to (empty for inline deliveries)
+	SubscriptionID string `json:"subscription_id,omitempty" db:"subscription_id"`
+	TenantID       string `json:"tenant_id" db:"tenant_id"`
+	EventType      string `json:"event_type" db:"event_type"`
+	Status         string `json:"status" db:"status"`
+	AttemptCount   int    `json:"attempt_count" db:"attempt_count"`
+	MaxAttempts    int    `json:"max_attempts" db:"max_attempts"`
+	// URL is the direct endpoint for inline deliveries (empty for subscription-based)
+	URL string `json:"url,omitempty" db:"url"`
+	// Secret is the HMAC key for inline deliveries (empty for subscription-based)
+	Secret string `json:"-" db:"secret"`
 }
 
 // DeliveryAttempt represents a single delivery attempt.
@@ -99,9 +109,12 @@ type CircuitBreakerState struct {
 
 // CreateSubscriptionRequest is the request to create a new subscription.
 type CreateSubscriptionRequest struct {
-	RetryPolicy    *RetryPolicy      `json:"retry_policy,omitempty"`
-	Headers        map[string]string `json:"headers,omitempty"`
-	Metadata       map[string]any    `json:"metadata,omitempty"`
+	RetryPolicy *RetryPolicy      `json:"retry_policy,omitempty"`
+	Headers     map[string]string `json:"headers,omitempty"`
+	Metadata    map[string]any    `json:"metadata,omitempty"`
+	// Filters enables metadata-based event filtering.
+	// Only events whose metadata contains ALL filter key-values will be delivered.
+	Filters        map[string]string `json:"filters,omitempty"`
 	TenantID       string            `json:"tenant_id"`
 	URL            string            `json:"url"`
 	Secret         string            `json:"secret"`
@@ -190,6 +203,9 @@ type UpdateSubscriptionRequest struct {
 
 	// Metadata replaces the metadata
 	Metadata *map[string]any `json:"metadata,omitempty"`
+
+	// Filters replaces the metadata filters
+	Filters *map[string]string `json:"filters,omitempty"`
 }
 
 // Validate implements the Validator interface for UpdateSubscriptionRequest.
@@ -258,6 +274,11 @@ type QueueDeliveryRequest struct {
 	// Payload is the event data to deliver
 	Payload map[string]any `json:"payload"`
 
+	// Metadata contains additional event context used for filter matching.
+	// If the subscription has filters, all filter key-values must match
+	// the corresponding metadata values for delivery to proceed.
+	Metadata map[string]any `json:"metadata,omitempty"`
+
 	// IdempotencyKey ensures this delivery is processed exactly once (optional)
 	IdempotencyKey string `json:"idempotency_key,omitempty"`
 }
@@ -287,6 +308,79 @@ func (r *QueueDeliveryRequest) Validate() error {
 	}
 	if len(payloadJSON) > MaxPayloadSize {
 		return cuserr.NewValidationError("payload", ErrMsgPayloadTooLarge)
+	}
+
+	return nil
+}
+
+// QueueInlineDeliveryRequest is the request to queue an inline delivery.
+//
+// Inline deliveries don't require a pre-created subscription. They're useful
+// for one-off callbacks like job completion webhooks.
+type QueueInlineDeliveryRequest struct {
+	// URL is the webhook endpoint to deliver to (required)
+	URL string `json:"url"`
+
+	// Secret is the HMAC signing key for this delivery (optional, recommended)
+	Secret string `json:"secret,omitempty"`
+
+	// EventType is the type of event being delivered (required)
+	EventType string `json:"event_type"`
+
+	// Payload is the event data to deliver (required)
+	Payload map[string]any `json:"payload"`
+
+	// TenantID is the tenant identifier for this delivery (required)
+	TenantID string `json:"tenant_id"`
+
+	// MaxRetries is the maximum number of retry attempts (optional, defaults to config)
+	MaxRetries int `json:"max_retries,omitempty"`
+
+	// IdempotencyKey ensures this delivery is processed exactly once (optional)
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
+}
+
+// Validate implements the Validator interface for QueueInlineDeliveryRequest.
+func (r *QueueInlineDeliveryRequest) Validate() error {
+	// Validate URL
+	if r.URL == "" {
+		return cuserr.NewValidationError("url", ErrMsgMissingURL)
+	}
+	if err := validateURL(r.URL); err != nil {
+		return err
+	}
+
+	// Validate tenant ID
+	if r.TenantID == "" {
+		return cuserr.NewValidationError("tenant_id", ErrMsgMissingTenantID)
+	}
+	if len(r.TenantID) > MaxTenantIDLength {
+		return cuserr.NewValidationError("tenant_id", "tenant_id exceeds maximum length")
+	}
+
+	// Validate event type
+	if r.EventType == "" {
+		return cuserr.NewValidationError("event_type", ErrMsgMissingEventType)
+	}
+	if len(r.EventType) > MaxEventTypeLength {
+		return cuserr.NewValidationError("event_type", ErrMsgEventTypeTooLong)
+	}
+
+	// Validate payload
+	if r.Payload == nil {
+		return cuserr.NewValidationError("payload", ErrMsgMissingPayload)
+	}
+	payloadJSON, err := json.Marshal(r.Payload)
+	if err != nil {
+		return cuserr.NewValidationError("payload", "invalid payload format")
+	}
+	if len(payloadJSON) > MaxPayloadSize {
+		return cuserr.NewValidationError("payload", ErrMsgPayloadTooLarge)
+	}
+
+	// Validate max retries (if provided)
+	if r.MaxRetries < 0 {
+		return cuserr.NewValidationError("max_retries", "max_retries cannot be negative")
 	}
 
 	return nil
@@ -347,6 +441,27 @@ type CircuitBreakerEvent struct {
 	State     string    `json:"state"`
 }
 
+// TestResult represents the result of testing a subscription's webhook endpoint.
+//
+// This is returned by TestSubscription() and provides information about
+// the endpoint's connectivity and response behavior.
+type TestResult struct {
+	// Success indicates if the test ping was successful (2xx response)
+	Success bool `json:"success"`
+
+	// StatusCode is the HTTP status code returned by the endpoint
+	StatusCode int `json:"status_code"`
+
+	// ResponseTime is how long the request took
+	ResponseTime time.Duration `json:"response_time"`
+
+	// ResponseBody is the response body (truncated if too long)
+	ResponseBody string `json:"response_body,omitempty"`
+
+	// Error contains any error message if the test failed
+	Error string `json:"error,omitempty"`
+}
+
 // Validate validates a RetryPolicy.
 func (p *RetryPolicy) Validate() error {
 	if p.MaxAttempts < 0 {
@@ -387,6 +502,7 @@ func validateURL(urlStr string) error {
 }
 
 // validateEventTypes validates an event types array.
+// Supports wildcard patterns: "*" (all events) and "prefix.*" (prefix match).
 func validateEventTypes(eventTypes []string) error {
 	if len(eventTypes) == 0 {
 		return cuserr.NewValidationError("event_types", ErrMsgMissingEventTypes)
@@ -397,6 +513,27 @@ func validateEventTypes(eventTypes []string) error {
 	}
 
 	for i, et := range eventTypes {
+		// Allow universal wildcard "*"
+		if et == WildcardAll {
+			continue
+		}
+
+		// Check for prefix wildcard pattern (e.g., "order.*")
+		if strings.HasSuffix(et, WildcardSuffix) {
+			prefix := strings.TrimSuffix(et, WildcardSuffix)
+			// Prefix must have at least 1 character
+			if len(prefix) < 1 {
+				return cuserr.NewValidationError("event_types",
+					fmt.Sprintf("event type at index %d: wildcard pattern must have a prefix (e.g., 'order.*')", i))
+			}
+			if len(prefix) > MaxEventTypeLength-2 { // -2 for ".*"
+				return cuserr.NewValidationError("event_types",
+					fmt.Sprintf("event type at index %d: %s", i, ErrMsgEventTypeTooLong))
+			}
+			continue
+		}
+
+		// Regular event type validation
 		if len(et) < MinEventTypeLength {
 			return cuserr.NewValidationError("event_types",
 				fmt.Sprintf("event type at index %d is too short", i))

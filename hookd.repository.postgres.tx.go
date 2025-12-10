@@ -585,6 +585,44 @@ func (r *PostgresRepositoryTx) MoveToDeadLetter(ctx context.Context, deliveryID 
 	return nil
 }
 
+// DeleteDelivery permanently deletes a delivery and its attempts within the transaction.
+func (r *PostgresRepositoryTx) DeleteDelivery(ctx context.Context, id string) error {
+	// First delete all delivery attempts (foreign key constraint)
+	_, err := r.tx.ExecContext(ctx,
+		`DELETE FROM delivery_attempts WHERE delivery_id = $1`,
+		id,
+	)
+	if err != nil {
+		return cuserr.NewExternalError("database", "postgres", err,
+			cuserr.WithMetadata("operation", "delete_delivery_attempts_tx"),
+			cuserr.WithMetadata("delivery_id", id),
+		)
+	}
+
+	// Then delete the delivery
+	result, err := r.tx.ExecContext(ctx,
+		`DELETE FROM deliveries WHERE id = $1`,
+		id,
+	)
+	if err != nil {
+		return cuserr.NewExternalError("database", "postgres", err,
+			cuserr.WithMetadata("operation", "delete_delivery_tx"),
+			cuserr.WithMetadata("delivery_id", id),
+		)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return cuserr.NewInternalError("database", err)
+	}
+
+	if rowsAffected == 0 {
+		return ErrDeliveryNotFound
+	}
+
+	return nil
+}
+
 // =============================================================================
 // DELIVERY ATTEMPT OPERATIONS
 // =============================================================================
