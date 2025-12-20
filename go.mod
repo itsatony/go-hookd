@@ -1,12 +1,10 @@
 module github.com/itsatony/go-hookd
 
-go 1.24.6
-
-toolchain go1.24.10
+go 1.24.0
 
 require (
 	github.com/itsatony/go-cuserr v0.3.0
-	github.com/itsatony/go-version v1.0.0
+	github.com/itsatony/go-version v1.0.2
 	github.com/lib/pq v1.10.9
 	github.com/matoous/go-nanoid/v2 v2.1.0
 	github.com/prometheus/client_golang v1.23.2

@@ -55,8 +55,8 @@ github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.3 h1:NmZ1PKzSTQbuGHw9DGPFomqkkLW
 github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.3/go.mod h1:zQrxl1YP88HQlA6i9c63DSVPFklWpGX4OWAc9bFuaH4=
 github.com/itsatony/go-cuserr v0.3.0 h1:wNKVlBK8jJ4kg5Bapa3+sX0pnhNlBWEyblixRprPuGs=
 github.com/itsatony/go-cuserr v0.3.0/go.mod h1:ieBB3srNbByVN8lyD8Z+EylMg+/QMXym7l+bb2eCVew=
-github.com/itsatony/go-version v1.0.0 h1:MhFWHkDPOwoQ/BoU0DX4OofmpPszcaviSEcKurCErP4=
-github.com/itsatony/go-version v1.0.0/go.mod h1:aQRpvPretr/JicUrzw/3K/Dn8IhKIH5xYB9Hs2ByTdc=
+github.com/itsatony/go-version v1.0.2 h1:8AzkuBaAP+UlOJnBYGPntXzE4646yGmSHrqPZMv4hI8=
+github.com/itsatony/go-version v1.0.2/go.mod h1:4wVHliqp3aoH5WmxyF+NInmt5ghd8tq9hFgvh5u2r/A=
 github.com/jackc/pgpassfile v1.0.0 h1:/6Hmqy13Ss2zCq62VdNG8tM1wchn8zjSGOBJ6icpsIM=
 github.com/jackc/pgpassfile v1.0.0/go.mod h1:CEx0iS5ambNFdcRtxPj5JhEz+xB6uRky5eyVu/W2HEg=
 github.com/jackc/pgservicefile v0.0.0-20221227161230-091c0ba34f0a h1:bbPeKD0xmW/Y25WS6cokEszi5g+S0QxI/d45PkRi7Nk=
