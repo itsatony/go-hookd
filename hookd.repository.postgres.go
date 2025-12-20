@@ -332,13 +332,13 @@ func (r *PostgresRepository) CreateSubscription(ctx context.Context, sub *Subscr
 		return err // Already wrapped as ExternalError by marshalJSONB
 	}
 
-	query := `
-		INSERT INTO subscriptions (
+	query := fmt.Sprintf(`
+		INSERT INTO %s (
 			id, tenant_id, url, secret, event_types, filters, status,
 			retry_policy, headers, metadata, created_at, updated_at
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
-		)`
+		)`, TableSubscriptions)
 
 	_, err = r.db.ExecContext(ctx, query,
 		sub.ID,
@@ -371,11 +371,11 @@ func (r *PostgresRepository) CreateSubscription(ctx context.Context, sub *Subscr
 // GetSubscription retrieves a subscription by its ID.
 // Returns ErrSubscriptionNotFound if the subscription does not exist.
 func (r *PostgresRepository) GetSubscription(ctx context.Context, id string) (*Subscription, error) {
-	query := `
+	query := fmt.Sprintf(`
 		SELECT id, tenant_id, url, secret, event_types, filters, status,
 		       retry_policy, headers, metadata, created_at, updated_at
-		FROM subscriptions
-		WHERE id = $1`
+		FROM %s
+		WHERE id = $1`, TableSubscriptions)
 
 	row := r.db.QueryRowContext(ctx, query, id)
 	sub, err := scanSubscription(row)
@@ -395,11 +395,11 @@ func (r *PostgresRepository) GetSubscription(ctx context.Context, id string) (*S
 // GetSubscriptionByTenantAndURL retrieves a subscription by tenant ID and URL.
 // Returns ErrSubscriptionNotFound if no matching subscription exists.
 func (r *PostgresRepository) GetSubscriptionByTenantAndURL(ctx context.Context, tenantID, url string) (*Subscription, error) {
-	query := `
+	query := fmt.Sprintf(`
 		SELECT id, tenant_id, url, secret, event_types, filters, status,
 		       retry_policy, headers, metadata, created_at, updated_at
-		FROM subscriptions
-		WHERE tenant_id = $1 AND url = $2`
+		FROM %s
+		WHERE tenant_id = $1 AND url = $2`, TableSubscriptions)
 
 	row := r.db.QueryRowContext(ctx, query, tenantID, url)
 	sub, err := scanSubscription(row)
@@ -440,8 +440,8 @@ func (r *PostgresRepository) UpdateSubscription(ctx context.Context, sub *Subscr
 		return err // Already wrapped as ExternalError by marshalJSONB
 	}
 
-	query := `
-		UPDATE subscriptions
+	query := fmt.Sprintf(`
+		UPDATE %s
 		SET url = $2,
 		    secret = $3,
 		    event_types = $4,
@@ -451,7 +451,7 @@ func (r *PostgresRepository) UpdateSubscription(ctx context.Context, sub *Subscr
 		    headers = $8,
 		    metadata = $9,
 		    updated_at = $10
-		WHERE id = $1`
+		WHERE id = $1`, TableSubscriptions)
 
 	result, err := r.db.ExecContext(ctx, query,
 		sub.ID,
@@ -490,7 +490,7 @@ func (r *PostgresRepository) UpdateSubscription(ctx context.Context, sub *Subscr
 // Returns ErrSubscriptionNotFound if the subscription does not exist.
 // Cascades to delete all related deliveries and attempts.
 func (r *PostgresRepository) DeleteSubscription(ctx context.Context, id string) error {
-	query := `DELETE FROM subscriptions WHERE id = $1`
+	query := fmt.Sprintf(`DELETE FROM %s WHERE id = $1`, TableSubscriptions)
 
 	result, err := r.db.ExecContext(ctx, query, id)
 	if err != nil {
@@ -516,11 +516,11 @@ func (r *PostgresRepository) DeleteSubscription(ctx context.Context, id string) 
 // ListSubscriptions retrieves subscriptions matching the given filter.
 // Returns an empty slice if no subscriptions match.
 func (r *PostgresRepository) ListSubscriptions(ctx context.Context, filter *SubscriptionFilter) ([]*Subscription, error) {
-	query := `
+	query := fmt.Sprintf(`
 		SELECT id, tenant_id, url, secret, event_types, filters, status,
 		       retry_policy, headers, metadata, created_at, updated_at
-		FROM subscriptions
-		WHERE 1=1`
+		FROM %s
+		WHERE 1=1`, TableSubscriptions)
 
 	args := []any{}
 	argCount := 1
@@ -616,14 +616,14 @@ func (r *PostgresRepository) CreateDelivery(ctx context.Context, delivery *Deliv
 		secret = delivery.Secret
 	}
 
-	query := `
-		INSERT INTO deliveries (
+	query := fmt.Sprintf(`
+		INSERT INTO %s (
 			id, subscription_id, tenant_id, event_type, payload,
 			url, secret, status, attempt_count, max_attempts,
 			next_retry_at, completed_at, created_at
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
-		)`
+		)`, TableDeliveries)
 
 	_, err = r.db.ExecContext(ctx, query,
 		delivery.ID,
@@ -653,12 +653,12 @@ func (r *PostgresRepository) CreateDelivery(ctx context.Context, delivery *Deliv
 // GetDelivery retrieves a delivery by its ID.
 // Returns ErrDeliveryNotFound if the delivery does not exist.
 func (r *PostgresRepository) GetDelivery(ctx context.Context, id string) (*Delivery, error) {
-	query := `
+	query := fmt.Sprintf(`
 		SELECT id, subscription_id, tenant_id, event_type, payload,
 		       url, secret, status, attempt_count, max_attempts,
 		       next_retry_at, completed_at, created_at
-		FROM deliveries
-		WHERE id = $1`
+		FROM %s
+		WHERE id = $1`, TableDeliveries)
 
 	row := r.db.QueryRowContext(ctx, query, id)
 	delivery, err := scanDelivery(row)
@@ -699,8 +699,8 @@ func (r *PostgresRepository) UpdateDelivery(ctx context.Context, delivery *Deliv
 		secret = delivery.Secret
 	}
 
-	query := `
-		UPDATE deliveries
+	query := fmt.Sprintf(`
+		UPDATE %s
 		SET subscription_id = $2,
 		    tenant_id = $3,
 		    event_type = $4,
@@ -712,7 +712,7 @@ func (r *PostgresRepository) UpdateDelivery(ctx context.Context, delivery *Deliv
 		    max_attempts = $10,
 		    next_retry_at = $11,
 		    completed_at = $12
-		WHERE id = $1`
+		WHERE id = $1`, TableDeliveries)
 
 	result, err := r.db.ExecContext(ctx, query,
 		delivery.ID,
@@ -753,18 +753,18 @@ func (r *PostgresRepository) UpdateDelivery(ctx context.Context, delivery *Deliv
 // Uses SKIP LOCKED to prevent concurrent workers from processing the same delivery.
 // Returns up to 'limit' deliveries ordered by next_retry_at, then created_at.
 func (r *PostgresRepository) GetPendingDeliveries(ctx context.Context, limit int) ([]*Delivery, error) {
-	query := `
+	query := fmt.Sprintf(`
 		SELECT id, subscription_id, tenant_id, event_type, payload,
 		       url, secret, status, attempt_count, max_attempts,
 		       next_retry_at, completed_at, created_at
-		FROM deliveries
+		FROM %s
 		WHERE status = $1
 		  AND (next_retry_at IS NULL OR next_retry_at <= NOW())
 		ORDER BY
 		  COALESCE(next_retry_at, created_at),
 		  created_at
 		LIMIT $2
-		FOR UPDATE SKIP LOCKED`
+		FOR UPDATE SKIP LOCKED`, TableDeliveries)
 
 	rows, err := r.db.QueryContext(ctx, query, DeliveryStatusPending, limit)
 	if err != nil {
@@ -797,12 +797,12 @@ func (r *PostgresRepository) GetPendingDeliveries(ctx context.Context, limit int
 // ListDeliveries retrieves deliveries matching the given filter.
 // Returns an empty slice if no deliveries match.
 func (r *PostgresRepository) ListDeliveries(ctx context.Context, filter *DeliveryFilter) ([]*Delivery, error) {
-	query := `
+	query := fmt.Sprintf(`
 		SELECT id, subscription_id, tenant_id, event_type, payload,
 		       url, secret, status, attempt_count, max_attempts,
 		       next_retry_at, completed_at, created_at
-		FROM deliveries
-		WHERE 1=1`
+		FROM %s
+		WHERE 1=1`, TableDeliveries)
 
 	args := []any{}
 	argCount := 1
@@ -879,11 +879,11 @@ func (r *PostgresRepository) ListDeliveries(ctx context.Context, filter *Deliver
 // MoveToDeadLetter moves a delivery to the dead letter queue.
 // This is called when a delivery exhausts all retry attempts.
 func (r *PostgresRepository) MoveToDeadLetter(ctx context.Context, deliveryID string, reason string) error {
-	query := `
-		UPDATE deliveries
+	query := fmt.Sprintf(`
+		UPDATE %s
 		SET status = $2,
 		    completed_at = $3
-		WHERE id = $1`
+		WHERE id = $1`, TableDeliveries)
 
 	result, err := r.db.ExecContext(ctx, query,
 		deliveryID,
@@ -924,7 +924,7 @@ func (r *PostgresRepository) DeleteDelivery(ctx context.Context, id string) erro
 	defer tx.Rollback() //nolint:errcheck // Rollback is a no-op if already committed
 
 	// Delete attempts first (foreign key constraint)
-	_, err = tx.ExecContext(ctx, "DELETE FROM delivery_attempts WHERE delivery_id = $1", id)
+	_, err = tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE delivery_id = $1", TableDeliveryAttempts), id)
 	if err != nil {
 		return cuserr.NewExternalError("database", "postgres", err,
 			cuserr.WithMetadata("operation", "delete_attempts"),
@@ -932,7 +932,7 @@ func (r *PostgresRepository) DeleteDelivery(ctx context.Context, id string) erro
 	}
 
 	// Delete the delivery
-	result, err := tx.ExecContext(ctx, "DELETE FROM deliveries WHERE id = $1", id)
+	result, err := tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", TableDeliveries), id)
 	if err != nil {
 		return cuserr.NewExternalError("database", "postgres", err,
 			cuserr.WithMetadata("operation", "delete_delivery"),
@@ -972,13 +972,13 @@ func (r *PostgresRepository) CreateDeliveryAttempt(ctx context.Context, attempt 
 		return err // Already wrapped as ExternalError by marshalJSONB
 	}
 
-	query := `
-		INSERT INTO delivery_attempts (
+	query := fmt.Sprintf(`
+		INSERT INTO %s (
 			id, delivery_id, attempt_number, status_code,
 			response_body, response_headers, error, duration_ms, attempted_at
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9
-		)`
+		)`, TableDeliveryAttempts)
 
 	_, err = r.db.ExecContext(ctx, query,
 		attempt.ID,
@@ -1009,12 +1009,12 @@ func (r *PostgresRepository) CreateDeliveryAttempt(ctx context.Context, attempt 
 // GetDeliveryAttempts retrieves all attempts for a delivery.
 // Returns attempts ordered by attempt_number ascending.
 func (r *PostgresRepository) GetDeliveryAttempts(ctx context.Context, deliveryID string) ([]*DeliveryAttempt, error) {
-	query := `
+	query := fmt.Sprintf(`
 		SELECT id, delivery_id, attempt_number, status_code,
 		       response_body, response_headers, error, duration_ms, attempted_at
-		FROM delivery_attempts
+		FROM %s
 		WHERE delivery_id = $1
-		ORDER BY attempt_number ASC`
+		ORDER BY attempt_number ASC`, TableDeliveryAttempts)
 
 	rows, err := r.db.QueryContext(ctx, query, deliveryID)
 	if err != nil {
@@ -1051,12 +1051,12 @@ func (r *PostgresRepository) GetDeliveryAttempts(ctx context.Context, deliveryID
 // CheckIdempotency checks if an idempotency key exists and is not expired.
 // Returns true if the key exists and is valid, false otherwise.
 func (r *PostgresRepository) CheckIdempotency(ctx context.Context, key string, subscriptionID string) (bool, error) {
-	query := `
+	query := fmt.Sprintf(`
 		SELECT COUNT(*)
-		FROM idempotency_store
+		FROM %s
 		WHERE idempotency_key = $1
 		  AND subscription_id = $2
-		  AND expires_at > NOW()`
+		  AND expires_at > NOW()`, TableIdempotencyStore)
 
 	var count int
 	err := r.db.QueryRowContext(ctx, query, key, subscriptionID).Scan(&count)
@@ -1072,14 +1072,14 @@ func (r *PostgresRepository) CheckIdempotency(ctx context.Context, key string, s
 // StoreIdempotencyKey stores an idempotency key with an expiration time.
 // Automatically cleans up expired keys on query.
 func (r *PostgresRepository) StoreIdempotencyKey(ctx context.Context, key string, subscriptionID string, expiresAt time.Time) error {
-	query := `
-		INSERT INTO idempotency_store (
+	query := fmt.Sprintf(`
+		INSERT INTO %s (
 			idempotency_key, subscription_id, expires_at, created_at
 		) VALUES (
 			$1, $2, $3, $4
 		)
 		ON CONFLICT (idempotency_key, subscription_id) DO UPDATE
-		SET expires_at = EXCLUDED.expires_at`
+		SET expires_at = EXCLUDED.expires_at`, TableIdempotencyStore)
 
 	_, err := r.db.ExecContext(ctx, query,
 		key,
@@ -1104,11 +1104,11 @@ func (r *PostgresRepository) StoreIdempotencyKey(ctx context.Context, key string
 // GetCircuitBreakerState retrieves the circuit breaker state for an endpoint.
 // Returns a default closed state if no state exists.
 func (r *PostgresRepository) GetCircuitBreakerState(ctx context.Context, endpoint string) (*CircuitBreakerState, error) {
-	query := `
+	query := fmt.Sprintf(`
 		SELECT endpoint, state, failure_count, success_count,
 		       last_failure, opened_at, next_retry_at, updated_at
-		FROM circuit_breaker_state
-		WHERE endpoint = $1`
+		FROM %s
+		WHERE endpoint = $1`, TableCircuitBreakerState)
 
 	row := r.db.QueryRowContext(ctx, query, endpoint)
 	state, err := scanCircuitBreakerState(row)
@@ -1134,8 +1134,8 @@ func (r *PostgresRepository) GetCircuitBreakerState(ctx context.Context, endpoin
 // UpdateCircuitBreakerState updates the circuit breaker state for an endpoint.
 // Creates a new state if one doesn't exist (UPSERT).
 func (r *PostgresRepository) UpdateCircuitBreakerState(ctx context.Context, state *CircuitBreakerState) error {
-	query := `
-		INSERT INTO circuit_breaker_state (
+	query := fmt.Sprintf(`
+		INSERT INTO %s (
 			endpoint, state, failure_count, success_count,
 			last_failure, opened_at, next_retry_at, updated_at
 		) VALUES (
@@ -1148,7 +1148,7 @@ func (r *PostgresRepository) UpdateCircuitBreakerState(ctx context.Context, stat
 		    last_failure = EXCLUDED.last_failure,
 		    opened_at = EXCLUDED.opened_at,
 		    next_retry_at = EXCLUDED.next_retry_at,
-		    updated_at = EXCLUDED.updated_at`
+		    updated_at = EXCLUDED.updated_at`, TableCircuitBreakerState)
 
 	_, err := r.db.ExecContext(ctx, query,
 		state.Endpoint,

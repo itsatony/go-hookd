@@ -146,7 +146,7 @@ func TestPostgresRepository_CreateSubscription_Integration(t *testing.T) {
 	// Query directly from database to verify
 	var count int
 	err = pgContainer.db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM subscriptions WHERE id = $1",
+		fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE id = $1", TableSubscriptions),
 		sub.ID,
 	).Scan(&count)
 	require.NoError(t, err)
@@ -170,14 +170,14 @@ func TestPostgresRepository_GetSubscription_Integration(t *testing.T) {
 
 	// Create subscription directly in database
 	// Note: time.Duration is stored as nanoseconds in JSON
-	_, err = pgContainer.db.ExecContext(ctx, `
-		INSERT INTO subscriptions (
+	_, err = pgContainer.db.ExecContext(ctx, fmt.Sprintf(`
+		INSERT INTO %s (
 			id, tenant_id, url, secret, event_types, status,
 			retry_policy, headers, metadata, created_at, updated_at
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW()
 		)
-	`, "sub_get_test", "tenant_1", "https://test.com/hook", "secret",
+	`, TableSubscriptions), "sub_get_test", "tenant_1", "https://test.com/hook", "secret",
 		pq.Array([]string{"test.event"}), "active",
 		`{"max_attempts": 10, "initial_backoff": 1000000000, "max_backoff": 300000000000, "backoff_factor": 2.0}`,
 		`{}`,
@@ -369,7 +369,7 @@ func TestPostgresRepository_CreateDelivery_Integration(t *testing.T) {
 	// Query directly from database
 	var count int
 	err = pgContainer.db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM deliveries WHERE id = $1",
+		fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE id = $1", TableDeliveries),
 		delivery.ID,
 	).Scan(&count)
 	require.NoError(t, err)
@@ -478,11 +478,11 @@ func TestPostgresRepository_GetPendingDeliveries_SkipLocked_Integration(t *testi
 	defer tx1.Rollback()
 
 	// Lock delivery in tx1
-	_, err = tx1.ExecContext(ctx, `
-		SELECT * FROM deliveries
+	_, err = tx1.ExecContext(ctx, fmt.Sprintf(`
+		SELECT * FROM %s
 		WHERE id = $1
 		FOR UPDATE
-	`, delivery.ID)
+	`, TableDeliveries), delivery.ID)
 	require.NoError(t, err)
 
 	// Try to get pending deliveries from main repo (should skip locked)

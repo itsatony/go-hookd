@@ -180,9 +180,9 @@ func TestConcurrentWorkerPool_NoDoubleProcessing(t *testing.T) {
 
 	// Cleanup
 	for _, deliveryID := range deliveryIDs {
-		_, _ = repo.db.ExecContext(ctx, "DELETE FROM deliveries WHERE id = $1", deliveryID)
+		_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", TableDeliveries), deliveryID)
 	}
-	_, _ = repo.db.ExecContext(ctx, "DELETE FROM subscriptions WHERE id = $1", sub.ID)
+	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", TableSubscriptions), sub.ID)
 }
 
 func TestConcurrentWorkerPool_SkipLocked(t *testing.T) {
@@ -333,9 +333,9 @@ func TestConcurrentWorkerPool_SkipLocked(t *testing.T) {
 
 	// Cleanup
 	for _, deliveryID := range deliveryIDs {
-		_, _ = repo.db.ExecContext(ctx, "DELETE FROM deliveries WHERE id = $1", deliveryID)
+		_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", TableDeliveries), deliveryID)
 	}
-	_, _ = repo.db.ExecContext(ctx, "DELETE FROM subscriptions WHERE id = $1", sub.ID)
+	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", TableSubscriptions), sub.ID)
 }
 
 func TestConcurrentWorkerPool_WorkerSemaphore(t *testing.T) {
@@ -446,7 +446,7 @@ func TestConcurrentWorkerPool_WorkerSemaphore(t *testing.T) {
 
 	// Cleanup
 	for _, deliveryID := range deliveryIDs {
-		_, _ = repo.db.ExecContext(ctx, "DELETE FROM deliveries WHERE id = $1", deliveryID)
+		_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", TableDeliveries), deliveryID)
 	}
-	_, _ = repo.db.ExecContext(ctx, "DELETE FROM subscriptions WHERE id = $1", sub.ID)
+	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", TableSubscriptions), sub.ID)
 }

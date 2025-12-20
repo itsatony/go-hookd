@@ -69,10 +69,19 @@ Read these files IN FULL before starting any work:
                    ▼
 ┌─────────────────────────────────────────────┐
 │          PostgreSQL Database                │
-│  subscriptions, deliveries, attempts,       │
-│  circuit_breaker_state, idempotency_store   │
+│  hookd_subscriptions, hookd_deliveries,     │
+│  hookd_delivery_attempts,                   │
+│  hookd_circuit_breaker_state,               │
+│  hookd_idempotency_store                    │
 └─────────────────────────────────────────────┘
 ```
+
+**Database Naming Convention (v0.4.0+)**:
+- All tables use `hookd_` prefix to prevent namespace collisions
+- Indexes: `idx_hookd_{table}_{columns}`
+- Triggers: `trg_hookd_{table}_{event}`
+- Functions: `hookd_{name}()`
+- Constraints: `chk_hookd_{table}_{rule}` or `fk_hookd_{table}_{ref}`
 
 **Separation of Concerns**:
 - Package provides webhook management logic ONLY
@@ -568,14 +577,14 @@ Support for distributed tracing via OpenTelemetry (future enhancement).
 ```yaml
 project:
   name: "go-hookd"
-  version: "0.3.1"
+  version: "0.4.0"
 
 schemas:
-  postgres_main: "1"
+  postgres_main: "2"  # Prefixed schema (hookd_*) for v0.4.0
 
 components:
-  manager: "0.3.1"
-  delivery_engine: "0.3.1"
+  manager: "0.4.0"
+  delivery_engine: "0.4.0"
   circuit_breaker: "0.2.0"
   idempotency_store: "0.2.0"
   dead_letter_queue: "0.1.0"

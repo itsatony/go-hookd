@@ -950,11 +950,11 @@ func TestPostgresRepositoryTx_GetPendingDeliveries_Integration(t *testing.T) {
 		require.NoError(t, err)
 		defer tx1.Rollback()
 
-		_, err = tx1.ExecContext(ctx, `
-			SELECT * FROM deliveries
+		_, err = tx1.ExecContext(ctx, fmt.Sprintf(`
+			SELECT * FROM %s
 			WHERE id = $1
 			FOR UPDATE
-		`, delivery.ID)
+		`, TableDeliveries), delivery.ID)
 		require.NoError(t, err)
 
 		// Try to get pending in tx2 - should skip locked

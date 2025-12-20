@@ -6,8 +6,10 @@ A webhook delivery management library for Go applications. Handles webhook subsc
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Test Coverage](https://img.shields.io/badge/coverage-60%25-yellow.svg)](https://github.com/itsatony/go-hookd)
 
-> **Status**: Production Ready (v0.3.0)
+> **Status**: Production Ready (v0.4.0)
 > Core functionality is implemented, tested, and production-ready. The API is stable with comprehensive test coverage.
+>
+> **v0.4.0 Breaking Change**: All database tables now use `hookd_` prefix (e.g., `hookd_subscriptions`) to prevent namespace collisions when embedded in other applications.
 
 ## What is go-hookd?
 
@@ -712,9 +714,11 @@ err = hookd.Migrate(ctx, dbURL, hookd.MigrateDown)
 
 Alternatively, run the SQL migrations manually from `migrations/postgres/`:
 
+**Note:** All tables use the `hookd_` prefix to prevent namespace collisions when go-hookd is embedded in applications with existing database schemas.
+
 ```sql
 -- Subscriptions
-CREATE TABLE subscriptions (
+CREATE TABLE hookd_subscriptions (
     id VARCHAR(50) PRIMARY KEY,
     tenant_id VARCHAR(100) NOT NULL,
     url TEXT NOT NULL,
@@ -729,9 +733,9 @@ CREATE TABLE subscriptions (
 );
 
 -- Deliveries
-CREATE TABLE deliveries (
+CREATE TABLE hookd_deliveries (
     id VARCHAR(50) PRIMARY KEY,
-    subscription_id VARCHAR(50) REFERENCES subscriptions(id),
+    subscription_id VARCHAR(50) REFERENCES hookd_subscriptions(id),
     tenant_id VARCHAR(100) NOT NULL,
     event_type VARCHAR(100) NOT NULL,
     payload JSONB NOT NULL,
@@ -744,9 +748,9 @@ CREATE TABLE deliveries (
 );
 
 -- Delivery Attempts
-CREATE TABLE delivery_attempts (
+CREATE TABLE hookd_delivery_attempts (
     id VARCHAR(50) PRIMARY KEY,
-    delivery_id VARCHAR(50) REFERENCES deliveries(id),
+    delivery_id VARCHAR(50) REFERENCES hookd_deliveries(id),
     attempt_number INTEGER NOT NULL,
     response_status_code INTEGER,
     response_body TEXT,
@@ -756,7 +760,7 @@ CREATE TABLE delivery_attempts (
 );
 
 -- Circuit Breaker State
-CREATE TABLE circuit_breaker_state (
+CREATE TABLE hookd_circuit_breaker_state (
     endpoint VARCHAR(500) PRIMARY KEY,
     state VARCHAR(20) NOT NULL DEFAULT 'closed',
     failure_count INTEGER NOT NULL DEFAULT 0,
@@ -765,23 +769,24 @@ CREATE TABLE circuit_breaker_state (
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
--- Idempotency Keys
-CREATE TABLE idempotency_keys (
-    key VARCHAR(200) PRIMARY KEY,
-    delivery_id VARCHAR(50),
+-- Idempotency Store
+CREATE TABLE hookd_idempotency_store (
+    idempotency_key VARCHAR(200) NOT NULL,
+    subscription_id VARCHAR(50) NOT NULL,
+    expires_at TIMESTAMP NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    expires_at TIMESTAMP NOT NULL
+    PRIMARY KEY (idempotency_key, subscription_id)
 );
 
--- Indexes for performance
-CREATE INDEX idx_deliveries_status ON deliveries(status);
-CREATE INDEX idx_deliveries_next_attempt ON deliveries(next_attempt_at) WHERE status = 'pending';
-CREATE INDEX idx_deliveries_subscription ON deliveries(subscription_id);
-CREATE INDEX idx_deliveries_tenant ON deliveries(tenant_id);
-CREATE INDEX idx_idempotency_expires ON idempotency_keys(expires_at);
+-- Indexes for performance (all prefixed with idx_hookd_)
+CREATE INDEX idx_hookd_deliveries_status ON hookd_deliveries(status);
+CREATE INDEX idx_hookd_deliveries_pending ON hookd_deliveries(next_attempt_at) WHERE status = 'pending';
+CREATE INDEX idx_hookd_deliveries_subscription ON hookd_deliveries(subscription_id);
+CREATE INDEX idx_hookd_deliveries_tenant ON hookd_deliveries(tenant_id);
+CREATE INDEX idx_hookd_idempotency_expires ON hookd_idempotency_store(expires_at);
 ```
 
-**Note:** This schema is a guideline. Adapt it to your database conventions.
+**Note:** This schema is a guideline. See `migrations/postgres/000001_baseline.up.sql` for the complete schema with all indexes and constraints.
 
 ## Testing
 
@@ -861,7 +866,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for full guidelines.
 
 ## Project Status
 
-**Current Version**: v0.3.0 (Production Ready)
+**Current Version**: v0.4.0 (Production Ready)
 
 **What's Implemented:**
 - ✓ Core subscription and delivery management

@@ -1552,10 +1552,10 @@ func TestE2E_MigrationHelper(t *testing.T) {
 		for _, f := range files {
 			if f.Version == 1 && f.Direction == MigrateUp {
 				hasUpV1 = true
-				assert.Contains(t, f.Content, "CREATE TABLE IF NOT EXISTS subscriptions",
-					"up migration should create subscriptions table")
-				assert.Contains(t, f.Content, "CREATE TABLE IF NOT EXISTS deliveries",
-					"up migration should create deliveries table")
+				assert.Contains(t, f.Content, "CREATE TABLE IF NOT EXISTS hookd_subscriptions",
+					"up migration should create hookd_subscriptions table")
+				assert.Contains(t, f.Content, "CREATE TABLE IF NOT EXISTS hookd_deliveries",
+					"up migration should create hookd_deliveries table")
 				t.Logf("Found v%d up migration: %s (%d bytes)", f.Version, f.Name, len(f.Content))
 			}
 			if f.Version == 1 && f.Direction == MigrateDown {

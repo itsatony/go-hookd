@@ -154,22 +154,46 @@ const (
 	HeaderIdempotencyKey = "X-Webhook-Idempotency-Key"
 )
 
+// =============================================================================
+// DATABASE OBJECT NAMES
+// =============================================================================
+// All database objects use the "hookd_" prefix to prevent namespace collisions
+// when go-hookd is embedded in other applications.
+
 // Database Table Names.
 const (
 	// TableSubscriptions is the subscriptions table name.
-	TableSubscriptions = "subscriptions"
+	TableSubscriptions = "hookd_subscriptions"
 
 	// TableDeliveries is the deliveries table name.
-	TableDeliveries = "deliveries"
+	TableDeliveries = "hookd_deliveries"
 
 	// TableDeliveryAttempts is the delivery_attempts table name.
-	TableDeliveryAttempts = "delivery_attempts"
+	TableDeliveryAttempts = "hookd_delivery_attempts"
 
 	// TableIdempotencyStore is the idempotency_store table name.
-	TableIdempotencyStore = "idempotency_store"
+	TableIdempotencyStore = "hookd_idempotency_store"
 
 	// TableCircuitBreakerState is the circuit_breaker_state table name.
-	TableCircuitBreakerState = "circuit_breaker_state"
+	TableCircuitBreakerState = "hookd_circuit_breaker_state"
+)
+
+// Database Function Names.
+const (
+	// FuncUpdateUpdatedAt is the function that updates the updated_at column.
+	FuncUpdateUpdatedAt = "hookd_update_updated_at"
+
+	// FuncCleanupIdempotency is the function that cleans up expired idempotency keys.
+	FuncCleanupIdempotency = "hookd_cleanup_expired_idempotency"
+)
+
+// Database Trigger Names.
+const (
+	// TriggerSubscriptionsUpdatedAt is the trigger for subscriptions.updated_at.
+	TriggerSubscriptionsUpdatedAt = "trg_hookd_subscriptions_updated_at"
+
+	// TriggerCircuitBreakerUpdatedAt is the trigger for circuit_breaker_state.updated_at.
+	TriggerCircuitBreakerUpdatedAt = "trg_hookd_circuit_breaker_updated_at"
 )
 
 // Default Configuration Values - Retry Policy.
@@ -542,7 +566,7 @@ const (
 
 	// UserAgentVersion is the current version for user agent.
 	// This should match versions.yaml project.version.
-	UserAgentVersion = "0.3.1"
+	UserAgentVersion = "0.4.0"
 )
 
 // UserAgent is the complete user agent string used for webhook deliveries.
