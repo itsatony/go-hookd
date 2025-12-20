@@ -856,3 +856,242 @@ func (r *PostgresRepositoryTx) Close() error {
 	// No-op: transactions are committed or rolled back, not closed
 	return nil
 }
+
+// =============================================================================
+// MAINTENANCE OPERATIONS
+// =============================================================================
+
+// CountDeliveriesByFilter counts deliveries matching the cleanup filter within the transaction.
+func (r *PostgresRepositoryTx) CountDeliveriesByFilter(ctx context.Context, filter *CleanupFilter) (int64, error) {
+	query := fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE 1=1`, TableDeliveries)
+	args := []any{}
+	argCount := 1
+
+	if filter.CreatedBefore != nil {
+		query += fmt.Sprintf(" AND created_at < $%d", argCount)
+		args = append(args, *filter.CreatedBefore)
+		argCount++
+	}
+
+	if filter.CreatedAfter != nil {
+		query += fmt.Sprintf(" AND created_at > $%d", argCount)
+		args = append(args, *filter.CreatedAfter)
+		argCount++
+	}
+
+	if filter.Status != nil && *filter.Status != "" {
+		query += fmt.Sprintf(" AND status = $%d", argCount)
+		args = append(args, *filter.Status)
+		argCount++
+	}
+
+	if filter.TenantID != "" {
+		query += fmt.Sprintf(" AND tenant_id = $%d", argCount)
+		args = append(args, filter.TenantID)
+		argCount++
+	}
+
+	if filter.SubscriptionID != nil && *filter.SubscriptionID != "" {
+		query += fmt.Sprintf(" AND subscription_id = $%d", argCount)
+		args = append(args, *filter.SubscriptionID)
+		argCount++
+	}
+
+	if filter.EventType != nil && *filter.EventType != "" {
+		query += fmt.Sprintf(" AND event_type = $%d", argCount)
+		args = append(args, *filter.EventType)
+	}
+
+	var count int64
+	err := r.tx.QueryRowContext(ctx, query, args...).Scan(&count)
+	if err != nil {
+		return 0, cuserr.NewExternalError("database", "postgres", err,
+			cuserr.WithMetadata("operation", "count_deliveries_by_filter_tx"),
+		)
+	}
+
+	return count, nil
+}
+
+// DeleteDeliveriesByFilter deletes deliveries matching the cleanup filter within the transaction.
+func (r *PostgresRepositoryTx) DeleteDeliveriesByFilter(ctx context.Context, filter *CleanupFilter) (int64, error) {
+	query := fmt.Sprintf(`DELETE FROM %s WHERE 1=1`, TableDeliveries)
+	args := []any{}
+	argCount := 1
+
+	if filter.CreatedBefore != nil {
+		query += fmt.Sprintf(" AND created_at < $%d", argCount)
+		args = append(args, *filter.CreatedBefore)
+		argCount++
+	}
+
+	if filter.CreatedAfter != nil {
+		query += fmt.Sprintf(" AND created_at > $%d", argCount)
+		args = append(args, *filter.CreatedAfter)
+		argCount++
+	}
+
+	if filter.Status != nil && *filter.Status != "" {
+		query += fmt.Sprintf(" AND status = $%d", argCount)
+		args = append(args, *filter.Status)
+		argCount++
+	}
+
+	if filter.TenantID != "" {
+		query += fmt.Sprintf(" AND tenant_id = $%d", argCount)
+		args = append(args, filter.TenantID)
+		argCount++
+	}
+
+	if filter.SubscriptionID != nil && *filter.SubscriptionID != "" {
+		query += fmt.Sprintf(" AND subscription_id = $%d", argCount)
+		args = append(args, *filter.SubscriptionID)
+		argCount++
+	}
+
+	if filter.EventType != nil && *filter.EventType != "" {
+		query += fmt.Sprintf(" AND event_type = $%d", argCount)
+		args = append(args, *filter.EventType)
+	}
+
+	result, err := r.tx.ExecContext(ctx, query, args...)
+	if err != nil {
+		return 0, cuserr.NewExternalError("database", "postgres", err,
+			cuserr.WithMetadata("operation", "delete_deliveries_by_filter_tx"),
+		)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, cuserr.NewExternalError("database", "postgres", err,
+			cuserr.WithMetadata("operation", "delete_deliveries_rows_affected_tx"),
+		)
+	}
+
+	return rowsAffected, nil
+}
+
+// GetMaintenanceStats retrieves comprehensive statistics within the transaction.
+func (r *PostgresRepositoryTx) GetMaintenanceStats(ctx context.Context) (*MaintenanceStats, error) {
+	stats := &MaintenanceStats{
+		DeliveriesByStatus: make(map[string]int64),
+		AsOf:               time.Now(),
+	}
+
+	// Get total deliveries and time range
+	deliveryStatsQuery := fmt.Sprintf(`
+		SELECT
+			COUNT(*) as total,
+			MIN(created_at) as oldest,
+			MAX(created_at) as newest
+		FROM %s`, TableDeliveries)
+
+	var oldest, newest *time.Time
+	err := r.tx.QueryRowContext(ctx, deliveryStatsQuery).Scan(
+		&stats.TotalDeliveries,
+		&oldest,
+		&newest,
+	)
+	if err != nil {
+		return nil, cuserr.NewExternalError("database", "postgres", err,
+			cuserr.WithMetadata("operation", "get_maintenance_stats_deliveries_tx"),
+		)
+	}
+	stats.OldestDeliveryAt = oldest
+	stats.NewestDeliveryAt = newest
+
+	// Get breakdown by status
+	statusQuery := fmt.Sprintf(`
+		SELECT status, COUNT(*) as count
+		FROM %s
+		GROUP BY status`, TableDeliveries)
+
+	rows, err := r.tx.QueryContext(ctx, statusQuery)
+	if err != nil {
+		return nil, cuserr.NewExternalError("database", "postgres", err,
+			cuserr.WithMetadata("operation", "get_maintenance_stats_by_status_tx"),
+		)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var status string
+		var count int64
+		if err := rows.Scan(&status, &count); err != nil {
+			return nil, cuserr.NewExternalError("database", "postgres", err,
+				cuserr.WithMetadata("operation", "scan_status_count_tx"),
+			)
+		}
+		stats.DeliveriesByStatus[status] = count
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, cuserr.NewExternalError("database", "postgres", err,
+			cuserr.WithMetadata("operation", "get_maintenance_stats_status_rows_tx"),
+		)
+	}
+
+	// Get total delivery attempts
+	attemptsQuery := fmt.Sprintf(`SELECT COUNT(*) FROM %s`, TableDeliveryAttempts)
+	err = r.tx.QueryRowContext(ctx, attemptsQuery).Scan(&stats.TotalDeliveryAttempts)
+	if err != nil {
+		return nil, cuserr.NewExternalError("database", "postgres", err,
+			cuserr.WithMetadata("operation", "get_maintenance_stats_attempts_tx"),
+		)
+	}
+
+	// Get idempotency key counts
+	idempotencyQuery := fmt.Sprintf(`
+		SELECT
+			COUNT(*) as total,
+			COUNT(*) FILTER (WHERE expires_at < NOW()) as expired
+		FROM %s`, TableIdempotencyStore)
+
+	err = r.tx.QueryRowContext(ctx, idempotencyQuery).Scan(
+		&stats.IdempotencyKeys,
+		&stats.ExpiredIdempotencyKeys,
+	)
+	if err != nil {
+		return nil, cuserr.NewExternalError("database", "postgres", err,
+			cuserr.WithMetadata("operation", "get_maintenance_stats_idempotency_tx"),
+		)
+	}
+
+	return stats, nil
+}
+
+// CountExpiredIdempotencyKeys counts expired idempotency keys within the transaction.
+func (r *PostgresRepositoryTx) CountExpiredIdempotencyKeys(ctx context.Context) (int64, error) {
+	query := fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE expires_at < NOW()`, TableIdempotencyStore)
+
+	var count int64
+	err := r.tx.QueryRowContext(ctx, query).Scan(&count)
+	if err != nil {
+		return 0, cuserr.NewExternalError("database", "postgres", err,
+			cuserr.WithMetadata("operation", "count_expired_idempotency_keys_tx"),
+		)
+	}
+
+	return count, nil
+}
+
+// CleanupExpiredIdempotencyKeys deletes expired idempotency keys within the transaction.
+func (r *PostgresRepositoryTx) CleanupExpiredIdempotencyKeys(ctx context.Context) (int64, error) {
+	query := fmt.Sprintf(`DELETE FROM %s WHERE expires_at < NOW()`, TableIdempotencyStore)
+
+	result, err := r.tx.ExecContext(ctx, query)
+	if err != nil {
+		return 0, cuserr.NewExternalError("database", "postgres", err,
+			cuserr.WithMetadata("operation", "cleanup_expired_idempotency_keys_tx"),
+		)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, cuserr.NewExternalError("database", "postgres", err,
+			cuserr.WithMetadata("operation", "cleanup_idempotency_rows_affected_tx"),
+		)
+	}
+
+	return rowsAffected, nil
+}

@@ -406,6 +406,14 @@ type SubscriptionFilter struct {
 
 // DeliveryFilter defines filtering criteria for listing deliveries.
 type DeliveryFilter struct {
+	// CreatedBefore filters deliveries created before this time (optional).
+	// Useful for cleanup operations to find old deliveries.
+	CreatedBefore *time.Time `json:"created_before,omitempty"`
+
+	// CreatedAfter filters deliveries created after this time (optional).
+	// Useful for finding recent deliveries.
+	CreatedAfter *time.Time `json:"created_after,omitempty"`
+
 	SubscriptionID *string `json:"subscription_id,omitempty"`
 	Status         *string `json:"status,omitempty"`
 	EventType      *string `json:"event_type,omitempty"`
@@ -460,6 +468,107 @@ type TestResult struct {
 
 	// Error contains any error message if the test failed
 	Error string `json:"error,omitempty"`
+}
+
+// =============================================================================
+// MAINTENANCE TYPES
+// =============================================================================
+
+// CleanupFilter specifies criteria for cleaning up deliveries.
+//
+// This filter is used by cleanup operations to select which deliveries
+// to count or delete. All non-nil fields are combined with AND logic.
+type CleanupFilter struct {
+	// CreatedBefore filters deliveries created before this time.
+	// This is typically the main filter for cleanup operations (e.g., "older than 30 days").
+	CreatedBefore *time.Time `json:"created_before,omitempty"`
+
+	// CreatedAfter filters deliveries created after this time (optional).
+	CreatedAfter *time.Time `json:"created_after,omitempty"`
+
+	// Status filters by delivery status.
+	// Use DeliveryStatusSuccess, DeliveryStatusFailed, DeliveryStatusDeadLetter, etc.
+	Status *string `json:"status,omitempty"`
+
+	// TenantID filters by tenant (optional).
+	// If empty, cleanup applies across all tenants.
+	TenantID string `json:"tenant_id,omitempty"`
+
+	// SubscriptionID filters by subscription (optional).
+	SubscriptionID *string `json:"subscription_id,omitempty"`
+
+	// EventType filters by event type (optional).
+	EventType *string `json:"event_type,omitempty"`
+}
+
+// Validate validates the CleanupFilter.
+func (f *CleanupFilter) Validate() error {
+	// At least one constraint must be provided to prevent accidental mass deletion
+	if f.CreatedBefore == nil && f.CreatedAfter == nil && f.Status == nil &&
+		f.TenantID == "" && f.SubscriptionID == nil && f.EventType == nil {
+		return cuserr.NewValidationError("filter", "at least one filter constraint is required")
+	}
+
+	// Validate time range if both are provided
+	if f.CreatedBefore != nil && f.CreatedAfter != nil {
+		if !f.CreatedBefore.After(*f.CreatedAfter) {
+			return cuserr.NewValidationError("filter", "created_before must be after created_after")
+		}
+	}
+
+	return nil
+}
+
+// CleanupResult contains the result of a cleanup operation.
+type CleanupResult struct {
+	// DeliveriesDeleted is the number of delivery records deleted.
+	DeliveriesDeleted int64 `json:"deliveries_deleted"`
+
+	// AttemptsDeleted is the number of delivery attempt records deleted.
+	// This is typically higher than DeliveriesDeleted due to cascade deletion.
+	AttemptsDeleted int64 `json:"attempts_deleted"`
+
+	// Duration is how long the cleanup operation took.
+	Duration time.Duration `json:"duration"`
+
+	// DryRun indicates if this was a dry-run (count-only) operation.
+	DryRun bool `json:"dry_run"`
+}
+
+// MaintenanceStats provides statistics about data that could be cleaned up.
+type MaintenanceStats struct {
+	// TotalDeliveries is the total count of deliveries in the system.
+	TotalDeliveries int64 `json:"total_deliveries"`
+
+	// DeliveriesByStatus breaks down deliveries by status.
+	DeliveriesByStatus map[string]int64 `json:"deliveries_by_status"`
+
+	// OldestDeliveryAt is the timestamp of the oldest delivery.
+	OldestDeliveryAt *time.Time `json:"oldest_delivery_at,omitempty"`
+
+	// NewestDeliveryAt is the timestamp of the newest delivery.
+	NewestDeliveryAt *time.Time `json:"newest_delivery_at,omitempty"`
+
+	// TotalDeliveryAttempts is the total count of delivery attempts.
+	TotalDeliveryAttempts int64 `json:"total_delivery_attempts"`
+
+	// IdempotencyKeys is the count of stored idempotency keys.
+	IdempotencyKeys int64 `json:"idempotency_keys"`
+
+	// ExpiredIdempotencyKeys is the count of expired idempotency keys ready for cleanup.
+	ExpiredIdempotencyKeys int64 `json:"expired_idempotency_keys"`
+
+	// AsOf is the timestamp when these stats were collected.
+	AsOf time.Time `json:"as_of"`
+}
+
+// IdempotencyCleanupResult contains the result of idempotency key cleanup.
+type IdempotencyCleanupResult struct {
+	// KeysDeleted is the number of expired idempotency keys deleted.
+	KeysDeleted int64 `json:"keys_deleted"`
+
+	// Duration is how long the cleanup operation took.
+	Duration time.Duration `json:"duration"`
 }
 
 // Validate validates a RetryPolicy.

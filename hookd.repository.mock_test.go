@@ -548,8 +548,9 @@ func TestMockRepository_Idempotency(t *testing.T) {
 		require.NoError(t, err)
 
 		// Cleanup
-		count := repo.CleanupExpiredIdempotencyKeys()
-		assert.GreaterOrEqual(t, count, 1) // At least key2 and key3
+		count, err := repo.CleanupExpiredIdempotencyKeys(ctx)
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, count, int64(1)) // At least key2 and key3
 	})
 }
 

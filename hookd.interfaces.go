@@ -122,6 +122,29 @@ type Repository interface {
 	// Close closes the repository connection and releases resources.
 	// After calling Close, no other methods should be called.
 	Close() error
+
+	// Maintenance Operations
+
+	// CountDeliveriesByFilter counts deliveries matching the cleanup filter.
+	// This is used for dry-run operations before actual deletion.
+	CountDeliveriesByFilter(ctx context.Context, filter *CleanupFilter) (int64, error)
+
+	// DeleteDeliveriesByFilter deletes deliveries matching the cleanup filter.
+	// Returns the number of deliveries deleted.
+	// Note: Related delivery attempts are automatically deleted via CASCADE.
+	DeleteDeliveriesByFilter(ctx context.Context, filter *CleanupFilter) (int64, error)
+
+	// GetMaintenanceStats retrieves comprehensive statistics for maintenance planning.
+	// Returns counts, oldest/newest timestamps, and breakdown by status.
+	GetMaintenanceStats(ctx context.Context) (*MaintenanceStats, error)
+
+	// CountExpiredIdempotencyKeys counts idempotency keys that have expired.
+	// This is used for dry-run operations before cleanup.
+	CountExpiredIdempotencyKeys(ctx context.Context) (int64, error)
+
+	// CleanupExpiredIdempotencyKeys deletes all expired idempotency keys.
+	// Returns the number of keys deleted.
+	CleanupExpiredIdempotencyKeys(ctx context.Context) (int64, error)
 }
 
 // RepositoryTx extends Repository with transaction control methods.

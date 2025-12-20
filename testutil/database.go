@@ -530,6 +530,31 @@ func (r *TransactionalRepository) Close() error {
 	return nil
 }
 
+// CountDeliveriesByFilter counts deliveries matching the cleanup filter (stub for testutil)
+func (r *TransactionalRepository) CountDeliveriesByFilter(ctx context.Context, filter *hookd.CleanupFilter) (int64, error) {
+	return 0, fmt.Errorf("CountDeliveriesByFilter not implemented in testutil TransactionalRepository")
+}
+
+// DeleteDeliveriesByFilter deletes deliveries matching the cleanup filter (stub for testutil)
+func (r *TransactionalRepository) DeleteDeliveriesByFilter(ctx context.Context, filter *hookd.CleanupFilter) (int64, error) {
+	return 0, fmt.Errorf("DeleteDeliveriesByFilter not implemented in testutil TransactionalRepository")
+}
+
+// GetMaintenanceStats retrieves comprehensive statistics (stub for testutil)
+func (r *TransactionalRepository) GetMaintenanceStats(ctx context.Context) (*hookd.MaintenanceStats, error) {
+	return nil, fmt.Errorf("GetMaintenanceStats not implemented in testutil TransactionalRepository")
+}
+
+// CountExpiredIdempotencyKeys counts expired idempotency keys (stub for testutil)
+func (r *TransactionalRepository) CountExpiredIdempotencyKeys(ctx context.Context) (int64, error) {
+	return 0, nil
+}
+
+// CleanupExpiredIdempotencyKeys deletes expired idempotency keys (stub for testutil)
+func (r *TransactionalRepository) CleanupExpiredIdempotencyKeys(ctx context.Context) (int64, error) {
+	return 0, nil
+}
+
 // =============================================================================
 // UTILITY FUNCTIONS
 // =============================================================================

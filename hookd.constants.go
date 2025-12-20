@@ -113,6 +113,12 @@ const (
 	EventTopicAuditSubscriptionDeleted = "audit.subscription_deleted"
 )
 
+// Maintenance Event Topics.
+const (
+	// EventTopicMaintenanceCleanup is published when a cleanup operation completes.
+	EventTopicMaintenanceCleanup = "maintenance.cleanup"
+)
+
 // Test Event Types.
 const (
 	// EventTypeTestPing is the event type used for TestSubscription ping requests.
@@ -566,7 +572,7 @@ const (
 
 	// UserAgentVersion is the current version for user agent.
 	// This should match versions.yaml project.version.
-	UserAgentVersion = "0.4.0"
+	UserAgentVersion = "0.5.0"
 )
 
 // UserAgent is the complete user agent string used for webhook deliveries.

@@ -696,25 +696,6 @@ func (r *MockRepository) StoreIdempotencyKey(ctx context.Context, key string, su
 	return nil
 }
 
-// CleanupExpiredIdempotencyKeys removes expired idempotency keys (for testing).
-// This is not part of the Repository interface but useful for maintenance.
-func (r *MockRepository) CleanupExpiredIdempotencyKeys() int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	now := time.Now()
-	count := 0
-
-	for key, entry := range r.idempotencyKeys {
-		if entry.ExpiresAt.Before(now) {
-			delete(r.idempotencyKeys, key)
-			count++
-		}
-	}
-
-	return count
-}
-
 // =============================================================================
 // CIRCUIT BREAKER OPERATIONS
 // =============================================================================
@@ -820,6 +801,152 @@ func (r *MockRepository) Close() error {
 		return cuserr.NewInternalError("mock_repository", nil, cuserr.WithMetadata("operation", "close"))
 	}
 	return nil
+}
+
+// =============================================================================
+// MAINTENANCE OPERATIONS
+// =============================================================================
+
+// CountDeliveriesByFilter counts deliveries matching the cleanup filter.
+func (r *MockRepository) CountDeliveriesByFilter(ctx context.Context, filter *CleanupFilter) (int64, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var count int64
+	for _, delivery := range r.deliveries {
+		if matchesCleanupFilter(delivery, filter) {
+			count++
+		}
+	}
+	return count, nil
+}
+
+// DeleteDeliveriesByFilter deletes deliveries matching the cleanup filter.
+func (r *MockRepository) DeleteDeliveriesByFilter(ctx context.Context, filter *CleanupFilter) (int64, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	var deleted int64
+	toDelete := []string{}
+
+	for id, delivery := range r.deliveries {
+		if matchesCleanupFilter(delivery, filter) {
+			toDelete = append(toDelete, id)
+		}
+	}
+
+	for _, id := range toDelete {
+		delete(r.deliveries, id)
+		delete(r.deliveryAttempts, id)
+		deleted++
+	}
+
+	return deleted, nil
+}
+
+// GetMaintenanceStats retrieves comprehensive statistics for maintenance planning.
+func (r *MockRepository) GetMaintenanceStats(ctx context.Context) (*MaintenanceStats, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	stats := &MaintenanceStats{
+		DeliveriesByStatus: make(map[string]int64),
+		AsOf:               time.Now(),
+	}
+
+	var oldest, newest *time.Time
+
+	for _, delivery := range r.deliveries {
+		stats.TotalDeliveries++
+		stats.DeliveriesByStatus[delivery.Status]++
+
+		if oldest == nil || delivery.CreatedAt.Before(*oldest) {
+			t := delivery.CreatedAt
+			oldest = &t
+		}
+		if newest == nil || delivery.CreatedAt.After(*newest) {
+			t := delivery.CreatedAt
+			newest = &t
+		}
+	}
+
+	stats.OldestDeliveryAt = oldest
+	stats.NewestDeliveryAt = newest
+
+	for _, attempts := range r.deliveryAttempts {
+		stats.TotalDeliveryAttempts += int64(len(attempts))
+	}
+
+	now := time.Now()
+	for _, entry := range r.idempotencyKeys {
+		stats.IdempotencyKeys++
+		if entry.ExpiresAt.Before(now) {
+			stats.ExpiredIdempotencyKeys++
+		}
+	}
+
+	return stats, nil
+}
+
+// CountExpiredIdempotencyKeys counts idempotency keys that have expired.
+func (r *MockRepository) CountExpiredIdempotencyKeys(ctx context.Context) (int64, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var count int64
+	now := time.Now()
+	for _, entry := range r.idempotencyKeys {
+		if entry.ExpiresAt.Before(now) {
+			count++
+		}
+	}
+	return count, nil
+}
+
+// CleanupExpiredIdempotencyKeys deletes all expired idempotency keys.
+func (r *MockRepository) CleanupExpiredIdempotencyKeys(ctx context.Context) (int64, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	var deleted int64
+	now := time.Now()
+	toDelete := []string{}
+
+	for key, entry := range r.idempotencyKeys {
+		if entry.ExpiresAt.Before(now) {
+			toDelete = append(toDelete, key)
+		}
+	}
+
+	for _, key := range toDelete {
+		delete(r.idempotencyKeys, key)
+		deleted++
+	}
+
+	return deleted, nil
+}
+
+// matchesCleanupFilter checks if a delivery matches the given cleanup filter.
+func matchesCleanupFilter(delivery *Delivery, filter *CleanupFilter) bool {
+	if filter.CreatedBefore != nil && !delivery.CreatedAt.Before(*filter.CreatedBefore) {
+		return false
+	}
+	if filter.CreatedAfter != nil && !delivery.CreatedAt.After(*filter.CreatedAfter) {
+		return false
+	}
+	if filter.Status != nil && *filter.Status != "" && delivery.Status != *filter.Status {
+		return false
+	}
+	if filter.TenantID != "" && delivery.TenantID != filter.TenantID {
+		return false
+	}
+	if filter.SubscriptionID != nil && *filter.SubscriptionID != "" && delivery.SubscriptionID != *filter.SubscriptionID {
+		return false
+	}
+	if filter.EventType != nil && *filter.EventType != "" && delivery.EventType != *filter.EventType {
+		return false
+	}
+	return true
 }
 
 // =============================================================================
@@ -1333,4 +1460,123 @@ func (tx *MockRepositoryTx) Ping(ctx context.Context) error {
 // Close is a no-op for transactions.
 func (tx *MockRepositoryTx) Close() error {
 	return nil
+}
+
+// CountDeliveriesByFilter counts deliveries matching the cleanup filter within the transaction.
+func (tx *MockRepositoryTx) CountDeliveriesByFilter(ctx context.Context, filter *CleanupFilter) (int64, error) {
+	tx.mu.RLock()
+	defer tx.mu.RUnlock()
+
+	var count int64
+	for _, delivery := range tx.deliveries {
+		if matchesCleanupFilter(delivery, filter) {
+			count++
+		}
+	}
+	return count, nil
+}
+
+// DeleteDeliveriesByFilter deletes deliveries matching the cleanup filter within the transaction.
+func (tx *MockRepositoryTx) DeleteDeliveriesByFilter(ctx context.Context, filter *CleanupFilter) (int64, error) {
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
+
+	var deleted int64
+	toDelete := []string{}
+
+	for id, delivery := range tx.deliveries {
+		if matchesCleanupFilter(delivery, filter) {
+			toDelete = append(toDelete, id)
+		}
+	}
+
+	for _, id := range toDelete {
+		delete(tx.deliveries, id)
+		delete(tx.deliveryAttempts, id)
+		deleted++
+	}
+
+	return deleted, nil
+}
+
+// GetMaintenanceStats retrieves comprehensive statistics for maintenance planning within the transaction.
+func (tx *MockRepositoryTx) GetMaintenanceStats(ctx context.Context) (*MaintenanceStats, error) {
+	tx.mu.RLock()
+	defer tx.mu.RUnlock()
+
+	stats := &MaintenanceStats{
+		DeliveriesByStatus: make(map[string]int64),
+		AsOf:               time.Now(),
+	}
+
+	var oldest, newest *time.Time
+
+	for _, delivery := range tx.deliveries {
+		stats.TotalDeliveries++
+		stats.DeliveriesByStatus[delivery.Status]++
+
+		if oldest == nil || delivery.CreatedAt.Before(*oldest) {
+			t := delivery.CreatedAt
+			oldest = &t
+		}
+		if newest == nil || delivery.CreatedAt.After(*newest) {
+			t := delivery.CreatedAt
+			newest = &t
+		}
+	}
+
+	stats.OldestDeliveryAt = oldest
+	stats.NewestDeliveryAt = newest
+
+	for _, attempts := range tx.deliveryAttempts {
+		stats.TotalDeliveryAttempts += int64(len(attempts))
+	}
+
+	now := time.Now()
+	for _, entry := range tx.idempotencyKeys {
+		stats.IdempotencyKeys++
+		if entry.ExpiresAt.Before(now) {
+			stats.ExpiredIdempotencyKeys++
+		}
+	}
+
+	return stats, nil
+}
+
+// CountExpiredIdempotencyKeys counts idempotency keys that have expired within the transaction.
+func (tx *MockRepositoryTx) CountExpiredIdempotencyKeys(ctx context.Context) (int64, error) {
+	tx.mu.RLock()
+	defer tx.mu.RUnlock()
+
+	var count int64
+	now := time.Now()
+	for _, entry := range tx.idempotencyKeys {
+		if entry.ExpiresAt.Before(now) {
+			count++
+		}
+	}
+	return count, nil
+}
+
+// CleanupExpiredIdempotencyKeys deletes all expired idempotency keys within the transaction.
+func (tx *MockRepositoryTx) CleanupExpiredIdempotencyKeys(ctx context.Context) (int64, error) {
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
+
+	var deleted int64
+	now := time.Now()
+	toDelete := []string{}
+
+	for key, entry := range tx.idempotencyKeys {
+		if entry.ExpiresAt.Before(now) {
+			toDelete = append(toDelete, key)
+		}
+	}
+
+	for _, key := range toDelete {
+		delete(tx.idempotencyKeys, key)
+		deleted++
+	}
+
+	return deleted, nil
 }
