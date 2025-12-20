@@ -20,7 +20,38 @@ import (
 // Thread Safety: PostgresRepository is safe for concurrent use by multiple goroutines.
 // The underlying sql.DB connection pool handles concurrent access automatically.
 type PostgresRepository struct {
-	db *sql.DB
+	db           *sql.DB
+	schemaConfig *SchemaConfig
+}
+
+// PostgresRepositoryOption is a functional option for configuring PostgresRepository.
+type PostgresRepositoryOption func(*PostgresRepository) error
+
+// WithTablePrefix configures a table name prefix for multi-service deployments.
+//
+// When multiple services share a PostgreSQL database, use unique prefixes to
+// isolate each service's webhook tables. The prefix is prepended to the standard
+// "hookd_" table names.
+//
+// Example:
+//
+//	repo, err := NewPostgresRepository(connStr, WithTablePrefix("servicea"))
+//	// Creates tables: servicea_hookd_subscriptions, servicea_hookd_deliveries, etc.
+//
+// Validation Rules:
+//   - Required (cannot be empty)
+//   - Only lowercase letters, numbers, and underscores
+//   - Maximum 32 characters
+//   - Cannot be a SQL keyword
+func WithTablePrefix(prefix string) PostgresRepositoryOption {
+	return func(r *PostgresRepository) error {
+		schema, err := NewSchemaConfig(prefix)
+		if err != nil {
+			return err
+		}
+		r.schemaConfig = schema
+		return nil
+	}
 }
 
 // NewPostgresRepository creates a new PostgreSQL repository instance.
@@ -28,9 +59,32 @@ type PostgresRepository struct {
 // The connectionString should be in the format:
 // postgresql://user:password@host:port/database?sslmode=disable
 //
-// Returns an error if the connection cannot be established or the database
-// cannot be pinged.
-func NewPostgresRepository(connectionString string) (*PostgresRepository, error) {
+// A table prefix is REQUIRED via WithTablePrefix option for multi-service isolation.
+//
+// Example:
+//
+//	repo, err := NewPostgresRepository(connStr, WithTablePrefix("myservice"))
+//
+// Returns an error if:
+//   - No prefix is provided (WithTablePrefix is required)
+//   - The connection cannot be established
+//   - The database cannot be pinged
+func NewPostgresRepository(connectionString string, opts ...PostgresRepositoryOption) (*PostgresRepository, error) {
+	r := &PostgresRepository{}
+
+	// Apply options
+	for _, opt := range opts {
+		if err := opt(r); err != nil {
+			return nil, err
+		}
+	}
+
+	// Validate required prefix
+	if r.schemaConfig == nil {
+		return nil, cuserr.NewValidationError("table_prefix", ErrMsgPrefixRequired)
+	}
+
+	// Open database connection
 	db, err := sql.Open("postgres", connectionString)
 	if err != nil {
 		return nil, cuserr.NewExternalError("database", "postgres", err,
@@ -57,7 +111,14 @@ func NewPostgresRepository(connectionString string) (*PostgresRepository, error)
 		)
 	}
 
-	return &PostgresRepository{db: db}, nil
+	r.db = db
+	return r, nil
+}
+
+// SchemaConfig returns the schema configuration for this repository.
+// This provides access to table names and other schema-related identifiers.
+func (r *PostgresRepository) SchemaConfig() *SchemaConfig {
+	return r.schemaConfig
 }
 
 // =============================================================================
@@ -338,7 +399,7 @@ func (r *PostgresRepository) CreateSubscription(ctx context.Context, sub *Subscr
 			retry_policy, headers, metadata, created_at, updated_at
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
-		)`, TableSubscriptions)
+		)`, r.schemaConfig.TableSubscriptions())
 
 	_, err = r.db.ExecContext(ctx, query,
 		sub.ID,
@@ -375,7 +436,7 @@ func (r *PostgresRepository) GetSubscription(ctx context.Context, id string) (*S
 		SELECT id, tenant_id, url, secret, event_types, filters, status,
 		       retry_policy, headers, metadata, created_at, updated_at
 		FROM %s
-		WHERE id = $1`, TableSubscriptions)
+		WHERE id = $1`, r.schemaConfig.TableSubscriptions())
 
 	row := r.db.QueryRowContext(ctx, query, id)
 	sub, err := scanSubscription(row)
@@ -399,7 +460,7 @@ func (r *PostgresRepository) GetSubscriptionByTenantAndURL(ctx context.Context, 
 		SELECT id, tenant_id, url, secret, event_types, filters, status,
 		       retry_policy, headers, metadata, created_at, updated_at
 		FROM %s
-		WHERE tenant_id = $1 AND url = $2`, TableSubscriptions)
+		WHERE tenant_id = $1 AND url = $2`, r.schemaConfig.TableSubscriptions())
 
 	row := r.db.QueryRowContext(ctx, query, tenantID, url)
 	sub, err := scanSubscription(row)
@@ -451,7 +512,7 @@ func (r *PostgresRepository) UpdateSubscription(ctx context.Context, sub *Subscr
 		    headers = $8,
 		    metadata = $9,
 		    updated_at = $10
-		WHERE id = $1`, TableSubscriptions)
+		WHERE id = $1`, r.schemaConfig.TableSubscriptions())
 
 	result, err := r.db.ExecContext(ctx, query,
 		sub.ID,
@@ -490,7 +551,7 @@ func (r *PostgresRepository) UpdateSubscription(ctx context.Context, sub *Subscr
 // Returns ErrSubscriptionNotFound if the subscription does not exist.
 // Cascades to delete all related deliveries and attempts.
 func (r *PostgresRepository) DeleteSubscription(ctx context.Context, id string) error {
-	query := fmt.Sprintf(`DELETE FROM %s WHERE id = $1`, TableSubscriptions)
+	query := fmt.Sprintf(`DELETE FROM %s WHERE id = $1`, r.schemaConfig.TableSubscriptions())
 
 	result, err := r.db.ExecContext(ctx, query, id)
 	if err != nil {
@@ -520,7 +581,7 @@ func (r *PostgresRepository) ListSubscriptions(ctx context.Context, filter *Subs
 		SELECT id, tenant_id, url, secret, event_types, filters, status,
 		       retry_policy, headers, metadata, created_at, updated_at
 		FROM %s
-		WHERE 1=1`, TableSubscriptions)
+		WHERE 1=1`, r.schemaConfig.TableSubscriptions())
 
 	args := []any{}
 	argCount := 1
@@ -623,7 +684,7 @@ func (r *PostgresRepository) CreateDelivery(ctx context.Context, delivery *Deliv
 			next_retry_at, completed_at, created_at
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
-		)`, TableDeliveries)
+		)`, r.schemaConfig.TableDeliveries())
 
 	_, err = r.db.ExecContext(ctx, query,
 		delivery.ID,
@@ -658,7 +719,7 @@ func (r *PostgresRepository) GetDelivery(ctx context.Context, id string) (*Deliv
 		       url, secret, status, attempt_count, max_attempts,
 		       next_retry_at, completed_at, created_at
 		FROM %s
-		WHERE id = $1`, TableDeliveries)
+		WHERE id = $1`, r.schemaConfig.TableDeliveries())
 
 	row := r.db.QueryRowContext(ctx, query, id)
 	delivery, err := scanDelivery(row)
@@ -712,7 +773,7 @@ func (r *PostgresRepository) UpdateDelivery(ctx context.Context, delivery *Deliv
 		    max_attempts = $10,
 		    next_retry_at = $11,
 		    completed_at = $12
-		WHERE id = $1`, TableDeliveries)
+		WHERE id = $1`, r.schemaConfig.TableDeliveries())
 
 	result, err := r.db.ExecContext(ctx, query,
 		delivery.ID,
@@ -764,7 +825,7 @@ func (r *PostgresRepository) GetPendingDeliveries(ctx context.Context, limit int
 		  COALESCE(next_retry_at, created_at),
 		  created_at
 		LIMIT $2
-		FOR UPDATE SKIP LOCKED`, TableDeliveries)
+		FOR UPDATE SKIP LOCKED`, r.schemaConfig.TableDeliveries())
 
 	rows, err := r.db.QueryContext(ctx, query, DeliveryStatusPending, limit)
 	if err != nil {
@@ -802,7 +863,7 @@ func (r *PostgresRepository) ListDeliveries(ctx context.Context, filter *Deliver
 		       url, secret, status, attempt_count, max_attempts,
 		       next_retry_at, completed_at, created_at
 		FROM %s
-		WHERE 1=1`, TableDeliveries)
+		WHERE 1=1`, r.schemaConfig.TableDeliveries())
 
 	args := []any{}
 	argCount := 1
@@ -896,7 +957,7 @@ func (r *PostgresRepository) MoveToDeadLetter(ctx context.Context, deliveryID st
 		UPDATE %s
 		SET status = $2,
 		    completed_at = $3
-		WHERE id = $1`, TableDeliveries)
+		WHERE id = $1`, r.schemaConfig.TableDeliveries())
 
 	result, err := r.db.ExecContext(ctx, query,
 		deliveryID,
@@ -937,7 +998,7 @@ func (r *PostgresRepository) DeleteDelivery(ctx context.Context, id string) erro
 	defer tx.Rollback() //nolint:errcheck // Rollback is a no-op if already committed
 
 	// Delete attempts first (foreign key constraint)
-	_, err = tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE delivery_id = $1", TableDeliveryAttempts), id)
+	_, err = tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE delivery_id = $1", r.schemaConfig.TableDeliveryAttempts()), id)
 	if err != nil {
 		return cuserr.NewExternalError("database", "postgres", err,
 			cuserr.WithMetadata("operation", "delete_attempts"),
@@ -945,7 +1006,7 @@ func (r *PostgresRepository) DeleteDelivery(ctx context.Context, id string) erro
 	}
 
 	// Delete the delivery
-	result, err := tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", TableDeliveries), id)
+	result, err := tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", r.schemaConfig.TableDeliveries()), id)
 	if err != nil {
 		return cuserr.NewExternalError("database", "postgres", err,
 			cuserr.WithMetadata("operation", "delete_delivery"),
@@ -991,7 +1052,7 @@ func (r *PostgresRepository) CreateDeliveryAttempt(ctx context.Context, attempt 
 			response_body, response_headers, error, duration_ms, attempted_at
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9
-		)`, TableDeliveryAttempts)
+		)`, r.schemaConfig.TableDeliveryAttempts())
 
 	_, err = r.db.ExecContext(ctx, query,
 		attempt.ID,
@@ -1027,7 +1088,7 @@ func (r *PostgresRepository) GetDeliveryAttempts(ctx context.Context, deliveryID
 		       response_body, response_headers, error, duration_ms, attempted_at
 		FROM %s
 		WHERE delivery_id = $1
-		ORDER BY attempt_number ASC`, TableDeliveryAttempts)
+		ORDER BY attempt_number ASC`, r.schemaConfig.TableDeliveryAttempts())
 
 	rows, err := r.db.QueryContext(ctx, query, deliveryID)
 	if err != nil {
@@ -1069,7 +1130,7 @@ func (r *PostgresRepository) CheckIdempotency(ctx context.Context, key string, s
 		FROM %s
 		WHERE idempotency_key = $1
 		  AND subscription_id = $2
-		  AND expires_at > NOW()`, TableIdempotencyStore)
+		  AND expires_at > NOW()`, r.schemaConfig.TableIdempotencyStore())
 
 	var count int
 	err := r.db.QueryRowContext(ctx, query, key, subscriptionID).Scan(&count)
@@ -1092,7 +1153,7 @@ func (r *PostgresRepository) StoreIdempotencyKey(ctx context.Context, key string
 			$1, $2, $3, $4
 		)
 		ON CONFLICT (idempotency_key, subscription_id) DO UPDATE
-		SET expires_at = EXCLUDED.expires_at`, TableIdempotencyStore)
+		SET expires_at = EXCLUDED.expires_at`, r.schemaConfig.TableIdempotencyStore())
 
 	_, err := r.db.ExecContext(ctx, query,
 		key,
@@ -1121,7 +1182,7 @@ func (r *PostgresRepository) GetCircuitBreakerState(ctx context.Context, endpoin
 		SELECT endpoint, state, failure_count, success_count,
 		       last_failure, opened_at, next_retry_at, updated_at
 		FROM %s
-		WHERE endpoint = $1`, TableCircuitBreakerState)
+		WHERE endpoint = $1`, r.schemaConfig.TableCircuitBreakerState())
 
 	row := r.db.QueryRowContext(ctx, query, endpoint)
 	state, err := scanCircuitBreakerState(row)
@@ -1161,7 +1222,7 @@ func (r *PostgresRepository) UpdateCircuitBreakerState(ctx context.Context, stat
 		    last_failure = EXCLUDED.last_failure,
 		    opened_at = EXCLUDED.opened_at,
 		    next_retry_at = EXCLUDED.next_retry_at,
-		    updated_at = EXCLUDED.updated_at`, TableCircuitBreakerState)
+		    updated_at = EXCLUDED.updated_at`, r.schemaConfig.TableCircuitBreakerState())
 
 	_, err := r.db.ExecContext(ctx, query,
 		state.Endpoint,
@@ -1198,8 +1259,9 @@ func (r *PostgresRepository) BeginTx(ctx context.Context) (RepositoryTx, error) 
 	}
 
 	return &PostgresRepositoryTx{
-		tx: tx,
-		db: r.db, // Keep reference for connection pool info
+		tx:           tx,
+		db:           r.db, // Keep reference for connection pool info
+		schemaConfig: r.schemaConfig,
 	}, nil
 }
 
@@ -1236,7 +1298,7 @@ func (r *PostgresRepository) Close() error {
 // CountDeliveriesByFilter counts deliveries matching the cleanup filter.
 // This is used for dry-run operations before actual deletion.
 func (r *PostgresRepository) CountDeliveriesByFilter(ctx context.Context, filter *CleanupFilter) (int64, error) {
-	query := fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE 1=1`, TableDeliveries)
+	query := fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE 1=1`, r.schemaConfig.TableDeliveries())
 	args := []any{}
 	argCount := 1
 
@@ -1291,7 +1353,7 @@ func (r *PostgresRepository) CountDeliveriesByFilter(ctx context.Context, filter
 // Returns the number of deliveries deleted.
 // Note: Related delivery attempts are automatically deleted via CASCADE.
 func (r *PostgresRepository) DeleteDeliveriesByFilter(ctx context.Context, filter *CleanupFilter) (int64, error) {
-	query := fmt.Sprintf(`DELETE FROM %s WHERE 1=1`, TableDeliveries)
+	query := fmt.Sprintf(`DELETE FROM %s WHERE 1=1`, r.schemaConfig.TableDeliveries())
 	args := []any{}
 	argCount := 1
 
@@ -1362,7 +1424,7 @@ func (r *PostgresRepository) GetMaintenanceStats(ctx context.Context) (*Maintena
 			COUNT(*) as total,
 			MIN(created_at) as oldest,
 			MAX(created_at) as newest
-		FROM %s`, TableDeliveries)
+		FROM %s`, r.schemaConfig.TableDeliveries())
 
 	var oldest, newest *time.Time
 	err := r.db.QueryRowContext(ctx, deliveryStatsQuery).Scan(
@@ -1382,7 +1444,7 @@ func (r *PostgresRepository) GetMaintenanceStats(ctx context.Context) (*Maintena
 	statusQuery := fmt.Sprintf(`
 		SELECT status, COUNT(*) as count
 		FROM %s
-		GROUP BY status`, TableDeliveries)
+		GROUP BY status`, r.schemaConfig.TableDeliveries())
 
 	rows, err := r.db.QueryContext(ctx, statusQuery)
 	if err != nil {
@@ -1410,7 +1472,7 @@ func (r *PostgresRepository) GetMaintenanceStats(ctx context.Context) (*Maintena
 	}
 
 	// Get total delivery attempts
-	attemptsQuery := fmt.Sprintf(`SELECT COUNT(*) FROM %s`, TableDeliveryAttempts)
+	attemptsQuery := fmt.Sprintf(`SELECT COUNT(*) FROM %s`, r.schemaConfig.TableDeliveryAttempts())
 	err = r.db.QueryRowContext(ctx, attemptsQuery).Scan(&stats.TotalDeliveryAttempts)
 	if err != nil {
 		return nil, cuserr.NewExternalError("database", "postgres", err,
@@ -1423,7 +1485,7 @@ func (r *PostgresRepository) GetMaintenanceStats(ctx context.Context) (*Maintena
 		SELECT
 			COUNT(*) as total,
 			COUNT(*) FILTER (WHERE expires_at < NOW()) as expired
-		FROM %s`, TableIdempotencyStore)
+		FROM %s`, r.schemaConfig.TableIdempotencyStore())
 
 	err = r.db.QueryRowContext(ctx, idempotencyQuery).Scan(
 		&stats.IdempotencyKeys,
@@ -1441,7 +1503,7 @@ func (r *PostgresRepository) GetMaintenanceStats(ctx context.Context) (*Maintena
 // CountExpiredIdempotencyKeys counts idempotency keys that have expired.
 // This is used for dry-run operations before cleanup.
 func (r *PostgresRepository) CountExpiredIdempotencyKeys(ctx context.Context) (int64, error) {
-	query := fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE expires_at < NOW()`, TableIdempotencyStore)
+	query := fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE expires_at < NOW()`, r.schemaConfig.TableIdempotencyStore())
 
 	var count int64
 	err := r.db.QueryRowContext(ctx, query).Scan(&count)
@@ -1457,7 +1519,7 @@ func (r *PostgresRepository) CountExpiredIdempotencyKeys(ctx context.Context) (i
 // CleanupExpiredIdempotencyKeys deletes all expired idempotency keys.
 // Returns the number of keys deleted.
 func (r *PostgresRepository) CleanupExpiredIdempotencyKeys(ctx context.Context) (int64, error) {
-	query := fmt.Sprintf(`DELETE FROM %s WHERE expires_at < NOW()`, TableIdempotencyStore)
+	query := fmt.Sprintf(`DELETE FROM %s WHERE expires_at < NOW()`, r.schemaConfig.TableIdempotencyStore())
 
 	result, err := r.db.ExecContext(ctx, query)
 	if err != nil {

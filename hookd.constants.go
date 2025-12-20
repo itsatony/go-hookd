@@ -163,44 +163,13 @@ const (
 // =============================================================================
 // DATABASE OBJECT NAMES
 // =============================================================================
-// All database objects use the "hookd_" prefix to prevent namespace collisions
-// when go-hookd is embedded in other applications.
-
-// Database Table Names.
-const (
-	// TableSubscriptions is the subscriptions table name.
-	TableSubscriptions = "hookd_subscriptions"
-
-	// TableDeliveries is the deliveries table name.
-	TableDeliveries = "hookd_deliveries"
-
-	// TableDeliveryAttempts is the delivery_attempts table name.
-	TableDeliveryAttempts = "hookd_delivery_attempts"
-
-	// TableIdempotencyStore is the idempotency_store table name.
-	TableIdempotencyStore = "hookd_idempotency_store"
-
-	// TableCircuitBreakerState is the circuit_breaker_state table name.
-	TableCircuitBreakerState = "hookd_circuit_breaker_state"
-)
-
-// Database Function Names.
-const (
-	// FuncUpdateUpdatedAt is the function that updates the updated_at column.
-	FuncUpdateUpdatedAt = "hookd_update_updated_at"
-
-	// FuncCleanupIdempotency is the function that cleans up expired idempotency keys.
-	FuncCleanupIdempotency = "hookd_cleanup_expired_idempotency"
-)
-
-// Database Trigger Names.
-const (
-	// TriggerSubscriptionsUpdatedAt is the trigger for subscriptions.updated_at.
-	TriggerSubscriptionsUpdatedAt = "trg_hookd_subscriptions_updated_at"
-
-	// TriggerCircuitBreakerUpdatedAt is the trigger for circuit_breaker_state.updated_at.
-	TriggerCircuitBreakerUpdatedAt = "trg_hookd_circuit_breaker_updated_at"
-)
+// Database object names (tables, indexes, functions, triggers) are now
+// dynamically generated via SchemaConfig to support multi-service isolation.
+// See hookd.schema.go for the SchemaConfig type and name generation methods.
+//
+// Example:
+//   config, _ := NewSchemaConfig("myservice")
+//   tableName := config.TableSubscriptions() // "myservice_hookd_subscriptions"
 
 // Default Configuration Values - Retry Policy.
 const (

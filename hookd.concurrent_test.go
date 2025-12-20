@@ -32,7 +32,7 @@ func TestConcurrentWorkerPool_NoDoubleProcessing(t *testing.T) {
 
 	// Setup PostgreSQL repository
 	config := NewConfig("postgres://hookd:hookd@localhost:54321/hookd?sslmode=disable")
-	repo, err := NewPostgresRepository(config.DatabaseURL)
+	repo, err := NewPostgresRepository(config.DatabaseURL, WithTablePrefix("test"))
 	if err != nil {
 		t.Skip(fmt.Sprintf("PostgreSQL not available: %v", err))
 	}
@@ -180,9 +180,9 @@ func TestConcurrentWorkerPool_NoDoubleProcessing(t *testing.T) {
 
 	// Cleanup
 	for _, deliveryID := range deliveryIDs {
-		_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", TableDeliveries), deliveryID)
+		_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", repo.schemaConfig.TableDeliveries()), deliveryID)
 	}
-	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", TableSubscriptions), sub.ID)
+	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", repo.schemaConfig.TableSubscriptions()), sub.ID)
 }
 
 func TestConcurrentWorkerPool_SkipLocked(t *testing.T) {
@@ -192,7 +192,7 @@ func TestConcurrentWorkerPool_SkipLocked(t *testing.T) {
 
 	// Setup PostgreSQL repository
 	config := NewConfig("postgres://hookd:hookd@localhost:54321/hookd?sslmode=disable")
-	repo, err := NewPostgresRepository(config.DatabaseURL)
+	repo, err := NewPostgresRepository(config.DatabaseURL, WithTablePrefix("test"))
 	if err != nil {
 		t.Skip(fmt.Sprintf("PostgreSQL not available: %v", err))
 	}
@@ -333,9 +333,9 @@ func TestConcurrentWorkerPool_SkipLocked(t *testing.T) {
 
 	// Cleanup
 	for _, deliveryID := range deliveryIDs {
-		_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", TableDeliveries), deliveryID)
+		_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", repo.schemaConfig.TableDeliveries()), deliveryID)
 	}
-	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", TableSubscriptions), sub.ID)
+	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", repo.schemaConfig.TableSubscriptions()), sub.ID)
 }
 
 func TestConcurrentWorkerPool_WorkerSemaphore(t *testing.T) {
@@ -348,7 +348,7 @@ func TestConcurrentWorkerPool_WorkerSemaphore(t *testing.T) {
 	config := NewConfig("postgres://hookd:hookd@localhost:54321/hookd?sslmode=disable")
 	config.WorkerCount = maxWorkers
 
-	repo, err := NewPostgresRepository(config.DatabaseURL)
+	repo, err := NewPostgresRepository(config.DatabaseURL, WithTablePrefix("test"))
 	if err != nil {
 		t.Skip(fmt.Sprintf("PostgreSQL not available: %v", err))
 	}
@@ -446,7 +446,7 @@ func TestConcurrentWorkerPool_WorkerSemaphore(t *testing.T) {
 
 	// Cleanup
 	for _, deliveryID := range deliveryIDs {
-		_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", TableDeliveries), deliveryID)
+		_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", repo.schemaConfig.TableDeliveries()), deliveryID)
 	}
-	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", TableSubscriptions), sub.ID)
+	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", repo.schemaConfig.TableSubscriptions()), sub.ID)
 }

@@ -19,8 +19,9 @@ import (
 // Thread Safety: PostgresRepositoryTx is NOT safe for concurrent use. Each transaction
 // should be used by a single goroutine. Create separate transactions for concurrent operations.
 type PostgresRepositoryTx struct {
-	tx *sql.Tx
-	db *sql.DB // Keep reference for connection pool info
+	tx           *sql.Tx
+	db           *sql.DB       // Keep reference for connection pool info
+	schemaConfig *SchemaConfig // Schema configuration for table names
 }
 
 // =============================================================================
@@ -863,7 +864,7 @@ func (r *PostgresRepositoryTx) Close() error {
 
 // CountDeliveriesByFilter counts deliveries matching the cleanup filter within the transaction.
 func (r *PostgresRepositoryTx) CountDeliveriesByFilter(ctx context.Context, filter *CleanupFilter) (int64, error) {
-	query := fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE 1=1`, TableDeliveries)
+	query := fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE 1=1`, r.schemaConfig.TableDeliveries())
 	args := []any{}
 	argCount := 1
 
@@ -915,7 +916,7 @@ func (r *PostgresRepositoryTx) CountDeliveriesByFilter(ctx context.Context, filt
 
 // DeleteDeliveriesByFilter deletes deliveries matching the cleanup filter within the transaction.
 func (r *PostgresRepositoryTx) DeleteDeliveriesByFilter(ctx context.Context, filter *CleanupFilter) (int64, error) {
-	query := fmt.Sprintf(`DELETE FROM %s WHERE 1=1`, TableDeliveries)
+	query := fmt.Sprintf(`DELETE FROM %s WHERE 1=1`, r.schemaConfig.TableDeliveries())
 	args := []any{}
 	argCount := 1
 
@@ -984,7 +985,7 @@ func (r *PostgresRepositoryTx) GetMaintenanceStats(ctx context.Context) (*Mainte
 			COUNT(*) as total,
 			MIN(created_at) as oldest,
 			MAX(created_at) as newest
-		FROM %s`, TableDeliveries)
+		FROM %s`, r.schemaConfig.TableDeliveries())
 
 	var oldest, newest *time.Time
 	err := r.tx.QueryRowContext(ctx, deliveryStatsQuery).Scan(
@@ -1004,7 +1005,7 @@ func (r *PostgresRepositoryTx) GetMaintenanceStats(ctx context.Context) (*Mainte
 	statusQuery := fmt.Sprintf(`
 		SELECT status, COUNT(*) as count
 		FROM %s
-		GROUP BY status`, TableDeliveries)
+		GROUP BY status`, r.schemaConfig.TableDeliveries())
 
 	rows, err := r.tx.QueryContext(ctx, statusQuery)
 	if err != nil {
@@ -1032,7 +1033,7 @@ func (r *PostgresRepositoryTx) GetMaintenanceStats(ctx context.Context) (*Mainte
 	}
 
 	// Get total delivery attempts
-	attemptsQuery := fmt.Sprintf(`SELECT COUNT(*) FROM %s`, TableDeliveryAttempts)
+	attemptsQuery := fmt.Sprintf(`SELECT COUNT(*) FROM %s`, r.schemaConfig.TableDeliveryAttempts())
 	err = r.tx.QueryRowContext(ctx, attemptsQuery).Scan(&stats.TotalDeliveryAttempts)
 	if err != nil {
 		return nil, cuserr.NewExternalError("database", "postgres", err,
@@ -1045,7 +1046,7 @@ func (r *PostgresRepositoryTx) GetMaintenanceStats(ctx context.Context) (*Mainte
 		SELECT
 			COUNT(*) as total,
 			COUNT(*) FILTER (WHERE expires_at < NOW()) as expired
-		FROM %s`, TableIdempotencyStore)
+		FROM %s`, r.schemaConfig.TableIdempotencyStore())
 
 	err = r.tx.QueryRowContext(ctx, idempotencyQuery).Scan(
 		&stats.IdempotencyKeys,
@@ -1062,7 +1063,7 @@ func (r *PostgresRepositoryTx) GetMaintenanceStats(ctx context.Context) (*Mainte
 
 // CountExpiredIdempotencyKeys counts expired idempotency keys within the transaction.
 func (r *PostgresRepositoryTx) CountExpiredIdempotencyKeys(ctx context.Context) (int64, error) {
-	query := fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE expires_at < NOW()`, TableIdempotencyStore)
+	query := fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE expires_at < NOW()`, r.schemaConfig.TableIdempotencyStore())
 
 	var count int64
 	err := r.tx.QueryRowContext(ctx, query).Scan(&count)
@@ -1077,7 +1078,7 @@ func (r *PostgresRepositoryTx) CountExpiredIdempotencyKeys(ctx context.Context) 
 
 // CleanupExpiredIdempotencyKeys deletes expired idempotency keys within the transaction.
 func (r *PostgresRepositoryTx) CleanupExpiredIdempotencyKeys(ctx context.Context) (int64, error) {
-	query := fmt.Sprintf(`DELETE FROM %s WHERE expires_at < NOW()`, TableIdempotencyStore)
+	query := fmt.Sprintf(`DELETE FROM %s WHERE expires_at < NOW()`, r.schemaConfig.TableIdempotencyStore())
 
 	result, err := r.tx.ExecContext(ctx, query)
 	if err != nil {

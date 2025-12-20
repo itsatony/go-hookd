@@ -17,15 +17,21 @@ import (
 
 // TestDB provides database utilities for integration tests
 type TestDB struct {
-	t       *testing.T
-	repo    *hookd.PostgresRepository
-	connStr string
-	db      *sql.DB
+	t            *testing.T
+	repo         *hookd.PostgresRepository
+	connStr      string
+	db           *sql.DB
+	schemaConfig *hookd.SchemaConfig
 }
 
 // NewTestDB creates a new test database instance
 // It checks for DATABASE_URL environment variable or uses default
 func NewTestDB(t *testing.T) *TestDB {
+	return NewTestDBWithPrefix(t, "test")
+}
+
+// NewTestDBWithPrefix creates a new test database instance with a custom prefix
+func NewTestDBWithPrefix(t *testing.T, prefix string) *TestDB {
 	connStr := os.Getenv("HOOKD_TEST_DB")
 	if connStr == "" {
 		connStr = "postgres://hookd:hookd@localhost:54321/hookd?sslmode=disable"
@@ -41,16 +47,19 @@ func NewTestDB(t *testing.T) *TestDB {
 		t.Skip(fmt.Sprintf("PostgreSQL not reachable: %v\n%s", err, databaseSetupMessage()))
 	}
 
-	repo, err := hookd.NewPostgresRepository(connStr)
+	repo, err := hookd.NewPostgresRepository(connStr, hookd.WithTablePrefix(prefix))
 	if err != nil {
 		t.Fatalf("Failed to create repository: %v", err)
 	}
 
+	schemaConfig, _ := hookd.NewSchemaConfig(prefix)
+
 	return &TestDB{
-		t:       t,
-		repo:    repo,
-		connStr: connStr,
-		db:      db,
+		t:            t,
+		repo:         repo,
+		connStr:      connStr,
+		db:           db,
+		schemaConfig: schemaConfig,
 	}
 }
 
@@ -67,13 +76,14 @@ func (tdb *TestDB) DB() *sql.DB {
 // Truncate removes all data from test tables (useful for cleanup)
 func (tdb *TestDB) Truncate() {
 	ctx := context.Background()
+	sc := tdb.schemaConfig
 
 	tables := []string{
-		hookd.TableDeliveryAttempts,
-		hookd.TableDeliveries,
-		hookd.TableIdempotencyStore,
-		hookd.TableCircuitBreakerState,
-		hookd.TableSubscriptions,
+		sc.TableDeliveryAttempts(),
+		sc.TableDeliveries(),
+		sc.TableIdempotencyStore(),
+		sc.TableCircuitBreakerState(),
+		sc.TableSubscriptions(),
 	}
 
 	for _, table := range tables {
@@ -82,6 +92,11 @@ func (tdb *TestDB) Truncate() {
 			tdb.t.Fatalf("Failed to truncate table %s: %v", table, err)
 		}
 	}
+}
+
+// SchemaConfig returns the schema configuration for this test database
+func (tdb *TestDB) SchemaConfig() *hookd.SchemaConfig {
+	return tdb.schemaConfig
 }
 
 // Close closes the database connection
@@ -118,8 +133,9 @@ func WithTransaction(t *testing.T, testFunc TxTestFunc) {
 	// Create transactional repository
 	config := hookd.NewConfig(tdb.connStr)
 	txRepo := &TransactionalRepository{
-		tx:     tx,
-		config: config,
+		tx:           tx,
+		config:       config,
+		schemaConfig: tdb.schemaConfig,
 	}
 
 	// Always rollback transaction (even on panic)
@@ -142,8 +158,9 @@ func WithTransaction(t *testing.T, testFunc TxTestFunc) {
 // TransactionalRepository wraps a transaction to implement Repository interface
 // This allows tests to run in isolated transactions
 type TransactionalRepository struct {
-	tx     *sql.Tx
-	config *hookd.Config
+	tx           *sql.Tx
+	config       *hookd.Config
+	schemaConfig *hookd.SchemaConfig
 }
 
 // Note: TransactionalRepository implements most Repository methods
@@ -151,12 +168,12 @@ type TransactionalRepository struct {
 
 // CreateSubscription creates a subscription within the transaction
 func (r *TransactionalRepository) CreateSubscription(ctx context.Context, sub *hookd.Subscription) error {
-	query := `
-		INSERT INTO subscriptions (
+	query := fmt.Sprintf(`
+		INSERT INTO %s (
 			id, tenant_id, url, event_types, secret, status,
 			headers, metadata, retry_policy, created_at, updated_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-	`
+	`, r.schemaConfig.TableSubscriptions())
 
 	_, err := r.tx.ExecContext(ctx, query,
 		sub.ID, sub.TenantID, sub.URL, sub.EventTypes, sub.Secret,
@@ -169,12 +186,12 @@ func (r *TransactionalRepository) CreateSubscription(ctx context.Context, sub *h
 
 // GetSubscription retrieves a subscription by ID within the transaction
 func (r *TransactionalRepository) GetSubscription(ctx context.Context, id string) (*hookd.Subscription, error) {
-	query := `
+	query := fmt.Sprintf(`
 		SELECT id, tenant_id, url, event_types, secret, status,
 			   headers, metadata, retry_policy, created_at, updated_at
-		FROM subscriptions
+		FROM %s
 		WHERE id = $1
-	`
+	`, r.schemaConfig.TableSubscriptions())
 
 	var sub hookd.Subscription
 	err := r.tx.QueryRowContext(ctx, query, id).Scan(
@@ -192,12 +209,12 @@ func (r *TransactionalRepository) GetSubscription(ctx context.Context, id string
 
 // UpdateSubscription updates a subscription within the transaction
 func (r *TransactionalRepository) UpdateSubscription(ctx context.Context, sub *hookd.Subscription) error {
-	query := `
-		UPDATE subscriptions
+	query := fmt.Sprintf(`
+		UPDATE %s
 		SET url = $2, event_types = $3, secret = $4, status = $5,
 			headers = $6, metadata = $7, retry_policy = $8, updated_at = $9
 		WHERE id = $1
-	`
+	`, r.schemaConfig.TableSubscriptions())
 
 	result, err := r.tx.ExecContext(ctx, query,
 		sub.ID, sub.URL, sub.EventTypes, sub.Secret, sub.Status,
@@ -222,7 +239,7 @@ func (r *TransactionalRepository) UpdateSubscription(ctx context.Context, sub *h
 
 // DeleteSubscription deletes a subscription within the transaction
 func (r *TransactionalRepository) DeleteSubscription(ctx context.Context, id string) error {
-	query := `DELETE FROM subscriptions WHERE id = $1`
+	query := fmt.Sprintf(`DELETE FROM %s WHERE id = $1`, r.schemaConfig.TableSubscriptions())
 
 	result, err := r.tx.ExecContext(ctx, query, id)
 	if err != nil {
@@ -244,12 +261,12 @@ func (r *TransactionalRepository) DeleteSubscription(ctx context.Context, id str
 // ListSubscriptions lists subscriptions with filters within the transaction
 func (r *TransactionalRepository) ListSubscriptions(ctx context.Context, filter *hookd.SubscriptionFilter) ([]*hookd.Subscription, error) {
 	// Simplified implementation for testing
-	query := `
+	query := fmt.Sprintf(`
 		SELECT id, tenant_id, url, event_types, secret, status,
 			   headers, metadata, retry_policy, created_at, updated_at
-		FROM subscriptions
+		FROM %s
 		WHERE tenant_id = $1
-	`
+	`, r.schemaConfig.TableSubscriptions())
 
 	rows, err := r.tx.QueryContext(ctx, query, filter.TenantID)
 	if err != nil {
@@ -276,12 +293,12 @@ func (r *TransactionalRepository) ListSubscriptions(ctx context.Context, filter 
 
 // CreateDelivery creates a delivery within the transaction
 func (r *TransactionalRepository) CreateDelivery(ctx context.Context, delivery *hookd.Delivery) error {
-	query := `
-		INSERT INTO deliveries (
+	query := fmt.Sprintf(`
+		INSERT INTO %s (
 			id, subscription_id, tenant_id, event_type, payload, status,
 			attempt_count, max_attempts, next_retry_at, created_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-	`
+	`, r.schemaConfig.TableDeliveries())
 
 	_, err := r.tx.ExecContext(ctx, query,
 		delivery.ID, delivery.SubscriptionID, delivery.TenantID,
@@ -295,13 +312,13 @@ func (r *TransactionalRepository) CreateDelivery(ctx context.Context, delivery *
 
 // GetDelivery retrieves a delivery by ID within the transaction
 func (r *TransactionalRepository) GetDelivery(ctx context.Context, id string) (*hookd.Delivery, error) {
-	query := `
+	query := fmt.Sprintf(`
 		SELECT id, subscription_id, tenant_id, event_type, payload, status,
 			   attempt_count, max_attempts, next_retry_at,
 			   completed_at, created_at
-		FROM deliveries
+		FROM %s
 		WHERE id = $1
-	`
+	`, r.schemaConfig.TableDeliveries())
 
 	var delivery hookd.Delivery
 	err := r.tx.QueryRowContext(ctx, query, id).Scan(
@@ -321,12 +338,12 @@ func (r *TransactionalRepository) GetDelivery(ctx context.Context, id string) (*
 
 // UpdateDelivery updates a delivery within the transaction
 func (r *TransactionalRepository) UpdateDelivery(ctx context.Context, delivery *hookd.Delivery) error {
-	query := `
-		UPDATE deliveries
+	query := fmt.Sprintf(`
+		UPDATE %s
 		SET status = $2, attempt_count = $3, next_retry_at = $4,
 			completed_at = $5
 		WHERE id = $1
-	`
+	`, r.schemaConfig.TableDeliveries())
 
 	result, err := r.tx.ExecContext(ctx, query,
 		delivery.ID, delivery.Status, delivery.AttemptCount,
@@ -351,12 +368,12 @@ func (r *TransactionalRepository) UpdateDelivery(ctx context.Context, delivery *
 
 // CreateDeliveryAttempt creates a delivery attempt within the transaction
 func (r *TransactionalRepository) CreateDeliveryAttempt(ctx context.Context, attempt *hookd.DeliveryAttempt) error {
-	query := `
-		INSERT INTO delivery_attempts (
+	query := fmt.Sprintf(`
+		INSERT INTO %s (
 			id, delivery_id, attempt_number, status_code, error,
 			response_body, duration_ms, attempted_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-	`
+	`, r.schemaConfig.TableDeliveryAttempts())
 
 	_, err := r.tx.ExecContext(ctx, query,
 		attempt.ID, attempt.DeliveryID, attempt.AttemptNumber,
@@ -369,13 +386,13 @@ func (r *TransactionalRepository) CreateDeliveryAttempt(ctx context.Context, att
 
 // GetDeliveryAttempts retrieves all attempts for a delivery within the transaction
 func (r *TransactionalRepository) GetDeliveryAttempts(ctx context.Context, deliveryID string) ([]*hookd.DeliveryAttempt, error) {
-	query := `
+	query := fmt.Sprintf(`
 		SELECT id, delivery_id, attempt_number, status_code, error,
 			   response_body, duration_ms, attempted_at
-		FROM delivery_attempts
+		FROM %s
 		WHERE delivery_id = $1
 		ORDER BY attempt_number ASC
-	`
+	`, r.schemaConfig.TableDeliveryAttempts())
 
 	rows, err := r.tx.QueryContext(ctx, query, deliveryID)
 	if err != nil {
@@ -402,17 +419,17 @@ func (r *TransactionalRepository) GetDeliveryAttempts(ctx context.Context, deliv
 
 // GetPendingDeliveries retrieves pending deliveries within the transaction
 func (r *TransactionalRepository) GetPendingDeliveries(ctx context.Context, limit int) ([]*hookd.Delivery, error) {
-	query := `
+	query := fmt.Sprintf(`
 		SELECT id, subscription_id, tenant_id, event_type, payload, status,
 			   attempt_count, max_attempts, next_retry_at,
 			   completed_at, created_at
-		FROM deliveries
+		FROM %s
 		WHERE status = $1
 			AND (next_retry_at IS NULL OR next_retry_at <= $2)
 		ORDER BY created_at ASC
 		LIMIT $3
 		FOR UPDATE SKIP LOCKED
-	`
+	`, r.schemaConfig.TableDeliveries())
 
 	rows, err := r.tx.QueryContext(ctx, query, hookd.DeliveryStatusPending, time.Now(), limit)
 	if err != nil {
@@ -448,12 +465,12 @@ func (r *TransactionalRepository) ListDeliveries(ctx context.Context, filter *ho
 
 // GetSubscriptionByTenantAndURL retrieves a subscription by tenant and URL
 func (r *TransactionalRepository) GetSubscriptionByTenantAndURL(ctx context.Context, tenantID, url string) (*hookd.Subscription, error) {
-	query := `
+	query := fmt.Sprintf(`
 		SELECT id, tenant_id, url, event_types, secret, status,
 			   headers, metadata, retry_policy, created_at, updated_at
-		FROM subscriptions
+		FROM %s
 		WHERE tenant_id = $1 AND url = $2
-	`
+	`, r.schemaConfig.TableSubscriptions())
 
 	var sub hookd.Subscription
 	err := r.tx.QueryRowContext(ctx, query, tenantID, url).Scan(
@@ -486,13 +503,13 @@ func (r *TransactionalRepository) MoveToDeadLetter(ctx context.Context, delivery
 
 func (r *TransactionalRepository) DeleteDelivery(ctx context.Context, id string) error {
 	// Delete attempts first (foreign key constraint)
-	_, err := r.tx.ExecContext(ctx, `DELETE FROM delivery_attempts WHERE delivery_id = $1`, id)
+	_, err := r.tx.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE delivery_id = $1`, r.schemaConfig.TableDeliveryAttempts()), id)
 	if err != nil {
 		return err
 	}
 
 	// Delete the delivery
-	result, err := r.tx.ExecContext(ctx, `DELETE FROM deliveries WHERE id = $1`, id)
+	result, err := r.tx.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE id = $1`, r.schemaConfig.TableDeliveries()), id)
 	if err != nil {
 		return err
 	}

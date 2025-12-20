@@ -22,6 +22,7 @@ import (
 // Note: This implementation is intended for testing and development only.
 // Data is not persisted and will be lost when the process exits.
 type MockRepository struct {
+	schemaConfig                  *SchemaConfig // Optional: for API consistency with PostgresRepository
 	injectError                   error
 	lockedDeliveries              map[string]bool
 	deliveries                    map[string]*Delivery
@@ -47,8 +48,20 @@ type idempotencyEntry struct {
 }
 
 // NewMockRepository creates a new in-memory mock repository.
-func NewMockRepository() *MockRepository {
+// The prefix parameter is optional; if empty, "mock" is used as the default prefix.
+// This parameter exists for API consistency with PostgresRepository.
+func NewMockRepository(prefix ...string) *MockRepository {
+	// Use default prefix if not provided
+	p := "mock"
+	if len(prefix) > 0 && prefix[0] != "" {
+		p = prefix[0]
+	}
+
+	// Create schema config (ignore errors for mock since prefix is controlled)
+	schemaConfig, _ := NewSchemaConfig(p)
+
 	return &MockRepository{
+		schemaConfig:        schemaConfig,
 		subscriptions:       make(map[string]*Subscription),
 		deliveries:          make(map[string]*Delivery),
 		deliveryAttempts:    make(map[string][]*DeliveryAttempt),
@@ -56,6 +69,12 @@ func NewMockRepository() *MockRepository {
 		circuitBreakerState: make(map[string]*CircuitBreakerState),
 		lockedDeliveries:    make(map[string]bool),
 	}
+}
+
+// SchemaConfig returns the schema configuration for this repository.
+// This method provides API consistency with PostgresRepository.
+func (r *MockRepository) SchemaConfig() *SchemaConfig {
+	return r.schemaConfig
 }
 
 // =============================================================================

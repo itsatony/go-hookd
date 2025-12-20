@@ -31,7 +31,7 @@ func TestIdempotency_ConcurrentDuplicates(t *testing.T) {
 
 	// Setup PostgreSQL repository
 	config := NewConfig("postgres://hookd:hookd@localhost:54321/hookd?sslmode=disable")
-	repo, err := NewPostgresRepository(config.DatabaseURL)
+	repo, err := NewPostgresRepository(config.DatabaseURL, WithTablePrefix("test"))
 	if err != nil {
 		t.Skip(fmt.Sprintf("PostgreSQL not available: %v", err))
 	}
@@ -112,9 +112,9 @@ func TestIdempotency_ConcurrentDuplicates(t *testing.T) {
 	time.Sleep(100 * time.Millisecond) // Brief pause to ensure DB is consistent
 
 	// Cleanup
-	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE subscription_id = $1", TableDeliveries), subResp.ID)
-	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", TableSubscriptions), subResp.ID)
-	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE subscription_id = $1", TableIdempotencyStore), subResp.ID)
+	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE subscription_id = $1", repo.schemaConfig.TableDeliveries()), subResp.ID)
+	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", repo.schemaConfig.TableSubscriptions()), subResp.ID)
+	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE subscription_id = $1", repo.schemaConfig.TableIdempotencyStore()), subResp.ID)
 }
 
 func TestIdempotency_UniqueKeys(t *testing.T) {
@@ -124,7 +124,7 @@ func TestIdempotency_UniqueKeys(t *testing.T) {
 
 	// Setup PostgreSQL repository
 	config := NewConfig("postgres://hookd:hookd@localhost:54321/hookd?sslmode=disable")
-	repo, err := NewPostgresRepository(config.DatabaseURL)
+	repo, err := NewPostgresRepository(config.DatabaseURL, WithTablePrefix("test"))
 	if err != nil {
 		t.Skip(fmt.Sprintf("PostgreSQL not available: %v", err))
 	}
@@ -190,10 +190,10 @@ func TestIdempotency_UniqueKeys(t *testing.T) {
 
 	// Cleanup
 	for _, deliveryID := range deliveryIDs {
-		_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", TableDeliveries), deliveryID)
+		_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", repo.schemaConfig.TableDeliveries()), deliveryID)
 	}
-	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", TableSubscriptions), subResp.ID)
-	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE subscription_id = $1", TableIdempotencyStore), subResp.ID)
+	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", repo.schemaConfig.TableSubscriptions()), subResp.ID)
+	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE subscription_id = $1", repo.schemaConfig.TableIdempotencyStore()), subResp.ID)
 }
 
 func TestIdempotency_Expiration(t *testing.T) {
@@ -204,7 +204,7 @@ func TestIdempotency_Expiration(t *testing.T) {
 	// Setup PostgreSQL repository
 	config := NewConfig("postgres://hookd:hookd@localhost:54321/hookd?sslmode=disable")
 	config.IdempotencyTTLHours = 1 // 1 hour (minimum allowed value)
-	repo, err := NewPostgresRepository(config.DatabaseURL)
+	repo, err := NewPostgresRepository(config.DatabaseURL, WithTablePrefix("test"))
 	if err != nil {
 		t.Skip(fmt.Sprintf("PostgreSQL not available: %v", err))
 	}
@@ -276,10 +276,10 @@ func TestIdempotency_Expiration(t *testing.T) {
 	t.Logf("Third request created new delivery: %s", delivery3.ID)
 
 	// Cleanup
-	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", TableDeliveries), delivery1.ID)
-	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", TableDeliveries), delivery3.ID)
-	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", TableSubscriptions), subResp.ID)
-	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE subscription_id = $1", TableIdempotencyStore), subResp.ID)
+	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", repo.schemaConfig.TableDeliveries()), delivery1.ID)
+	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", repo.schemaConfig.TableDeliveries()), delivery3.ID)
+	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", repo.schemaConfig.TableSubscriptions()), subResp.ID)
+	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE subscription_id = $1", repo.schemaConfig.TableIdempotencyStore()), subResp.ID)
 }
 
 func TestIdempotency_DifferentSubscriptions(t *testing.T) {
@@ -289,7 +289,7 @@ func TestIdempotency_DifferentSubscriptions(t *testing.T) {
 
 	// Setup PostgreSQL repository
 	config := NewConfig("postgres://hookd:hookd@localhost:54321/hookd?sslmode=disable")
-	repo, err := NewPostgresRepository(config.DatabaseURL)
+	repo, err := NewPostgresRepository(config.DatabaseURL, WithTablePrefix("test"))
 	if err != nil {
 		t.Skip(fmt.Sprintf("PostgreSQL not available: %v", err))
 	}
@@ -363,12 +363,12 @@ func TestIdempotency_DifferentSubscriptions(t *testing.T) {
 	assert.Nil(t, delivery3)
 
 	// Cleanup
-	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", TableDeliveries), delivery1.ID)
-	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", TableDeliveries), delivery2.ID)
-	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", TableSubscriptions), sub1.ID)
-	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", TableSubscriptions), sub2.ID)
-	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE subscription_id = $1", TableIdempotencyStore), sub1.ID)
-	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE subscription_id = $1", TableIdempotencyStore), sub2.ID)
+	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", repo.schemaConfig.TableDeliveries()), delivery1.ID)
+	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", repo.schemaConfig.TableDeliveries()), delivery2.ID)
+	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", repo.schemaConfig.TableSubscriptions()), sub1.ID)
+	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", repo.schemaConfig.TableSubscriptions()), sub2.ID)
+	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE subscription_id = $1", repo.schemaConfig.TableIdempotencyStore()), sub1.ID)
+	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE subscription_id = $1", repo.schemaConfig.TableIdempotencyStore()), sub2.ID)
 }
 
 func TestIdempotency_HighConcurrency(t *testing.T) {
@@ -378,7 +378,7 @@ func TestIdempotency_HighConcurrency(t *testing.T) {
 
 	// Setup PostgreSQL repository
 	config := NewConfig("postgres://hookd:hookd@localhost:54321/hookd?sslmode=disable")
-	repo, err := NewPostgresRepository(config.DatabaseURL)
+	repo, err := NewPostgresRepository(config.DatabaseURL, WithTablePrefix("test"))
 	if err != nil {
 		t.Skip(fmt.Sprintf("PostgreSQL not available: %v", err))
 	}
@@ -454,7 +454,7 @@ func TestIdempotency_HighConcurrency(t *testing.T) {
 	assert.Equal(t, totalRequests-uniqueKeys, duplicateCount, "%d requests should be rejected as duplicates", totalRequests-uniqueKeys)
 
 	// Cleanup
-	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE subscription_id = $1", TableDeliveries), subResp.ID)
-	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", TableSubscriptions), subResp.ID)
-	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE subscription_id = $1", TableIdempotencyStore), subResp.ID)
+	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE subscription_id = $1", repo.schemaConfig.TableDeliveries()), subResp.ID)
+	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = $1", repo.schemaConfig.TableSubscriptions()), subResp.ID)
+	_, _ = repo.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE subscription_id = $1", repo.schemaConfig.TableIdempotencyStore()), subResp.ID)
 }

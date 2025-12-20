@@ -11,6 +11,7 @@ package hookd
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"sync"
 	"testing"
@@ -39,7 +40,7 @@ func setupTestDB(t *testing.T) (*PostgresRepository, func()) {
 	connStr := getTestConnectionString()
 
 	// Try to connect to verify database is available
-	repo, err := NewPostgresRepository(connStr)
+	repo, err := NewPostgresRepository(connStr, WithTablePrefix("test"))
 	if err != nil {
 		t.Skipf("PostgreSQL database not available (run ./scripts/db-dev.sh bootstrap): %v", err)
 		return nil, nil
@@ -54,25 +55,26 @@ func setupTestDB(t *testing.T) (*PostgresRepository, func()) {
 		return nil, nil
 	}
 
+	// Helper to clean tables using schemaConfig
+	cleanTables := func() {
+		ctx := context.Background()
+		sc := repo.SchemaConfig()
+		repo.db.ExecContext(ctx, fmt.Sprintf("TRUNCATE TABLE %s CASCADE", sc.TableDeliveryAttempts()))
+		repo.db.ExecContext(ctx, fmt.Sprintf("TRUNCATE TABLE %s CASCADE", sc.TableDeliveries()))
+		repo.db.ExecContext(ctx, fmt.Sprintf("TRUNCATE TABLE %s CASCADE", sc.TableIdempotencyStore()))
+		repo.db.ExecContext(ctx, fmt.Sprintf("TRUNCATE TABLE %s CASCADE", sc.TableCircuitBreakerState()))
+		repo.db.ExecContext(ctx, fmt.Sprintf("TRUNCATE TABLE %s CASCADE", sc.TableSubscriptions()))
+	}
+
 	// Cleanup function
 	cleanup := func() {
 		// Clean up all test data
-		ctx := context.Background()
-		repo.db.ExecContext(ctx, "TRUNCATE TABLE delivery_attempts CASCADE")
-		repo.db.ExecContext(ctx, "TRUNCATE TABLE deliveries CASCADE")
-		repo.db.ExecContext(ctx, "TRUNCATE TABLE idempotency_store CASCADE")
-		repo.db.ExecContext(ctx, "TRUNCATE TABLE circuit_breaker_state CASCADE")
-		repo.db.ExecContext(ctx, "TRUNCATE TABLE subscriptions CASCADE")
+		cleanTables()
 		repo.Close()
 	}
 
 	// Clean tables before tests
-	ctx = context.Background()
-	repo.db.ExecContext(ctx, "TRUNCATE TABLE delivery_attempts CASCADE")
-	repo.db.ExecContext(ctx, "TRUNCATE TABLE deliveries CASCADE")
-	repo.db.ExecContext(ctx, "TRUNCATE TABLE idempotency_store CASCADE")
-	repo.db.ExecContext(ctx, "TRUNCATE TABLE circuit_breaker_state CASCADE")
-	repo.db.ExecContext(ctx, "TRUNCATE TABLE subscriptions CASCADE")
+	cleanTables()
 
 	return repo, cleanup
 }
@@ -598,7 +600,7 @@ func TestPostgresRepository_Health(t *testing.T) {
 	t.Run("Close", func(t *testing.T) {
 		// Create a separate connection to test close
 		connStr := getTestConnectionString()
-		repo2, err := NewPostgresRepository(connStr)
+		repo2, err := NewPostgresRepository(connStr, WithTablePrefix("test"))
 		require.NoError(t, err)
 
 		err = repo2.Close()

@@ -1538,69 +1538,6 @@ func TestE2E_DeadLetterQueueBulkOperations(t *testing.T) {
 	t.Log("✓ E2E DLQ bulk operations test passed")
 }
 
-// TestE2E_MigrationHelper tests the migration helper with embedded files.
-// This test validates that migrations are properly embedded and can be loaded.
-// Note: Full database migration testing requires integration tests with testcontainers.
-func TestE2E_MigrationHelper(t *testing.T) {
-	t.Run("embedded_migrations_loadable", func(t *testing.T) {
-		files, err := GetMigrationFiles()
-		require.NoError(t, err, "should load embedded migration files")
-		require.NotEmpty(t, files, "should have migration files")
-
-		// Verify we have at least version 1 migrations
-		var hasUpV1, hasDownV1 bool
-		for _, f := range files {
-			if f.Version == 1 && f.Direction == MigrateUp {
-				hasUpV1 = true
-				assert.Contains(t, f.Content, "CREATE TABLE IF NOT EXISTS hookd_subscriptions",
-					"up migration should create hookd_subscriptions table")
-				assert.Contains(t, f.Content, "CREATE TABLE IF NOT EXISTS hookd_deliveries",
-					"up migration should create hookd_deliveries table")
-				t.Logf("Found v%d up migration: %s (%d bytes)", f.Version, f.Name, len(f.Content))
-			}
-			if f.Version == 1 && f.Direction == MigrateDown {
-				hasDownV1 = true
-				assert.Contains(t, f.Content, "DROP TABLE",
-					"down migration should drop tables")
-				t.Logf("Found v%d down migration: %s (%d bytes)", f.Version, f.Name, len(f.Content))
-			}
-		}
-
-		assert.True(t, hasUpV1, "should have version 1 up migration")
-		assert.True(t, hasDownV1, "should have version 1 down migration")
-	})
-
-	t.Run("get_migration_sql_by_version", func(t *testing.T) {
-		upSQL, err := GetMigrationSQL(1, MigrateUp)
-		require.NoError(t, err, "should get up migration SQL")
-		require.NotEmpty(t, upSQL)
-		assert.Contains(t, upSQL, "subscriptions")
-		t.Logf("v1 up migration: %d bytes", len(upSQL))
-
-		downSQL, err := GetMigrationSQL(1, MigrateDown)
-		require.NoError(t, err, "should get down migration SQL")
-		require.NotEmpty(t, downSQL)
-		assert.Contains(t, downSQL, "DROP")
-		t.Logf("v1 down migration: %d bytes", len(downSQL))
-	})
-
-	t.Run("non_existent_version_returns_error", func(t *testing.T) {
-		_, err := GetMigrationSQL(9999, MigrateUp)
-		assert.Error(t, err, "should error for non-existent version")
-	})
-
-	t.Run("migrator_can_be_created", func(t *testing.T) {
-		// Test that migrator can be created (without actual DB connection)
-		m := NewMigrator(nil)
-		require.NotNil(t, m)
-		// Close is safe even with nil db
-		err := m.Close()
-		assert.NoError(t, err)
-	})
-
-	t.Log("✓ E2E migration helper test passed: embedded files loadable and accessible")
-}
-
 // TestE2E_MetadataFiltering tests subscription filters with event metadata matching.
 // This ensures that:
 // 1. Events matching all filters are delivered

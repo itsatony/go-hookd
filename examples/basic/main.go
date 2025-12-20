@@ -55,8 +55,31 @@ func main() {
 	fmt.Println()
 
 	// For this example, use mock repository (no database required)
+	// The mock repository accepts an optional prefix for API consistency
 	fmt.Println("Using mock repository (no database required)")
-	repo := hookd.NewMockRepository()
+	repo := hookd.NewMockRepository("example")
+
+	// To use a real PostgreSQL repository instead:
+	//
+	// 1. Create schema configuration with your service prefix
+	//    schemaConfig, err := hookd.NewSchemaConfig("myservice")
+	//    if err != nil {
+	//        log.Fatalf("Failed to create schema config: %v", err)
+	//    }
+	//
+	// 2. Open database connection and ensure schema exists
+	//    db, err := sql.Open("postgres", dbURL)
+	//    schemaMgr := hookd.NewSchemaManager(db, schemaConfig)
+	//    if err := schemaMgr.EnsureSchema(ctx); err != nil {
+	//        log.Fatalf("Failed to ensure schema: %v", err)
+	//    }
+	//
+	// 3. Create repository with the same prefix
+	//    repo, err := hookd.NewPostgresRepository(dbURL, hookd.WithTablePrefix("myservice"))
+	//    if err != nil {
+	//        log.Fatalf("Failed to create repository: %v", err)
+	//    }
+	//    defer repo.Close()
 
 	// Initialize manager
 	manager, err := hookd.NewManager(config, repo)

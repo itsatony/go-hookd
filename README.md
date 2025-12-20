@@ -6,10 +6,10 @@ A webhook delivery management library for Go applications. Handles webhook subsc
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Test Coverage](https://img.shields.io/badge/coverage-60%25-yellow.svg)](https://github.com/itsatony/go-hookd)
 
-> **Status**: Production Ready (v0.4.0)
+> **Status**: Production Ready (v0.6.0)
 > Core functionality is implemented, tested, and production-ready. The API is stable with comprehensive test coverage.
 >
-> **v0.4.0 Breaking Change**: All database tables now use `hookd_` prefix (e.g., `hookd_subscriptions`) to prevent namespace collisions when embedded in other applications.
+> **v0.6.0 Breaking Change**: Database tables now use configurable prefixes: `{prefix}_hookd_{table}` (e.g., `myapp_hookd_subscriptions`). The prefix is **required** via `WithTablePrefix("myapp")`. Schema is managed via `SchemaManager.EnsureSchema(ctx)` instead of migrations.
 
 ## What is go-hookd?
 
@@ -44,7 +44,8 @@ go-hookd is a Go library that manages webhook subscriptions and deliveries. It p
 - **Metadata Filtering**: Filter deliveries based on event metadata fields
 - **Inline Deliveries**: One-off webhooks without pre-created subscriptions
 - **Dead Letter Queue Management**: List, retry, and purge failed deliveries
-- **Migration Helper**: Programmatic PostgreSQL schema migrations
+- **Multi-Service Isolation**: Configurable table prefixes for database sharing
+- **Schema Manager**: Idempotent schema setup without incremental migrations
 - **Prometheus Metrics**: Optional `prometheus/` subpackage for metrics collection
 - **Signature Verification Package**: `verify/` subpackage with replay protection
 
@@ -91,7 +92,8 @@ func main() {
 	config.QueuePollInterval = 500 // milliseconds
 
 	// Use mock repository (in-memory, no database needed)
-	repo := hookd.NewMockRepository()
+	// Optional prefix for API consistency with PostgresRepository
+	repo := hookd.NewMockRepository("test")
 
 	// Create manager
 	manager, err := hookd.NewManager(config, repo)
@@ -158,12 +160,14 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/itsatony/go-hookd"
+	_ "github.com/lib/pq" // PostgreSQL driver
 )
 
 func main() {
@@ -173,19 +177,44 @@ func main() {
 		log.Fatal("DATABASE_URL environment variable required")
 	}
 
-	// Configure
+	// Choose a unique prefix for your service
+	prefix := os.Getenv("HOOKD_PREFIX")
+	if prefix == "" {
+		prefix = "myservice" // Default prefix
+	}
+
+	// Step 1: Create schema config with your service prefix
+	schemaConfig, err := hookd.NewSchemaConfig(prefix)
+	if err != nil {
+		log.Fatalf("Invalid prefix: %v", err)
+	}
+
+	// Step 2: Ensure database schema exists
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		log.Fatalf("Failed to connect to database: %v", err)
+	}
+	defer db.Close()
+
+	schemaMgr := hookd.NewSchemaManager(db, schemaConfig)
+	ctx := context.Background()
+	if err := schemaMgr.EnsureSchema(ctx); err != nil {
+		log.Fatalf("Failed to setup schema: %v", err)
+	}
+
+	// Step 3: Create repository with the same prefix
+	repo, err := hookd.NewPostgresRepository(dbURL, hookd.WithTablePrefix(prefix))
+	if err != nil {
+		log.Fatalf("Failed to create repository: %v", err)
+	}
+	defer repo.Close()
+
+	// Step 4: Configure and create manager
 	config := hookd.NewConfig(dbURL)
 	config.WorkerCount = 10
 	config.QueuePollInterval = 1000
 	config.DefaultMaxRetries = 3
 
-	// Create repository
-	repo, err := hookd.NewPostgresRepository(context.Background(), config)
-	if err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
-	}
-
-	// Create manager
 	manager, err := hookd.NewManager(config, repo)
 	if err != nil {
 		log.Fatal(err)
@@ -217,6 +246,29 @@ func main() {
 - `http-server/` - REST API integration example
 - `monitoring/` - Event bus integration for metrics
 - `helpers/` - Common utility functions
+
+## Multi-Service Deployments
+
+Multiple services can share the same PostgreSQL database using different table prefixes. Each service uses its own prefix to ensure complete data isolation:
+
+```go
+// Service A: "orders" service
+schemaConfigA, _ := hookd.NewSchemaConfig("orders")
+schemaMgr := hookd.NewSchemaManager(db, schemaConfigA)
+schemaMgr.EnsureSchema(ctx) // Creates: orders_hookd_subscriptions, etc.
+repoA, _ := hookd.NewPostgresRepository(dbURL, hookd.WithTablePrefix("orders"))
+
+// Service B: "payments" service (same database, different prefix)
+schemaConfigB, _ := hookd.NewSchemaConfig("payments")
+hookd.NewSchemaManager(db, schemaConfigB).EnsureSchema(ctx)
+repoB, _ := hookd.NewPostgresRepository(dbURL, hookd.WithTablePrefix("payments"))
+```
+
+**Key Points:**
+- **Prefix Required**: `NewPostgresRepository()` requires `WithTablePrefix()` - there's no default
+- **Validation**: Prefix must be lowercase alphanumeric + underscore, max 32 characters
+- **Idempotent**: `EnsureSchema()` is safe to call multiple times (creates only if missing)
+- **Schema Version**: On version mismatch, schema is dropped and recreated (no data migration)
 
 ## Configuration
 
@@ -689,36 +741,50 @@ HMAC-SHA256(secret, timestamp + "." + payload)
 
 ## Database Schema
 
-### Using the Migration Helper
+### Using SchemaManager
 
-go-hookd includes embedded PostgreSQL migrations:
+go-hookd uses SchemaManager to create and manage database schemas. Each service uses a unique prefix for complete data isolation:
 
 ```go
-import "github.com/itsatony/go-hookd"
+import (
+	"database/sql"
+	"github.com/itsatony/go-hookd"
+)
 
-// Run migrations programmatically
-err := hookd.Migrate(ctx, dbURL, hookd.MigrateUp)
+// Step 1: Create schema config with your service prefix
+schemaConfig, err := hookd.NewSchemaConfig("myservice")
 if err != nil {
-	log.Fatalf("Migration failed: %v", err)
+	log.Fatalf("Invalid prefix: %v", err)
 }
 
-// Check migration status
-status, err := hookd.MigrationStatus(ctx, dbURL)
-fmt.Printf("Current version: %d, Pending: %d\n", status.Version, status.Pending)
+// Step 2: Create schema manager and ensure schema exists
+db, _ := sql.Open("postgres", dbURL)
+schemaMgr := hookd.NewSchemaManager(db, schemaConfig)
 
-// Rollback if needed
-err = hookd.Migrate(ctx, dbURL, hookd.MigrateDown)
+if err := schemaMgr.EnsureSchema(ctx); err != nil {
+	log.Fatalf("Schema setup failed: %v", err)
+}
+// Creates: myservice_hookd_subscriptions, myservice_hookd_deliveries, etc.
+
+// Check schema info
+info, _ := schemaMgr.GetSchemaInfo(ctx)
+fmt.Printf("Schema exists: %v, Version: %s\n", info.Exists, info.Version)
+
+// Drop schema (for testing/cleanup)
+err = schemaMgr.DropSchema(ctx)
 ```
 
-### Manual Schema Creation
+### Table Naming Convention
 
-Alternatively, run the SQL migrations manually from `migrations/postgres/`:
+All tables use configurable prefixes: `{prefix}_hookd_{table}`
 
-**Note:** All tables use the `hookd_` prefix to prevent namespace collisions when go-hookd is embedded in applications with existing database schemas.
+**Note:** The prefix is **required** - there's no default. Prefixes must be lowercase alphanumeric + underscore, max 32 characters.
+
+### Example Schema Structure
 
 ```sql
--- Subscriptions
-CREATE TABLE hookd_subscriptions (
+-- Example with prefix "myservice"
+CREATE TABLE myservice_hookd_subscriptions (
     id VARCHAR(50) PRIMARY KEY,
     tenant_id VARCHAR(100) NOT NULL,
     url TEXT NOT NULL,
@@ -866,7 +932,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for full guidelines.
 
 ## Project Status
 
-**Current Version**: v0.4.0 (Production Ready)
+**Current Version**: v0.6.0 (Production Ready)
 
 **What's Implemented:**
 - ✓ Core subscription and delivery management

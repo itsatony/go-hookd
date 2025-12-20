@@ -217,39 +217,9 @@ func TestHTTPHeaders(t *testing.T) {
 	}
 }
 
-// TestTableNames validates database table name constants.
-func TestTableNames(t *testing.T) {
-	tables := []string{
-		TableSubscriptions,
-		TableDeliveries,
-		TableDeliveryAttempts,
-		TableIdempotencyStore,
-		TableCircuitBreakerState,
-	}
-
-	for _, table := range tables {
-		t.Run(table, func(t *testing.T) {
-			// Tables should not be empty
-			assert.NotEmpty(t, table, "table should not be empty")
-
-			// Tables should be lowercase with underscores
-			assert.Equal(t, strings.ToLower(table), table, "table should be lowercase")
-
-			// Tables should be reasonable length
-			assert.LessOrEqual(t, len(table), 50, "table should be reasonable length")
-
-			// Tables should not have spaces
-			assert.NotContains(t, table, " ", "table should not contain spaces")
-		})
-	}
-
-	// Tables should be unique
-	uniqueTables := make(map[string]bool)
-	for _, table := range tables {
-		assert.False(t, uniqueTables[table], "table %s should be unique", table)
-		uniqueTables[table] = true
-	}
-}
+// NOTE: TestTableNames was removed in v0.6.0.
+// Table names are now dynamically generated via SchemaConfig for multi-service isolation.
+// See hookd.schema_test.go for comprehensive table name testing.
 
 // TestDefaultConfigValues validates default configuration constants.
 func TestDefaultConfigValues(t *testing.T) {

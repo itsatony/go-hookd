@@ -6,13 +6,10 @@ package hookd
 import (
 	"context"
 	"database/sql"
-	"fmt"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/lib/pq"
+	_ "github.com/lib/pq"
 	"github.com/stretchr/testify/require"
 	postgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 )
@@ -25,7 +22,7 @@ type PostgresTestContainer struct {
 }
 
 // SetupPostgresContainer creates and starts a PostgreSQL testcontainer
-// with migrations applied.
+// with schema applied using SchemaManager.
 func SetupPostgresContainer(t *testing.T) *PostgresTestContainer {
 	t.Helper()
 
@@ -54,9 +51,13 @@ func SetupPostgresContainer(t *testing.T) *PostgresTestContainer {
 	err = db.PingContext(ctx)
 	require.NoError(t, err, "Failed to ping PostgreSQL")
 
-	// Run migrations
-	err = runMigrations(db)
-	require.NoError(t, err, "Failed to run migrations")
+	// Create schema using SchemaManager (with "test" prefix to match test repos)
+	schemaConfig, err := NewSchemaConfig("test")
+	require.NoError(t, err, "Failed to create schema config")
+
+	schemaMgr := NewSchemaManager(db, schemaConfig)
+	err = schemaMgr.EnsureSchema(ctx)
+	require.NoError(t, err, "Failed to ensure schema")
 
 	return &PostgresTestContainer{
 		container: pgContainer,
@@ -80,26 +81,6 @@ func (p *PostgresTestContainer) Cleanup(t *testing.T) {
 	}
 }
 
-// runMigrations applies database migrations from the migrations folder
-func runMigrations(db *sql.DB) error {
-	// Get path to migrations
-	migrationsPath := filepath.Join("..", "migrations", "postgres")
-
-	// Read up migration
-	upSQL, err := os.ReadFile(filepath.Join(migrationsPath, "000001_create_tables.up.sql"))
-	if err != nil {
-		return fmt.Errorf("failed to read migration file: %w", err)
-	}
-
-	// Execute migration
-	_, err = db.Exec(string(upSQL))
-	if err != nil {
-		return fmt.Errorf("failed to execute migration: %w", err)
-	}
-
-	return nil
-}
-
 // =============================================================================
 // INTEGRATION TESTS - SUBSCRIPTION CRUD
 // =============================================================================
@@ -113,7 +94,7 @@ func TestPostgresRepository_CreateSubscription_Integration(t *testing.T) {
 	pgContainer := SetupPostgresContainer(t)
 	defer pgContainer.Cleanup(t)
 
-	repo, err := NewPostgresRepository(pgContainer.connStr)
+	repo, err := NewPostgresRepository(pgContainer.connStr, WithTablePrefix("test"))
 	require.NoError(t, err)
 	defer repo.Close()
 
@@ -162,7 +143,7 @@ func TestPostgresRepository_GetSubscription_Integration(t *testing.T) {
 	pgContainer := SetupPostgresContainer(t)
 	defer pgContainer.Cleanup(t)
 
-	repo, err := NewPostgresRepository(pgContainer.connStr)
+	repo, err := NewPostgresRepository(pgContainer.connStr, WithTablePrefix("test"))
 	require.NoError(t, err)
 	defer repo.Close()
 
@@ -205,7 +186,7 @@ func TestPostgresRepository_UpdateSubscription_Integration(t *testing.T) {
 	pgContainer := SetupPostgresContainer(t)
 	defer pgContainer.Cleanup(t)
 
-	repo, err := NewPostgresRepository(pgContainer.connStr)
+	repo, err := NewPostgresRepository(pgContainer.connStr, WithTablePrefix("test"))
 	require.NoError(t, err)
 	defer repo.Close()
 
@@ -250,7 +231,7 @@ func TestPostgresRepository_DeleteSubscription_Integration(t *testing.T) {
 	pgContainer := SetupPostgresContainer(t)
 	defer pgContainer.Cleanup(t)
 
-	repo, err := NewPostgresRepository(pgContainer.connStr)
+	repo, err := NewPostgresRepository(pgContainer.connStr, WithTablePrefix("test"))
 	require.NoError(t, err)
 	defer repo.Close()
 
@@ -287,7 +268,7 @@ func TestPostgresRepository_ListSubscriptions_Integration(t *testing.T) {
 	pgContainer := SetupPostgresContainer(t)
 	defer pgContainer.Cleanup(t)
 
-	repo, err := NewPostgresRepository(pgContainer.connStr)
+	repo, err := NewPostgresRepository(pgContainer.connStr, WithTablePrefix("test"))
 	require.NoError(t, err)
 	defer repo.Close()
 
@@ -330,7 +311,7 @@ func TestPostgresRepository_CreateDelivery_Integration(t *testing.T) {
 	pgContainer := SetupPostgresContainer(t)
 	defer pgContainer.Cleanup(t)
 
-	repo, err := NewPostgresRepository(pgContainer.connStr)
+	repo, err := NewPostgresRepository(pgContainer.connStr, WithTablePrefix("test"))
 	require.NoError(t, err)
 	defer repo.Close()
 
@@ -385,7 +366,7 @@ func TestPostgresRepository_GetPendingDeliveries_Integration(t *testing.T) {
 	pgContainer := SetupPostgresContainer(t)
 	defer pgContainer.Cleanup(t)
 
-	repo, err := NewPostgresRepository(pgContainer.connStr)
+	repo, err := NewPostgresRepository(pgContainer.connStr, WithTablePrefix("test"))
 	require.NoError(t, err)
 	defer repo.Close()
 
@@ -440,7 +421,7 @@ func TestPostgresRepository_GetPendingDeliveries_SkipLocked_Integration(t *testi
 	pgContainer := SetupPostgresContainer(t)
 	defer pgContainer.Cleanup(t)
 
-	repo, err := NewPostgresRepository(pgContainer.connStr)
+	repo, err := NewPostgresRepository(pgContainer.connStr, WithTablePrefix("test"))
 	require.NoError(t, err)
 	defer repo.Close()
 
@@ -508,7 +489,7 @@ func TestPostgresRepository_Transaction_Commit_Integration(t *testing.T) {
 	pgContainer := SetupPostgresContainer(t)
 	defer pgContainer.Cleanup(t)
 
-	repo, err := NewPostgresRepository(pgContainer.connStr)
+	repo, err := NewPostgresRepository(pgContainer.connStr, WithTablePrefix("test"))
 	require.NoError(t, err)
 	defer repo.Close()
 
@@ -549,7 +530,7 @@ func TestPostgresRepository_Transaction_Rollback_Integration(t *testing.T) {
 	pgContainer := SetupPostgresContainer(t)
 	defer pgContainer.Cleanup(t)
 
-	repo, err := NewPostgresRepository(pgContainer.connStr)
+	repo, err := NewPostgresRepository(pgContainer.connStr, WithTablePrefix("test"))
 	require.NoError(t, err)
 	defer repo.Close()
 
@@ -594,7 +575,7 @@ func TestPostgresRepository_GetDelivery_Integration(t *testing.T) {
 	pgContainer := SetupPostgresContainer(t)
 	defer pgContainer.Cleanup(t)
 
-	repo, err := NewPostgresRepository(pgContainer.connStr)
+	repo, err := NewPostgresRepository(pgContainer.connStr, WithTablePrefix("test"))
 	require.NoError(t, err)
 	defer repo.Close()
 
@@ -647,7 +628,7 @@ func TestPostgresRepository_UpdateDelivery_Integration(t *testing.T) {
 	pgContainer := SetupPostgresContainer(t)
 	defer pgContainer.Cleanup(t)
 
-	repo, err := NewPostgresRepository(pgContainer.connStr)
+	repo, err := NewPostgresRepository(pgContainer.connStr, WithTablePrefix("test"))
 	require.NoError(t, err)
 	defer repo.Close()
 
@@ -705,7 +686,7 @@ func TestPostgresRepository_MoveToDeadLetter_Integration(t *testing.T) {
 	pgContainer := SetupPostgresContainer(t)
 	defer pgContainer.Cleanup(t)
 
-	repo, err := NewPostgresRepository(pgContainer.connStr)
+	repo, err := NewPostgresRepository(pgContainer.connStr, WithTablePrefix("test"))
 	require.NoError(t, err)
 	defer repo.Close()
 
@@ -761,7 +742,7 @@ func TestPostgresRepository_CreateDeliveryAttempt_Integration(t *testing.T) {
 	pgContainer := SetupPostgresContainer(t)
 	defer pgContainer.Cleanup(t)
 
-	repo, err := NewPostgresRepository(pgContainer.connStr)
+	repo, err := NewPostgresRepository(pgContainer.connStr, WithTablePrefix("test"))
 	require.NoError(t, err)
 	defer repo.Close()
 
@@ -825,7 +806,7 @@ func TestPostgresRepository_GetDeliveryAttempts_Integration(t *testing.T) {
 	pgContainer := SetupPostgresContainer(t)
 	defer pgContainer.Cleanup(t)
 
-	repo, err := NewPostgresRepository(pgContainer.connStr)
+	repo, err := NewPostgresRepository(pgContainer.connStr, WithTablePrefix("test"))
 	require.NoError(t, err)
 	defer repo.Close()
 
@@ -896,7 +877,7 @@ func TestPostgresRepository_CheckIdempotency_Integration(t *testing.T) {
 	pgContainer := SetupPostgresContainer(t)
 	defer pgContainer.Cleanup(t)
 
-	repo, err := NewPostgresRepository(pgContainer.connStr)
+	repo, err := NewPostgresRepository(pgContainer.connStr, WithTablePrefix("test"))
 	require.NoError(t, err)
 	defer repo.Close()
 
@@ -942,7 +923,7 @@ func TestPostgresRepository_StoreIdempotencyKey_Integration(t *testing.T) {
 	pgContainer := SetupPostgresContainer(t)
 	defer pgContainer.Cleanup(t)
 
-	repo, err := NewPostgresRepository(pgContainer.connStr)
+	repo, err := NewPostgresRepository(pgContainer.connStr, WithTablePrefix("test"))
 	require.NoError(t, err)
 	defer repo.Close()
 
@@ -993,7 +974,7 @@ func TestPostgresRepository_GetCircuitBreakerState_Integration(t *testing.T) {
 	pgContainer := SetupPostgresContainer(t)
 	defer pgContainer.Cleanup(t)
 
-	repo, err := NewPostgresRepository(pgContainer.connStr)
+	repo, err := NewPostgresRepository(pgContainer.connStr, WithTablePrefix("test"))
 	require.NoError(t, err)
 	defer repo.Close()
 
@@ -1039,7 +1020,7 @@ func TestPostgresRepository_UpdateCircuitBreakerState_Integration(t *testing.T) 
 	pgContainer := SetupPostgresContainer(t)
 	defer pgContainer.Cleanup(t)
 
-	repo, err := NewPostgresRepository(pgContainer.connStr)
+	repo, err := NewPostgresRepository(pgContainer.connStr, WithTablePrefix("test"))
 	require.NoError(t, err)
 	defer repo.Close()
 
@@ -1082,7 +1063,7 @@ func TestPostgresRepository_GetSubscriptionByTenantAndURL_Integration(t *testing
 	pgContainer := SetupPostgresContainer(t)
 	defer pgContainer.Cleanup(t)
 
-	repo, err := NewPostgresRepository(pgContainer.connStr)
+	repo, err := NewPostgresRepository(pgContainer.connStr, WithTablePrefix("test"))
 	require.NoError(t, err)
 	defer repo.Close()
 
@@ -1137,7 +1118,7 @@ func TestPostgresRepository_Ping_Integration(t *testing.T) {
 	pgContainer := SetupPostgresContainer(t)
 	defer pgContainer.Cleanup(t)
 
-	repo, err := NewPostgresRepository(pgContainer.connStr)
+	repo, err := NewPostgresRepository(pgContainer.connStr, WithTablePrefix("test"))
 	require.NoError(t, err)
 	defer repo.Close()
 

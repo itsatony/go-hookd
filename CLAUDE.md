@@ -69,19 +69,22 @@ Read these files IN FULL before starting any work:
                    ▼
 ┌─────────────────────────────────────────────┐
 │          PostgreSQL Database                │
-│  hookd_subscriptions, hookd_deliveries,     │
-│  hookd_delivery_attempts,                   │
-│  hookd_circuit_breaker_state,               │
-│  hookd_idempotency_store                    │
+│  {prefix}_hookd_subscriptions,              │
+│  {prefix}_hookd_deliveries,                 │
+│  {prefix}_hookd_delivery_attempts,          │
+│  {prefix}_hookd_circuit_breaker_state,      │
+│  {prefix}_hookd_idempotency_store           │
 └─────────────────────────────────────────────┘
 ```
 
-**Database Naming Convention (v0.4.0+)**:
-- All tables use `hookd_` prefix to prevent namespace collisions
-- Indexes: `idx_hookd_{table}_{columns}`
-- Triggers: `trg_hookd_{table}_{event}`
-- Functions: `hookd_{name}()`
-- Constraints: `chk_hookd_{table}_{rule}` or `fk_hookd_{table}_{ref}`
+**Database Naming Convention (v0.6.0+)**:
+- All tables use configurable prefix: `{prefix}_hookd_{table}` (e.g., `myapp_hookd_subscriptions`)
+- Prefix is required and configured via `WithTablePrefix("myapp")`
+- Indexes: `idx_{prefix}_hookd_{table}_{columns}`
+- Triggers: `trg_{prefix}_hookd_{table}_{event}`
+- Functions: `{prefix}_hookd_{name}()`
+- Constraints: `chk_{prefix}_hookd_{table}_{rule}` or `fk_{prefix}_hookd_{table}_{ref}`
+- Schema managed via `SchemaManager.EnsureSchema(ctx)` - single baseline, no incremental migrations
 
 **Separation of Concerns**:
 - Package provides webhook management logic ONLY
@@ -577,25 +580,63 @@ Support for distributed tracing via OpenTelemetry (future enhancement).
 ```yaml
 project:
   name: "go-hookd"
-  version: "0.4.0"
+  version: "0.6.0"
 
 schemas:
-  postgres_main: "2"  # Prefixed schema (hookd_*) for v0.4.0
+  postgres_main: "3"  # Configurable prefix schema ({prefix}_hookd_*) for v0.6.0
 
 components:
-  manager: "0.4.0"
-  delivery_engine: "0.4.0"
-  circuit_breaker: "0.2.0"
-  idempotency_store: "0.2.0"
+  manager: "0.6.0"
+  delivery_engine: "0.5.0"
+  circuit_breaker: "0.3.0"
+  idempotency_store: "0.3.0"
   dead_letter_queue: "0.1.0"
+  schema_manager: "0.1.0"
 
 dependencies:
-  go_cuserr: "0.3.0"
+  go_cuserr: "0.3.1"
   go_version: "1.0.0"
   go_pubbing: "0.5.2"
 ```
 
 Update on every release, schema change, or component version bump.
+
+---
+
+## Multi-Service Database Setup (v0.6.0+)
+
+Multiple services can share the same PostgreSQL database using different table prefixes:
+
+```go
+// Service A initialization
+schemaConfigA, _ := hookd.NewSchemaConfig("servicea")
+schemaMgr := hookd.NewSchemaManager(db, schemaConfigA)
+if err := schemaMgr.EnsureSchema(ctx); err != nil {
+    log.Fatal("schema setup failed:", err)
+}
+repoA, _ := hookd.NewPostgresRepository(connStr, hookd.WithTablePrefix("servicea"))
+// Creates: servicea_hookd_subscriptions, servicea_hookd_deliveries, etc.
+
+// Service B (same database, different prefix)
+schemaConfigB, _ := hookd.NewSchemaConfig("serviceb")
+schemaMgrB := hookd.NewSchemaManager(db, schemaConfigB)
+schemaMgrB.EnsureSchema(ctx)
+repoB, _ := hookd.NewPostgresRepository(connStr, hookd.WithTablePrefix("serviceb"))
+// Creates: serviceb_hookd_subscriptions, serviceb_hookd_deliveries, etc.
+```
+
+**Key Points:**
+- **Prefix required**: `NewPostgresRepository()` requires `WithTablePrefix()` - no default
+- **Schema validation**: Prefix must be lowercase alphanumeric + underscore, max 32 chars
+- **Idempotent schema**: `EnsureSchema()` creates or replaces schema (destructive on version mismatch)
+- **Complete isolation**: Data is fully isolated between prefixes
+- **No incremental migrations**: Schema is single baseline, managed via embedded SQL template
+
+**Mock Repository for Testing:**
+```go
+// Mock repository accepts optional prefix for API consistency
+repo := hookd.NewMockRepository("test")
+```
 
 ---
 
@@ -606,6 +647,8 @@ Update on every release, schema change, or component version bump.
 - `Manager` - Main package API
 - `DeliveryEngine` - Worker pool & delivery execution
 - `CircuitBreaker` - Per-endpoint failure detection
+- `SchemaManager` - Database schema setup and versioning
+- `SchemaConfig` - Table prefix and naming configuration
 
 ### Domain Models
 - `Subscription` - Webhook subscription configuration

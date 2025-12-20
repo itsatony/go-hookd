@@ -4,23 +4,24 @@ manifest_version: "1.0"
 # Project version (semantic versioning)
 project:
   name: "go-hookd"
-  version: "0.5.0"
+  version: "0.6.0"
   description: "Enterprise webhook management package"
 
 # Database schema versions (migration numbers)
 schemas:
-  postgres_main: "2"  # Prefixed schema (hookd_*) for v0.4.0
+  postgres_main: "3"  # Configurable prefix schema ({prefix}_hookd_*) for v0.6.0
 
 # Component versions (internal modules)
 components:
-  manager: "0.5.0"
-  delivery_engine: "0.4.0"
-  circuit_breaker: "0.2.0"
-  idempotency_store: "0.2.0"
+  manager: "0.6.0"
+  delivery_engine: "0.5.0"
+  circuit_breaker: "0.3.0"
+  idempotency_store: "0.3.0"
   prometheus_collector: "0.1.0"
   signature_verifier: "0.1.0"
   dead_letter_queue: "0.1.0"
-  maintenance_api: "0.1.0"
+  maintenance_api: "0.2.0"
+  schema_manager: "0.1.0"
 
 # External dependencies (mandatory)
 dependencies:
