@@ -542,7 +542,7 @@ const (
 
 	// UserAgentVersion is the current version for user agent.
 	// This should match versions.yaml project.version.
-	UserAgentVersion = "0.3.0"
+	UserAgentVersion = "0.3.1"
 )
 
 // UserAgent is the complete user agent string used for webhook deliveries.

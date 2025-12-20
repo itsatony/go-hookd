@@ -568,14 +568,14 @@ Support for distributed tracing via OpenTelemetry (future enhancement).
 ```yaml
 project:
   name: "go-hookd"
-  version: "0.3.0"
+  version: "0.3.1"
 
 schemas:
   postgres_main: "1"
 
 components:
-  manager: "0.3.0"
-  delivery_engine: "0.3.0"
+  manager: "0.3.1"
+  delivery_engine: "0.3.1"
   circuit_breaker: "0.2.0"
   idempotency_store: "0.2.0"
   dead_letter_queue: "0.1.0"
