@@ -1,7 +1,8 @@
--- Migration: 000001_create_tables
--- Description: Create all tables for go-hookd webhook management system
+-- Migration: 000001_baseline
+-- Description: Baseline schema for go-hookd v0.3.0 webhook management system
 -- Author: go-hookd
--- Created: 2025-01-08
+-- Created: 2025-12-20
+-- Schema Version: 1 (see versions.yaml)
 
 -- Enable required extensions
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -21,6 +22,9 @@ CREATE TABLE IF NOT EXISTS subscriptions (
 
     -- Event filtering
     event_types TEXT[] NOT NULL,
+
+    -- Metadata filtering (NEW in v0.3.0)
+    filters JSONB DEFAULT '{}'::jsonb,
 
     -- Subscription state
     status VARCHAR(50) NOT NULL DEFAULT 'active',
@@ -56,27 +60,34 @@ CREATE INDEX idx_subscriptions_status ON subscriptions(status);
 CREATE INDEX idx_subscriptions_event_types ON subscriptions USING GIN(event_types);
 CREATE INDEX idx_subscriptions_created_at ON subscriptions(created_at DESC);
 CREATE UNIQUE INDEX idx_subscriptions_tenant_url ON subscriptions(tenant_id, url);
+CREATE INDEX idx_subscriptions_filters ON subscriptions USING GIN(filters);
 
 -- Comments
 COMMENT ON TABLE subscriptions IS 'Webhook subscription configurations';
 COMMENT ON COLUMN subscriptions.id IS 'Prefixed nanoID (sub_*)';
 COMMENT ON COLUMN subscriptions.tenant_id IS 'Tenant identifier for multi-tenancy';
 COMMENT ON COLUMN subscriptions.event_types IS 'Array of event types this subscription listens to';
+COMMENT ON COLUMN subscriptions.filters IS 'JSONB filter conditions for metadata-based filtering';
 COMMENT ON COLUMN subscriptions.retry_policy IS 'Retry configuration as JSONB';
 
 -- =============================================================================
 -- DELIVERIES TABLE
 -- =============================================================================
 -- Stores webhook delivery queue and state
+-- Supports both subscription-based and inline (ad-hoc) deliveries
 CREATE TABLE IF NOT EXISTS deliveries (
     -- Identity
     id VARCHAR(255) PRIMARY KEY,
-    subscription_id VARCHAR(255) NOT NULL,
+    subscription_id VARCHAR(255), -- NULLABLE for inline deliveries
     tenant_id VARCHAR(255) NOT NULL,
 
     -- Event data
     event_type VARCHAR(255) NOT NULL,
     payload JSONB NOT NULL,
+
+    -- Inline delivery fields (only used when subscription_id is NULL)
+    url TEXT,                    -- Direct URL for inline deliveries
+    secret VARCHAR(512),         -- HMAC secret for inline deliveries
 
     -- Delivery state
     status VARCHAR(50) NOT NULL DEFAULT 'pending',
@@ -96,8 +107,9 @@ CREATE TABLE IF NOT EXISTS deliveries (
     CONSTRAINT chk_delivery_status CHECK (status IN ('pending', 'success', 'failed', 'dead_letter')),
     CONSTRAINT chk_attempt_count_positive CHECK (attempt_count >= 0),
     CONSTRAINT chk_max_attempts_positive CHECK (max_attempts >= 0),
+    CONSTRAINT chk_delivery_target CHECK (subscription_id IS NOT NULL OR url IS NOT NULL),
 
-    -- Foreign keys
+    -- Foreign keys (optional for inline deliveries)
     CONSTRAINT fk_deliveries_subscription
         FOREIGN KEY (subscription_id)
         REFERENCES subscriptions(id)
@@ -116,12 +128,20 @@ CREATE INDEX idx_deliveries_created_at ON deliveries(created_at DESC);
 CREATE INDEX idx_deliveries_pending_queue ON deliveries(status, next_retry_at, created_at)
     WHERE status = 'pending';
 
+-- Index for inline deliveries (deliveries without subscription)
+CREATE INDEX idx_deliveries_inline ON deliveries(tenant_id, event_type)
+    WHERE subscription_id IS NULL;
+
 -- Comments
 COMMENT ON TABLE deliveries IS 'Webhook delivery queue and history';
 COMMENT ON COLUMN deliveries.id IS 'Prefixed nanoID (dlv_*)';
+COMMENT ON COLUMN deliveries.subscription_id IS 'NULL for inline deliveries';
+COMMENT ON COLUMN deliveries.url IS 'Direct URL for inline deliveries (NULL for subscription-based)';
+COMMENT ON COLUMN deliveries.secret IS 'HMAC secret for inline deliveries (NULL for subscription-based)';
 COMMENT ON COLUMN deliveries.status IS 'Current delivery status';
 COMMENT ON COLUMN deliveries.next_retry_at IS 'Scheduled time for next retry attempt';
 COMMENT ON INDEX idx_deliveries_pending_queue IS 'Optimized for SKIP LOCKED queue processing';
+COMMENT ON CONSTRAINT chk_delivery_target ON deliveries IS 'Ensures delivery has either subscription_id OR url for inline delivery';
 
 -- =============================================================================
 -- DELIVERY_ATTEMPTS TABLE
@@ -143,12 +163,16 @@ CREATE TABLE IF NOT EXISTS delivery_attempts (
     -- Error tracking
     error TEXT,
 
+    -- Timing metrics (NEW in v0.3.0)
+    duration_ms BIGINT DEFAULT 0,
+
     -- Timestamps
     attempted_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
 
     -- Constraints
     CONSTRAINT chk_attempt_number_positive CHECK (attempt_number > 0),
     CONSTRAINT chk_status_code_valid CHECK (status_code >= 0 AND status_code < 600),
+    CONSTRAINT chk_duration_ms_positive CHECK (duration_ms >= 0),
 
     -- Foreign keys
     CONSTRAINT fk_attempts_delivery
@@ -168,6 +192,7 @@ COMMENT ON TABLE delivery_attempts IS 'History of all webhook delivery attempts'
 COMMENT ON COLUMN delivery_attempts.id IS 'Prefixed nanoID (att_*)';
 COMMENT ON COLUMN delivery_attempts.attempt_number IS '1-based attempt number';
 COMMENT ON COLUMN delivery_attempts.status_code IS 'HTTP status code (0 if network error)';
+COMMENT ON COLUMN delivery_attempts.duration_ms IS 'Request duration in milliseconds';
 
 -- =============================================================================
 -- IDEMPOTENCY_STORE TABLE
@@ -293,6 +318,7 @@ COMMENT ON FUNCTION cleanup_expired_idempotency_keys() IS 'Removes expired idemp
 -- MIGRATION COMPLETE
 -- =============================================================================
 -- Tables created: 5
--- Indexes created: 24
+-- Indexes created: 26
 -- Functions created: 2
 -- Triggers created: 2
+-- Schema version: 1 (baseline for v0.3.0)

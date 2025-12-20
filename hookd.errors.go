@@ -8,6 +8,7 @@
 package hookd
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -80,8 +81,9 @@ func NewDeliveryExecutionError(url string, statusCode int, err error) error {
 // NewCircuitBreakerError creates an error indicating circuit breaker is open.
 func NewCircuitBreakerError(endpoint string) error {
 	// Circuit breaker open is an external service error (service unavailable)
+	// Use errors.New instead of fmt.Errorf to avoid format string issues
 	return cuserr.NewExternalError("webhook-endpoint", "circuit_breaker",
-		fmt.Errorf(ErrMsgCircuitBreakerOpen),
+		errors.New(ErrMsgCircuitBreakerOpen),
 		cuserr.WithMetadata("endpoint", endpoint),
 	)
 }

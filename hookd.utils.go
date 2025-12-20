@@ -210,6 +210,10 @@ func CopyInterfaceMap(src map[string]any) map[string]any {
 //   - payload: The JSON payload being delivered (as bytes)
 //
 // Returns the hex-encoded signature string.
+//
+// NOTE: This function is intentionally duplicated in verify/verify.go to keep
+// the verify package standalone for webhook receivers who may not import the
+// full hookd package. Any changes here must be mirrored there.
 func calculateSignature(secret, timestamp string, payload []byte) string {
 	// Create the message to sign: timestamp.payload
 	message := fmt.Sprintf("%s.%s", timestamp, string(payload))

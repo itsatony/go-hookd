@@ -1,7 +1,8 @@
--- Migration: 000001_create_tables (ROLLBACK)
+-- Migration: 000001_baseline (ROLLBACK)
 -- Description: Clean rollback of all go-hookd tables and functions
 -- Author: go-hookd
--- Created: 2025-01-08
+-- Created: 2025-12-20
+-- Schema Version: 1 (see versions.yaml)
 
 -- =============================================================================
 -- DROP TRIGGERS

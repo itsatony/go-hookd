@@ -182,6 +182,10 @@ func Quick(secret, timestamp string, payload []byte, signature string) bool {
 
 // calculateSignature generates an HMAC-SHA256 signature.
 // This matches the signing logic in the main hookd package.
+//
+// NOTE: This function is intentionally duplicated from hookd.utils.go to keep
+// the verify package standalone for webhook receivers who may not import the
+// full hookd package. Any changes here must be mirrored there.
 func calculateSignature(secret, timestamp string, payload []byte) string {
 	// Create the signature payload: timestamp.payload
 	signaturePayload := fmt.Sprintf("%s.%s", timestamp, string(payload))

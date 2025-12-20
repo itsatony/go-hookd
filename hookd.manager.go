@@ -35,17 +35,18 @@ type EventBus interface {
 
 // Manager is the main webhook management orchestrator.
 type Manager struct {
-	repo       Repository
-	eventBus   EventBus
-	ctx        context.Context
-	config     *Config
-	logger     *zap.Logger
-	httpClient *http.Client
-	cancel     context.CancelFunc
-	workerSem  chan struct{}
-	wg         sync.WaitGroup
-	startedMu  sync.RWMutex
-	started    bool
+	repo            Repository
+	eventBus        EventBus
+	ctx             context.Context
+	config          *Config
+	logger          *zap.Logger
+	httpClient      *http.Client
+	cancel          context.CancelFunc
+	workerSem       chan struct{}
+	wg              sync.WaitGroup
+	startedMu       sync.RWMutex
+	started         bool
+	testRateLimiter sync.Map // map[subscriptionID]time.Time - rate limiting for TestSubscription
 }
 
 // ManagerOption is a functional option for configuring the Manager.
@@ -475,7 +476,7 @@ func (m *Manager) executeWebhookRequest(ctx context.Context, delivery *Delivery,
 	}
 
 	// Create request with payload body
-	req, err := http.NewRequestWithContext(ctx, "POST", targetURL, bytes.NewReader(payloadJSON))
+	req, err := http.NewRequestWithContext(ctx, HTTPMethodPost, targetURL, bytes.NewReader(payloadJSON))
 	if err != nil {
 		return 0, "", nil, cuserr.NewInternalError("http_client", err,
 			cuserr.WithMetadata("operation", "create_request"),
@@ -484,8 +485,8 @@ func (m *Manager) executeWebhookRequest(ctx context.Context, delivery *Delivery,
 	}
 
 	// Set headers
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "go-hookd/0.1.0")
+	req.Header.Set("Content-Type", ContentTypeJSON)
+	req.Header.Set("User-Agent", UserAgent)
 
 	// Add custom headers from subscription (if any)
 	for key, value := range customHeaders {

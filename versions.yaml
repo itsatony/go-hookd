@@ -9,7 +9,7 @@ project:
 
 # Database schema versions (migration numbers)
 schemas:
-  postgres_main: "3"  # Added filters and inline delivery support
+  postgres_main: "1"  # Baseline schema for v0.3.0
 
 # Component versions (internal modules)
 components:

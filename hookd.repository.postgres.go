@@ -94,7 +94,7 @@ func unmarshalJSONB(data []byte, target any) error {
 }
 
 // scanSubscription scans a database row into a Subscription struct.
-// Handles JSONB fields (retry_policy, headers, metadata) and TEXT[] arrays (event_types).
+// Handles JSONB fields (retry_policy, headers, metadata, filters) and TEXT[] arrays (event_types).
 func scanSubscription(scanner interface {
 	Scan(dest ...any) error
 }) (*Subscription, error) {
@@ -102,6 +102,7 @@ func scanSubscription(scanner interface {
 	var retryPolicyJSON []byte
 	var headersJSON []byte
 	var metadataJSON []byte
+	var filtersJSON []byte
 	var eventTypes pq.StringArray
 
 	err := scanner.Scan(
@@ -110,6 +111,7 @@ func scanSubscription(scanner interface {
 		&sub.URL,
 		&sub.Secret,
 		&eventTypes,
+		&filtersJSON,
 		&sub.Status,
 		&retryPolicyJSON,
 		&headersJSON,
@@ -145,11 +147,18 @@ func scanSubscription(scanner interface {
 		}
 	}
 
+	if len(filtersJSON) > 0 {
+		sub.Filters = make(map[string]string)
+		if err := unmarshalJSONB(filtersJSON, &sub.Filters); err != nil {
+			return nil, err
+		}
+	}
+
 	return &sub, nil
 }
 
 // scanDelivery scans a database row into a Delivery struct.
-// Handles JSONB payload field and nullable timestamps.
+// Handles JSONB payload field, nullable timestamps, and inline delivery fields (url, secret).
 func scanDelivery(scanner interface {
 	Scan(dest ...any) error
 }) (*Delivery, error) {
@@ -157,13 +166,18 @@ func scanDelivery(scanner interface {
 	var payloadJSON []byte
 	var nextRetryAt sql.NullTime
 	var completedAt sql.NullTime
+	var subscriptionID sql.NullString
+	var url sql.NullString
+	var secret sql.NullString
 
 	err := scanner.Scan(
 		&dlv.ID,
-		&dlv.SubscriptionID,
+		&subscriptionID,
 		&dlv.TenantID,
 		&dlv.EventType,
 		&payloadJSON,
+		&url,
+		&secret,
 		&dlv.Status,
 		&dlv.AttemptCount,
 		&dlv.MaxAttempts,
@@ -173,6 +187,19 @@ func scanDelivery(scanner interface {
 	)
 	if err != nil {
 		return nil, err
+	}
+
+	// Handle nullable subscription ID (for inline deliveries)
+	if subscriptionID.Valid {
+		dlv.SubscriptionID = subscriptionID.String
+	}
+
+	// Handle nullable inline delivery fields
+	if url.Valid {
+		dlv.URL = url.String
+	}
+	if secret.Valid {
+		dlv.Secret = secret.String
 	}
 
 	// Unmarshal payload JSONB
@@ -195,7 +222,7 @@ func scanDelivery(scanner interface {
 }
 
 // scanDeliveryAttempt scans a database row into a DeliveryAttempt struct.
-// Handles JSONB response_headers field.
+// Handles JSONB response_headers field and duration_ms metric.
 func scanDeliveryAttempt(scanner interface {
 	Scan(dest ...any) error
 }) (*DeliveryAttempt, error) {
@@ -212,6 +239,7 @@ func scanDeliveryAttempt(scanner interface {
 		&responseBody,
 		&responseHeadersJSON,
 		&errorMsg,
+		&att.DurationMs,
 		&att.AttemptedAt,
 	)
 	if err != nil {
@@ -299,12 +327,17 @@ func (r *PostgresRepository) CreateSubscription(ctx context.Context, sub *Subscr
 		return err // Already wrapped as ExternalError by marshalJSONB
 	}
 
+	filtersJSON, err := marshalJSONB(sub.Filters)
+	if err != nil {
+		return err // Already wrapped as ExternalError by marshalJSONB
+	}
+
 	query := `
 		INSERT INTO subscriptions (
-			id, tenant_id, url, secret, event_types, status,
+			id, tenant_id, url, secret, event_types, filters, status,
 			retry_policy, headers, metadata, created_at, updated_at
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
 		)`
 
 	_, err = r.db.ExecContext(ctx, query,
@@ -313,6 +346,7 @@ func (r *PostgresRepository) CreateSubscription(ctx context.Context, sub *Subscr
 		sub.URL,
 		sub.Secret,
 		pq.Array(sub.EventTypes),
+		filtersJSON,
 		sub.Status,
 		retryPolicyJSON,
 		headersJSON,
@@ -338,7 +372,7 @@ func (r *PostgresRepository) CreateSubscription(ctx context.Context, sub *Subscr
 // Returns ErrSubscriptionNotFound if the subscription does not exist.
 func (r *PostgresRepository) GetSubscription(ctx context.Context, id string) (*Subscription, error) {
 	query := `
-		SELECT id, tenant_id, url, secret, event_types, status,
+		SELECT id, tenant_id, url, secret, event_types, filters, status,
 		       retry_policy, headers, metadata, created_at, updated_at
 		FROM subscriptions
 		WHERE id = $1`
@@ -362,7 +396,7 @@ func (r *PostgresRepository) GetSubscription(ctx context.Context, id string) (*S
 // Returns ErrSubscriptionNotFound if no matching subscription exists.
 func (r *PostgresRepository) GetSubscriptionByTenantAndURL(ctx context.Context, tenantID, url string) (*Subscription, error) {
 	query := `
-		SELECT id, tenant_id, url, secret, event_types, status,
+		SELECT id, tenant_id, url, secret, event_types, filters, status,
 		       retry_policy, headers, metadata, created_at, updated_at
 		FROM subscriptions
 		WHERE tenant_id = $1 AND url = $2`
@@ -401,16 +435,22 @@ func (r *PostgresRepository) UpdateSubscription(ctx context.Context, sub *Subscr
 		return err // Already wrapped as ExternalError by marshalJSONB
 	}
 
+	filtersJSON, err := marshalJSONB(sub.Filters)
+	if err != nil {
+		return err // Already wrapped as ExternalError by marshalJSONB
+	}
+
 	query := `
 		UPDATE subscriptions
 		SET url = $2,
 		    secret = $3,
 		    event_types = $4,
-		    status = $5,
-		    retry_policy = $6,
-		    headers = $7,
-		    metadata = $8,
-		    updated_at = $9
+		    filters = $5,
+		    status = $6,
+		    retry_policy = $7,
+		    headers = $8,
+		    metadata = $9,
+		    updated_at = $10
 		WHERE id = $1`
 
 	result, err := r.db.ExecContext(ctx, query,
@@ -418,6 +458,7 @@ func (r *PostgresRepository) UpdateSubscription(ctx context.Context, sub *Subscr
 		sub.URL,
 		sub.Secret,
 		pq.Array(sub.EventTypes),
+		filtersJSON,
 		sub.Status,
 		retryPolicyJSON,
 		headersJSON,
@@ -476,7 +517,7 @@ func (r *PostgresRepository) DeleteSubscription(ctx context.Context, id string) 
 // Returns an empty slice if no subscriptions match.
 func (r *PostgresRepository) ListSubscriptions(ctx context.Context, filter *SubscriptionFilter) ([]*Subscription, error) {
 	query := `
-		SELECT id, tenant_id, url, secret, event_types, status,
+		SELECT id, tenant_id, url, secret, event_types, filters, status,
 		       retry_policy, headers, metadata, created_at, updated_at
 		FROM subscriptions
 		WHERE 1=1`
@@ -552,6 +593,7 @@ func (r *PostgresRepository) ListSubscriptions(ctx context.Context, filter *Subs
 // =============================================================================
 
 // CreateDelivery creates a new delivery in the database.
+// Supports both subscription-based and inline deliveries (with url/secret).
 func (r *PostgresRepository) CreateDelivery(ctx context.Context, delivery *Delivery) error {
 	// Marshal payload JSONB
 	payloadJSON, err := marshalJSONB(delivery.Payload)
@@ -559,21 +601,38 @@ func (r *PostgresRepository) CreateDelivery(ctx context.Context, delivery *Deliv
 		return err // Already wrapped as ExternalError by marshalJSONB
 	}
 
+	// Handle nullable subscription_id for inline deliveries
+	var subscriptionID any
+	if delivery.SubscriptionID != "" {
+		subscriptionID = delivery.SubscriptionID
+	}
+
+	// Handle nullable url/secret for subscription-based deliveries
+	var url, secret any
+	if delivery.URL != "" {
+		url = delivery.URL
+	}
+	if delivery.Secret != "" {
+		secret = delivery.Secret
+	}
+
 	query := `
 		INSERT INTO deliveries (
 			id, subscription_id, tenant_id, event_type, payload,
-			status, attempt_count, max_attempts, next_retry_at,
-			completed_at, created_at
+			url, secret, status, attempt_count, max_attempts,
+			next_retry_at, completed_at, created_at
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
 		)`
 
 	_, err = r.db.ExecContext(ctx, query,
 		delivery.ID,
-		delivery.SubscriptionID,
+		subscriptionID,
 		delivery.TenantID,
 		delivery.EventType,
 		payloadJSON,
+		url,
+		secret,
 		delivery.Status,
 		delivery.AttemptCount,
 		delivery.MaxAttempts,
@@ -596,8 +655,8 @@ func (r *PostgresRepository) CreateDelivery(ctx context.Context, delivery *Deliv
 func (r *PostgresRepository) GetDelivery(ctx context.Context, id string) (*Delivery, error) {
 	query := `
 		SELECT id, subscription_id, tenant_id, event_type, payload,
-		       status, attempt_count, max_attempts, next_retry_at,
-		       completed_at, created_at
+		       url, secret, status, attempt_count, max_attempts,
+		       next_retry_at, completed_at, created_at
 		FROM deliveries
 		WHERE id = $1`
 
@@ -625,25 +684,44 @@ func (r *PostgresRepository) UpdateDelivery(ctx context.Context, delivery *Deliv
 		return err // Already wrapped as ExternalError by marshalJSONB
 	}
 
+	// Handle nullable subscription_id for inline deliveries
+	var subscriptionID any
+	if delivery.SubscriptionID != "" {
+		subscriptionID = delivery.SubscriptionID
+	}
+
+	// Handle nullable url/secret for subscription-based deliveries
+	var url, secret any
+	if delivery.URL != "" {
+		url = delivery.URL
+	}
+	if delivery.Secret != "" {
+		secret = delivery.Secret
+	}
+
 	query := `
 		UPDATE deliveries
 		SET subscription_id = $2,
 		    tenant_id = $3,
 		    event_type = $4,
 		    payload = $5,
-		    status = $6,
-		    attempt_count = $7,
-		    max_attempts = $8,
-		    next_retry_at = $9,
-		    completed_at = $10
+		    url = $6,
+		    secret = $7,
+		    status = $8,
+		    attempt_count = $9,
+		    max_attempts = $10,
+		    next_retry_at = $11,
+		    completed_at = $12
 		WHERE id = $1`
 
 	result, err := r.db.ExecContext(ctx, query,
 		delivery.ID,
-		delivery.SubscriptionID,
+		subscriptionID,
 		delivery.TenantID,
 		delivery.EventType,
 		payloadJSON,
+		url,
+		secret,
 		delivery.Status,
 		delivery.AttemptCount,
 		delivery.MaxAttempts,
@@ -677,8 +755,8 @@ func (r *PostgresRepository) UpdateDelivery(ctx context.Context, delivery *Deliv
 func (r *PostgresRepository) GetPendingDeliveries(ctx context.Context, limit int) ([]*Delivery, error) {
 	query := `
 		SELECT id, subscription_id, tenant_id, event_type, payload,
-		       status, attempt_count, max_attempts, next_retry_at,
-		       completed_at, created_at
+		       url, secret, status, attempt_count, max_attempts,
+		       next_retry_at, completed_at, created_at
 		FROM deliveries
 		WHERE status = $1
 		  AND (next_retry_at IS NULL OR next_retry_at <= NOW())
@@ -721,8 +799,8 @@ func (r *PostgresRepository) GetPendingDeliveries(ctx context.Context, limit int
 func (r *PostgresRepository) ListDeliveries(ctx context.Context, filter *DeliveryFilter) ([]*Delivery, error) {
 	query := `
 		SELECT id, subscription_id, tenant_id, event_type, payload,
-		       status, attempt_count, max_attempts, next_retry_at,
-		       completed_at, created_at
+		       url, secret, status, attempt_count, max_attempts,
+		       next_retry_at, completed_at, created_at
 		FROM deliveries
 		WHERE 1=1`
 
@@ -897,9 +975,9 @@ func (r *PostgresRepository) CreateDeliveryAttempt(ctx context.Context, attempt 
 	query := `
 		INSERT INTO delivery_attempts (
 			id, delivery_id, attempt_number, status_code,
-			response_body, response_headers, error, attempted_at
+			response_body, response_headers, error, duration_ms, attempted_at
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8
+			$1, $2, $3, $4, $5, $6, $7, $8, $9
 		)`
 
 	_, err = r.db.ExecContext(ctx, query,
@@ -910,6 +988,7 @@ func (r *PostgresRepository) CreateDeliveryAttempt(ctx context.Context, attempt 
 		attempt.ResponseBody,
 		responseHeadersJSON,
 		attempt.Error,
+		attempt.DurationMs,
 		attempt.AttemptedAt,
 	)
 
@@ -932,7 +1011,7 @@ func (r *PostgresRepository) CreateDeliveryAttempt(ctx context.Context, attempt 
 func (r *PostgresRepository) GetDeliveryAttempts(ctx context.Context, deliveryID string) ([]*DeliveryAttempt, error) {
 	query := `
 		SELECT id, delivery_id, attempt_number, status_code,
-		       response_body, response_headers, error, attempted_at
+		       response_body, response_headers, error, duration_ms, attempted_at
 		FROM delivery_attempts
 		WHERE delivery_id = $1
 		ORDER BY attempt_number ASC`

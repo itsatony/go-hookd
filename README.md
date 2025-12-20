@@ -4,7 +4,7 @@ A webhook delivery management library for Go applications. Handles webhook subsc
 
 [![Go Version](https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat&logo=go)](https://golang.org)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Test Coverage](https://img.shields.io/badge/coverage-80%25+-green.svg)](https://github.com/itsatony/go-hookd)
+[![Test Coverage](https://img.shields.io/badge/coverage-60%25-yellow.svg)](https://github.com/itsatony/go-hookd)
 
 > **Status**: Production Ready (v0.3.0)
 > Core functionality is implemented, tested, and production-ready. The API is stable with comprehensive test coverage.

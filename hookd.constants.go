@@ -522,3 +522,61 @@ const (
 	// OperationRetryDelivery is the retry delivery operation name.
 	OperationRetryDelivery = "RetryDelivery"
 )
+
+// HTTP Constants - Methods and Content Types.
+const (
+	// HTTPMethodPost is the POST HTTP method.
+	HTTPMethodPost = "POST"
+
+	// HTTPMethodGet is the GET HTTP method.
+	HTTPMethodGet = "GET"
+
+	// ContentTypeJSON is the JSON content type.
+	ContentTypeJSON = "application/json"
+)
+
+// User-Agent Constants.
+const (
+	// UserAgentPrefix is the prefix for the user agent string.
+	UserAgentPrefix = "go-hookd"
+
+	// UserAgentVersion is the current version for user agent.
+	// This should match versions.yaml project.version.
+	UserAgentVersion = "0.3.0"
+)
+
+// UserAgent is the complete user agent string used for webhook deliveries.
+var UserAgent = UserAgentPrefix + "/" + UserAgentVersion
+
+// Test Subscription Constants.
+const (
+	// TestPingMessage is the message included in test ping payloads.
+	TestPingMessage = "This is a test ping from go-hookd. Your webhook endpoint is being verified."
+
+	// TestPingDeliveryID is the pseudo-delivery ID for test pings.
+	TestPingDeliveryID = "test_ping"
+
+	// TestSubscriptionCooldownSeconds is the minimum seconds between TestSubscription calls.
+	TestSubscriptionCooldownSeconds = 10
+)
+
+// Error Messages - Manager.
+const (
+	// ErrMsgRepositoryRequired is the error message when repository is nil.
+	ErrMsgRepositoryRequired = "repository is required"
+
+	// ErrMsgCreateLoggerFailed is the error message when logger creation fails.
+	ErrMsgCreateLoggerFailed = "failed to create default logger"
+
+	// ErrMsgMarshalTestPayload is the error message when test payload marshaling fails.
+	ErrMsgMarshalTestPayload = "failed to marshal test payload"
+
+	// ErrMsgCreateRequest is the error message when HTTP request creation fails.
+	ErrMsgCreateRequest = "failed to create request"
+
+	// ErrMsgEndpointStatusFmt is the format string for endpoint status errors.
+	ErrMsgEndpointStatusFmt = "endpoint returned status %d"
+
+	// ErrMsgRateLimited is the error message for rate limited requests.
+	ErrMsgRateLimited = "test subscription rate limited, try again in %d seconds"
+)

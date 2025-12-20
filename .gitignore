@@ -54,8 +54,22 @@ dist/
 # Test outputs
 TEST_*.md
 TEST_*.txt
-full_test_run.log
+test-output.txt
+full_test*.log
+*_test_*.log
 
-# Coverage baseline tracking
+# Coverage artifacts
 .coverage-baseline.json
 coverage-report.txt
+coverage*.out
+*.coverprofile
+
+# HTML reports
+*.html
+
+# Test metrics
+*_metrics.json
+test_metrics.json
+
+# IDE-specific
+.env.local

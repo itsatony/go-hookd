@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/itsatony/go-cuserr"
 	"go.uber.org/zap"
 )
 
@@ -507,6 +508,16 @@ func (m *Manager) DisableSubscription(ctx context.Context, id string) (*Subscrip
 //	    fmt.Printf("Endpoint failed: %s\n", result.Error)
 //	}
 func (m *Manager) TestSubscription(ctx context.Context, subscriptionID string) (*TestResult, error) {
+	// Rate limiting check - prevent abuse of TestSubscription
+	cooldown := time.Duration(TestSubscriptionCooldownSeconds) * time.Second
+	if lastTest, ok := m.testRateLimiter.Load(subscriptionID); ok {
+		if time.Since(lastTest.(time.Time)) < cooldown {
+			return nil, cuserr.NewValidationError("subscription_id",
+				fmt.Sprintf(ErrMsgRateLimited, TestSubscriptionCooldownSeconds))
+		}
+	}
+	m.testRateLimiter.Store(subscriptionID, time.Now())
+
 	// Get subscription
 	sub, err := m.GetSubscription(ctx, subscriptionID)
 	if err != nil {
@@ -517,7 +528,7 @@ func (m *Manager) TestSubscription(ctx context.Context, subscriptionID string) (
 	testPayload := map[string]any{
 		"type":      EventTypeTestPing,
 		"timestamp": time.Now().Unix(),
-		"message":   "This is a test ping from go-hookd. Your webhook endpoint is being verified.",
+		"message":   TestPingMessage,
 	}
 
 	// Marshal payload
@@ -525,22 +536,22 @@ func (m *Manager) TestSubscription(ctx context.Context, subscriptionID string) (
 	if err != nil {
 		return &TestResult{
 			Success: false,
-			Error:   "failed to marshal test payload: " + err.Error(),
+			Error:   ErrMsgMarshalTestPayload + ": " + err.Error(),
 		}, nil
 	}
 
 	// Create HTTP request
-	req, err := http.NewRequestWithContext(ctx, "POST", sub.URL, bytes.NewReader(payloadJSON))
+	req, err := http.NewRequestWithContext(ctx, HTTPMethodPost, sub.URL, bytes.NewReader(payloadJSON))
 	if err != nil {
 		return &TestResult{
 			Success: false,
-			Error:   "failed to create request: " + err.Error(),
+			Error:   ErrMsgCreateRequest + ": " + err.Error(),
 		}, nil
 	}
 
 	// Set headers (same as real deliveries)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "go-hookd/0.1.0")
+	req.Header.Set("Content-Type", ContentTypeJSON)
+	req.Header.Set("User-Agent", UserAgent)
 
 	// Add custom headers from subscription
 	for key, value := range sub.Headers {
@@ -552,7 +563,7 @@ func (m *Manager) TestSubscription(ctx context.Context, subscriptionID string) (
 	signature := calculateSignature(sub.Secret, timestamp, payloadJSON)
 	req.Header.Set(HeaderSignature, signature)
 	req.Header.Set(HeaderTimestamp, timestamp)
-	req.Header.Set(HeaderDeliveryID, "test_ping")
+	req.Header.Set(HeaderDeliveryID, TestPingDeliveryID)
 	req.Header.Set(HeaderSubscriptionID, sub.ID)
 	req.Header.Set(HeaderEventType, EventTypeTestPing)
 	req.Header.Set(HeaderAttemptNumber, "1")
@@ -587,7 +598,7 @@ func (m *Manager) TestSubscription(ctx context.Context, subscriptionID string) (
 	}
 
 	if !success {
-		result.Error = fmt.Sprintf("endpoint returned status %d", resp.StatusCode)
+		result.Error = fmt.Sprintf(ErrMsgEndpointStatusFmt, resp.StatusCode)
 	}
 
 	m.logger.Info("subscription test completed",
