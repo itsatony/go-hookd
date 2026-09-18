@@ -6,9 +6,15 @@ A webhook delivery management library for Go applications. Handles webhook subsc
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Test Coverage](https://img.shields.io/badge/coverage-60%25-yellow.svg)](https://github.com/itsatony/go-hookd)
 
-> **Status**: Production Ready (v0.6.0)
+> **Status**: Production Ready (v0.7.0)
 > Core functionality is implemented, tested, and production-ready. The API is stable with comprehensive test coverage.
 >
+> **v0.7.0**: The worker pool now backs off while the delivery queue is empty, so its
+> idle database cost is proportional to traffic rather than to `WorkerCount`. Tune with
+> `Config.QueueIdleMaxInterval` / `QueueIdleBackoffFactor`, and call `Manager.Notify()`
+> after committing a delivery to keep latency independent of the ceiling.
+> See [Idle polling and Notify](#idle-polling-and-notify).
+
 > **v0.6.0 Breaking Change**: Database tables now use configurable prefixes: `{prefix}_hookd_{table}` (e.g., `myapp_hookd_subscriptions`). The prefix is **required** via `WithTablePrefix("myapp")`. Schema is managed via `SchemaManager.EnsureSchema(ctx)` instead of migrations.
 
 ## What is go-hookd?
@@ -282,6 +288,10 @@ config.WorkerCount = 10                    // Number of concurrent delivery work
 config.QueuePollInterval = 1000            // How often to check for pending deliveries (ms)
 config.MaxBatchSize = 100                  // Max deliveries to fetch per poll
 
+// Idle Polling (see "Idle polling and Notify")
+config.QueueIdleMaxInterval = 30000        // Poll interval ceiling while the queue is empty (ms)
+config.QueueIdleBackoffFactor = 2.0        // Widen the interval by this much per empty poll (1.0 = off)
+
 // Retry Configuration
 config.DefaultMaxRetries = 3               // Default retry attempts (overridable per subscription)
 config.DefaultInitialBackoffMs = 1000      // First retry after 1s
@@ -302,6 +312,42 @@ config.IdempotencyTTLHours = 24            // How long to remember idempotency k
 // Shutdown Configuration
 config.ShutdownTimeoutMs = 30000           // Max time to wait for graceful shutdown
 ```
+
+### Idle polling and Notify
+
+The pool's steady-state query rate against the deliveries table is
+`WorkerCount / QueuePollInterval`, and it is paid whether or not anything is ever
+enqueued. At the defaults that is **10 queries per second, forever** — which is what a
+production deployment of this library was measured doing against a queue that had been
+empty for its entire life, accounting for 81 % of all statements on that database.
+
+Since v0.7.0 a worker widens its own poll interval after each poll that finds nothing,
+by `QueueIdleBackoffFactor`, up to `QueueIdleMaxInterval`. At the defaults an idle pool
+settles at `WorkerCount / 30s` — a 30x reduction — and the interval snaps back to
+`QueuePollInterval` the instant a poll returns work, so **backoff never slows a queue
+that has work in it**. Wake-ups carry ±20 % jitter, because every worker is started in
+the same loop and would otherwise poll in lockstep.
+
+The cost is first-delivery latency: a delivery enqueued into an idle pool waits up to
+`QueueIdleMaxInterval` to be noticed. Callers that create deliveries in the same process
+should remove that cost by waking a worker directly:
+
+```go
+if err := repo.CreateDelivery(ctx, delivery); err != nil {
+    return err
+}
+manager.Notify() // poll now instead of on the next scheduled tick
+```
+
+`Notify` never blocks and is safe before `Start` and after `Stop`. Callers that do not
+call it remain correct and simply wait for the next poll.
+
+To opt out entirely, set `QueueIdleMaxInterval` equal to `QueuePollInterval`, or
+`QueueIdleBackoffFactor` to `1.0`.
+
+⚠ Both fields default when left at their zero value, so a `Config` built as a struct
+literal by code that predates them keeps working — an upgrade does not become a boot
+failure. An explicitly set out-of-range value is still refused.
 
 ### Understanding Retry Logic
 
@@ -932,7 +978,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for full guidelines.
 
 ## Project Status
 
-**Current Version**: v0.6.0 (Production Ready)
+**Current Version**: v0.7.0 (Production Ready)
 
 **What's Implemented:**
 - ✓ Core subscription and delivery management

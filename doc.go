@@ -78,6 +78,13 @@
 //	config.QueuePollInterval = 1000      // Queue polling interval (ms)
 //	config.MaxBatchSize = 100            // Deliveries per poll
 //
+//	// Idle polling: while the queue is empty a worker widens its own poll interval
+//	// up to the ceiling, so the pool's idle database cost is proportional to traffic
+//	// rather than to WorkerCount. Call Manager.Notify after committing a delivery to
+//	// keep latency independent of the ceiling.
+//	config.QueueIdleMaxInterval = 30000  // Idle poll ceiling (ms); == QueuePollInterval disables
+//	config.QueueIdleBackoffFactor = 2.0  // Widening per empty poll; 1.0 disables
+//
 //	// Retry configuration
 //	config.MaxRetries = 3                // Maximum retry attempts
 //	config.InitialBackoffMs = 1000       // Initial backoff (ms)

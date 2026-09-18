@@ -196,6 +196,20 @@ const (
 
 	// DefaultDeliveryTimeoutMs is the default HTTP delivery timeout in milliseconds.
 	DefaultDeliveryTimeoutMs = 30000 // 30 seconds
+
+	// DefaultQueueIdleMaxIntervalMs is the default upper bound, in milliseconds, for
+	// the adaptive poll interval a worker backs off to while the queue stays empty.
+	// Set equal to QueuePollInterval to disable idle backoff.
+	DefaultQueueIdleMaxIntervalMs = 30000 // 30 seconds
+
+	// DefaultQueueIdleBackoffFactor is the default multiplier applied to a worker's
+	// poll interval after a poll that found no deliveries. 1.0 disables idle backoff.
+	DefaultQueueIdleBackoffFactor = 2.0
+
+	// QueueIdleJitterFraction is the fraction of the computed idle interval applied
+	// as random jitter, spreading the wake-ups of a worker pool that would otherwise
+	// have been started within the same microsecond and would poll in lockstep.
+	QueueIdleJitterFraction = 0.2
 )
 
 // Default Configuration Values - Circuit Breaker.
@@ -364,6 +378,12 @@ const (
 
 	// ErrMsgInvalidPollInterval is the error message for invalid poll interval.
 	ErrMsgInvalidPollInterval = "queue_poll_interval must be at least 1ms"
+
+	// ErrMsgInvalidIdleMaxInterval is the error message for an idle ceiling below the base interval.
+	ErrMsgInvalidIdleMaxInterval = "queue_idle_max_interval must be >= queue_poll_interval"
+
+	// ErrMsgInvalidIdleBackoffFactor is the error message for an invalid idle backoff factor.
+	ErrMsgInvalidIdleBackoffFactor = "queue_idle_backoff_factor must be >= 1.0"
 
 	// ErrMsgInvalidDeliveryTimeout is the error message for invalid delivery timeout.
 	ErrMsgInvalidDeliveryTimeout = "delivery_timeout must be at least 1s"

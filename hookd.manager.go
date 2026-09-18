@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net/http"
 	"sync"
 	"time"
@@ -43,6 +44,7 @@ type Manager struct {
 	httpClient      *http.Client
 	cancel          context.CancelFunc
 	workerSem       chan struct{}
+	wake            chan struct{}
 	wg              sync.WaitGroup
 	startedMu       sync.RWMutex
 	started         bool
@@ -104,6 +106,7 @@ func NewManager(config *Config, repo Repository, opts ...ManagerOption) (*Manage
 		logger:     logger,
 		httpClient: httpClient,
 		workerSem:  make(chan struct{}, config.WorkerCount),
+		wake:       make(chan struct{}, config.WorkerCount),
 	}
 
 	// Apply options
@@ -183,6 +186,8 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.logger.Info("manager started",
 		zap.Int("worker_count", m.config.WorkerCount),
 		zap.Int("poll_interval_ms", m.config.QueuePollInterval),
+		zap.Int("idle_max_interval_ms", m.config.QueueIdleMaxInterval),
+		zap.Float64("idle_backoff_factor", m.config.QueueIdleBackoffFactor),
 	)
 
 	return nil
@@ -249,31 +254,130 @@ func (m *Manager) workerLoop(workerID int) {
 
 	m.logger.Debug("worker started", zap.Int("worker_id", workerID))
 
-	pollInterval := time.Duration(m.config.QueuePollInterval) * time.Millisecond
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
+	base := m.config.QueuePollIntervalDuration()
+	ceiling := m.config.QueueIdleMaxIntervalDuration()
+	interval := base
+
+	timer := time.NewTimer(jitter(interval))
+	defer timer.Stop()
+
+	// nextDelay is the delay for the upcoming timer reset. It is normally a jittered
+	// interval, and immediate after a wake-up, which is what makes Notify worth
+	// calling: an enqueueing caller gets a poll now rather than one interval from now.
+	var nextDelay time.Duration
 
 	for {
+		nextDelay = 0
 		select {
 		case <-m.ctx.Done():
 			m.logger.Debug("worker stopping", zap.Int("worker_id", workerID))
 			return
 
-		case <-ticker.C:
+		case <-m.wake:
+			// An enqueueing caller told us there is work. Drop any backoff so the
+			// delivery is picked up at the base interval rather than at the ceiling,
+			// and poll immediately rather than waiting out the interval.
+			interval = base
+			nextDelay = time.Millisecond
+
+		case <-timer.C:
 			// Acquire semaphore slot
 			m.workerSem <- struct{}{}
 
 			// Process deliveries
-			m.processDeliveries(workerID)
+			found := m.processDeliveries(workerID)
 
 			// Release semaphore slot
 			<-m.workerSem
+
+			// A poll that found work means the queue is active: return to the base
+			// interval immediately, so backoff can never slow a busy queue. A poll
+			// that found nothing widens the interval towards the ceiling, making the
+			// idle cost of the pool proportional to traffic rather than to
+			// WorkerCount.
+			if found > 0 {
+				interval = base
+			} else {
+				interval = nextIdleInterval(interval, base, ceiling, m.config.QueueIdleBackoffFactor)
+			}
 		}
+
+		if !timer.Stop() {
+			// Drain only if the fire has not already been consumed by this
+			// iteration's select; a non-blocking receive is correct for both paths.
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		if nextDelay == 0 {
+			nextDelay = jitter(interval)
+		}
+		timer.Reset(nextDelay)
+	}
+}
+
+// nextIdleInterval returns the poll interval a worker should use after a poll that
+// found no deliveries: the current interval multiplied by factor, clamped to
+// [base, ceiling]. A factor of 1.0 or a ceiling equal to base holds the interval
+// fixed, which is how idle backoff is switched off.
+func nextIdleInterval(current, base, ceiling time.Duration, factor float64) time.Duration {
+	if factor <= 1.0 || ceiling <= base {
+		return base
+	}
+	next := time.Duration(float64(current) * factor)
+	if next > ceiling {
+		return ceiling
+	}
+	if next < base {
+		return base
+	}
+	return next
+}
+
+// jitter spreads a worker's next wake-up by +/- QueueIdleJitterFraction of d.
+//
+// Every worker in a pool is started inside the same loop and therefore polls in
+// lockstep, which turns an idle pool into a burst of WorkerCount identical queries
+// on one instant rather than a spread of single queries. The jitter is applied to
+// the scheduled delay only; it never changes the average rate.
+func jitter(d time.Duration) time.Duration {
+	if d <= 0 {
+		return d
+	}
+	span := float64(d) * QueueIdleJitterFraction
+	offset := (rand.Float64()*2 - 1) * span //nolint:gosec // scheduling spread, not security
+	next := time.Duration(float64(d) + offset)
+	if next < time.Millisecond {
+		return time.Millisecond
+	}
+	return next
+}
+
+// Notify tells the worker pool that a delivery may be waiting, waking one worker
+// immediately instead of leaving it to discover the work on its next poll.
+//
+// It is safe to call at any time, including before Start and after Stop, and never
+// blocks: if every worker already has a pending wake-up, the call is a no-op
+// because the work will be picked up regardless.
+//
+// Callers that create deliveries in the same process should call Notify after the
+// delivery is committed. Doing so makes delivery latency independent of
+// QueueIdleMaxInterval; callers that do not are still correct, and simply wait up
+// to that ceiling for the next poll.
+func (m *Manager) Notify() {
+	select {
+	case m.wake <- struct{}{}:
+	default:
 	}
 }
 
 // processDeliveries fetches and processes pending deliveries.
-func (m *Manager) processDeliveries(workerID int) {
+//
+// It returns the number of deliveries the poll found, which the worker loop uses to
+// decide whether to back off. A failed poll returns 0: an unreachable database is
+// the case where backing off is most wanted, not least.
+func (m *Manager) processDeliveries(workerID int) int {
 	ctx, cancel := context.WithTimeout(m.ctx, 30*time.Second)
 	defer cancel()
 
@@ -284,13 +388,15 @@ func (m *Manager) processDeliveries(workerID int) {
 			zap.Int("worker_id", workerID),
 			zap.Error(err),
 		)
-		return
+		return 0
 	}
 
 	// Process each delivery
 	for _, delivery := range deliveries {
 		m.processDelivery(ctx, delivery)
 	}
+
+	return len(deliveries)
 }
 
 // processDelivery processes a single delivery.

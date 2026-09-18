@@ -27,6 +27,21 @@ type Config struct {
 	DeliveryTimeoutMs int // HTTP delivery timeout in milliseconds (default: 30000)
 	MaxBatchSize      int // Maximum deliveries to fetch per poll (default: 100)
 
+	// QueueIdleMaxInterval is the ceiling, in milliseconds, that a worker's poll
+	// interval backs off to while consecutive polls return no deliveries
+	// (default: 30000). Set equal to QueuePollInterval to poll at a fixed rate.
+	//
+	// The idle rate of a pool is WorkerCount/QueuePollInterval, which is paid
+	// continuously whether or not anything is enqueued; backoff makes that cost
+	// proportional to traffic instead of to worker count. A worker resets to
+	// QueuePollInterval the moment a poll returns work or Manager.Notify is called,
+	// so backoff never slows a queue that has work in it.
+	QueueIdleMaxInterval int
+
+	// QueueIdleBackoffFactor is the multiplier applied to a worker's poll interval
+	// after an empty poll (default: 2.0). 1.0 disables idle backoff.
+	QueueIdleBackoffFactor float64
+
 	// Retry policy defaults (can be overridden per-subscription)
 	DefaultMaxRetries       int     // Maximum retry attempts (default: 10)
 	DefaultInitialBackoffMs int     // Initial backoff in milliseconds (default: 1000)
@@ -66,6 +81,9 @@ func NewConfig(databaseURL string) *Config {
 		QueuePollInterval: DefaultQueuePollIntervalMs,
 		DeliveryTimeoutMs: DefaultDeliveryTimeoutMs,
 		MaxBatchSize:      100,
+
+		QueueIdleMaxInterval:   DefaultQueueIdleMaxIntervalMs,
+		QueueIdleBackoffFactor: DefaultQueueIdleBackoffFactor,
 
 		// Retry policy
 		DefaultMaxRetries:       DefaultMaxRetries,
@@ -143,6 +161,29 @@ func (c *Config) validateWorkerPool() error {
 	if c.MaxBatchSize < 1 {
 		return NewConfigurationError("max_batch_size", ErrMsgInvalidMaxBatchSize)
 	}
+	// A Config built as a struct literal by a caller that predates these two fields
+	// carries their zero values. Refusing that would turn a library upgrade into a
+	// boot failure for every such caller, so an unset field adopts the default here
+	// rather than being reported as an invalid one. Only the zero value is treated
+	// this way: any explicitly set out-of-range value below is still refused.
+	if c.QueueIdleMaxInterval == 0 {
+		// Never below the caller's own base interval: a caller that set a poll
+		// interval slower than the default ceiling must not be refused for a field
+		// it never named.
+		c.QueueIdleMaxInterval = DefaultQueueIdleMaxIntervalMs
+		if c.QueuePollInterval > c.QueueIdleMaxInterval {
+			c.QueueIdleMaxInterval = c.QueuePollInterval
+		}
+	}
+	if c.QueueIdleBackoffFactor == 0 {
+		c.QueueIdleBackoffFactor = DefaultQueueIdleBackoffFactor
+	}
+	if c.QueueIdleMaxInterval < c.QueuePollInterval {
+		return NewConfigurationError("queue_idle_max_interval", ErrMsgInvalidIdleMaxInterval)
+	}
+	if c.QueueIdleBackoffFactor < 1.0 {
+		return NewConfigurationError("queue_idle_backoff_factor", ErrMsgInvalidIdleBackoffFactor)
+	}
 	return nil
 }
 
@@ -201,6 +242,11 @@ func (c *Config) validateShutdown() error {
 // QueuePollIntervalDuration returns the queue poll interval as a time.Duration.
 func (c *Config) QueuePollIntervalDuration() time.Duration {
 	return time.Duration(c.QueuePollInterval) * time.Millisecond
+}
+
+// QueueIdleMaxIntervalDuration returns the idle poll ceiling as a time.Duration.
+func (c *Config) QueueIdleMaxIntervalDuration() time.Duration {
+	return time.Duration(c.QueueIdleMaxInterval) * time.Millisecond
 }
 
 // DeliveryTimeout returns the delivery timeout as a time.Duration.
