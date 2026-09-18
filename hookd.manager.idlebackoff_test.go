@@ -320,3 +320,81 @@ func TestConfigIdleBackoffValidation(t *testing.T) {
 		})
 	}
 }
+
+// TestEveryEnqueuePathWakesTheWorkerPool pins the property that a caller never has to
+// know about Notify: every Manager entry point that leaves a delivery in `pending`
+// wakes the pool itself.
+//
+// Without this the idle backoff would trade a real database saving for a delivery
+// latency of up to QueueIdleMaxInterval on the library's own public API, which is not a
+// trade any consumer asked for.
+func TestEveryEnqueuePathWakesTheWorkerPool(t *testing.T) {
+	// drain empties the wake channel so each subtest observes only its own signal.
+	drain := func(m *Manager) {
+		for {
+			select {
+			case <-m.wake:
+			default:
+				return
+			}
+		}
+	}
+
+	tests := []struct {
+		name   string
+		invoke func(t *testing.T, m *Manager, repo *MockRepository)
+	}{
+		{
+			name: "QueueInlineDelivery",
+			invoke: func(t *testing.T, m *Manager, _ *MockRepository) {
+				if _, err := m.QueueInlineDelivery(context.Background(), &QueueInlineDeliveryRequest{
+					URL:       "https://example.test/hook",
+					TenantID:  "t1",
+					EventType: "thing.happened",
+					Payload:   map[string]any{"a": 1},
+				}); err != nil {
+					t.Fatalf("QueueInlineDelivery: %v", err)
+				}
+			},
+		},
+		{
+			name: "RetryDelivery",
+			invoke: func(t *testing.T, m *Manager, repo *MockRepository) {
+				d := &Delivery{
+					ID: "d-retry", TenantID: "t1", EventType: "thing.happened",
+					URL: "https://example.test/hook", Status: DeliveryStatusFailed,
+					MaxAttempts: 3, CreatedAt: time.Now(),
+				}
+				if err := repo.CreateDelivery(context.Background(), d); err != nil {
+					t.Fatalf("seed CreateDelivery: %v", err)
+				}
+				if _, err := m.RetryDelivery(context.Background(), d.ID); err != nil {
+					t.Fatalf("RetryDelivery: %v", err)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := NewMockRepository()
+			cfg := NewConfig("postgres://test")
+			cfg.WorkerCount = 1
+			m, err := NewManager(cfg, repo)
+			if err != nil {
+				t.Fatalf("NewManager: %v", err)
+			}
+			// Deliberately NOT started: the wake must be queued by the enqueue path
+			// itself, not by a running worker happening to poll.
+			drain(m)
+
+			tt.invoke(t, m, repo)
+
+			select {
+			case <-m.wake:
+			default:
+				t.Errorf("%s persisted a pending delivery without waking the worker pool", tt.name)
+			}
+		})
+	}
+}

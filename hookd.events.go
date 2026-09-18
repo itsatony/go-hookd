@@ -169,6 +169,11 @@ func (m *Manager) QueueDelivery(ctx context.Context, req *QueueDeliveryRequest) 
 	// Publish delivery queued event
 	m.publishDeliveryEvent(EventTopicDeliveryQueued, delivery, sub, nil)
 
+	// Wake a worker rather than leaving the delivery to be discovered on the next
+	// scheduled poll, which an idle pool may have backed off by up to
+	// QueueIdleMaxInterval.
+	m.Notify()
+
 	return delivery, nil
 }
 
@@ -284,6 +289,11 @@ func (m *Manager) QueueInlineDelivery(ctx context.Context, req *QueueInlineDeliv
 
 	// Publish delivery queued event (no subscription)
 	m.publishDeliveryEvent(EventTopicDeliveryQueued, delivery, nil, nil)
+
+	// Wake a worker rather than leaving the delivery to be discovered on the next
+	// scheduled poll, which an idle pool may have backed off by up to
+	// QueueIdleMaxInterval.
+	m.Notify()
 
 	return delivery, nil
 }
@@ -421,6 +431,10 @@ func (m *Manager) RetryDelivery(ctx context.Context, deliveryID string) (*Delive
 		zap.String("delivery_id", delivery.ID),
 		zap.String("subscription_id", delivery.SubscriptionID),
 	)
+
+	// A manual retry returns the delivery to pending, so it is an enqueue as far as
+	// the worker pool is concerned and must wake it like any other.
+	m.Notify()
 
 	return delivery, nil
 }

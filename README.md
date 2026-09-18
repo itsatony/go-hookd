@@ -6,10 +6,10 @@ A webhook delivery management library for Go applications. Handles webhook subsc
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Test Coverage](https://img.shields.io/badge/coverage-60%25-yellow.svg)](https://github.com/itsatony/go-hookd)
 
-> **Status**: Production Ready (v0.7.0)
+> **Status**: Production Ready (v0.7.1)
 > Core functionality is implemented, tested, and production-ready. The API is stable with comprehensive test coverage.
 >
-> **v0.7.0**: The worker pool now backs off while the delivery queue is empty, so its
+> **v0.7.x**: The worker pool now backs off while the delivery queue is empty, so its
 > idle database cost is proportional to traffic rather than to `WorkerCount`. Tune with
 > `Config.QueueIdleMaxInterval` / `QueueIdleBackoffFactor`, and call `Manager.Notify()`
 > after committing a delivery to keep latency independent of the ceiling.
@@ -328,19 +328,24 @@ settles at `WorkerCount / 30s` — a 30x reduction — and the interval snaps ba
 that has work in it**. Wake-ups carry ±20 % jitter, because every worker is started in
 the same loop and would otherwise poll in lockstep.
 
-The cost is first-delivery latency: a delivery enqueued into an idle pool waits up to
-`QueueIdleMaxInterval` to be noticed. Callers that create deliveries in the same process
-should remove that cost by waking a worker directly:
+The cost would be first-delivery latency — a delivery enqueued into an idle pool waiting
+up to `QueueIdleMaxInterval` to be noticed — so **every Manager entry point that leaves a
+delivery pending wakes the pool itself**: `QueueDelivery`, `QueueInlineDelivery`,
+`QueueDeliveries` and `RetryDelivery`. Consumers using the Manager API need no change and
+lose no latency.
+
+`Manager.Notify()` is exported for the one case the library cannot see: a caller that
+writes to the deliveries table through its own repository handle or through
+`RepositoryTx`, outside the Manager API. It never blocks and is safe before `Start` and
+after `Stop`.
 
 ```go
-if err := repo.CreateDelivery(ctx, delivery); err != nil {
+if err := tx.CreateDelivery(ctx, delivery); err != nil {
     return err
 }
+// after the transaction commits:
 manager.Notify() // poll now instead of on the next scheduled tick
 ```
-
-`Notify` never blocks and is safe before `Start` and after `Stop`. Callers that do not
-call it remain correct and simply wait for the next poll.
 
 To opt out entirely, set `QueueIdleMaxInterval` equal to `QueuePollInterval`, or
 `QueueIdleBackoffFactor` to `1.0`.
@@ -978,7 +983,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for full guidelines.
 
 ## Project Status
 
-**Current Version**: v0.7.0 (Production Ready)
+**Current Version**: v0.7.1 (Production Ready)
 
 **What's Implemented:**
 - ✓ Core subscription and delivery management
