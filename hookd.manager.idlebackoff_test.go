@@ -398,3 +398,69 @@ func TestEveryEnqueuePathWakesTheWorkerPool(t *testing.T) {
 		})
 	}
 }
+
+// TestRetryDeadLetterWakesABackedOffWorker pins the enqueue path that v0.7.1
+// did not reach.
+//
+// A dead letter reset to pending IS an enqueue: the row is claimable the moment
+// UpdateDelivery commits. The three QueueDelivery paths wake the pool; this one
+// did not, and the state it runs in is exactly the one where that matters — a
+// dead-letter sweep fires against a queue that has been empty long enough to
+// have climbed to the ceiling. Without the wake the redrive is held for up to
+// QueueIdleMaxInterval.
+//
+// The control arm is load-bearing: it proves the worker really is past the
+// observation window, so the wake arm is evidence of a wake rather than of an
+// ordinary poll arriving on time.
+func TestRetryDeadLetterWakesABackedOffWorker(t *testing.T) {
+	const (
+		climb   = 900 * time.Millisecond
+		observe = 300 * time.Millisecond
+	)
+
+	ctrl, _, stopCtrl := runPool(t, 5, 10000, 4.0)
+	time.Sleep(climb)
+	ctrlBefore := ctrl.polls.Load()
+	time.Sleep(observe)
+	ctrlAfter := ctrl.polls.Load()
+	stopCtrl()
+	if ctrlAfter != ctrlBefore {
+		t.Fatalf("control arm polled %d times in the observation window with no redrive; the worker has not backed off past it, so the wake arm would be vacuous", ctrlAfter-ctrlBefore)
+	}
+
+	rec, m, stop := runPool(t, 5, 10000, 4.0)
+	defer stop()
+
+	dead := &Delivery{
+		ID:             "dl-wake-1",
+		SubscriptionID: "sub-1",
+		TenantID:       "tenant-1",
+		EventType:      "test.event",
+		URL:            "http://127.0.0.1:1/never",
+		Status:         DeliveryStatusDeadLetter,
+		AttemptCount:   3,
+		MaxAttempts:    3,
+	}
+	if err := rec.Repository.CreateDelivery(context.Background(), dead); err != nil {
+		t.Fatalf("seed dead letter: %v", err)
+	}
+
+	time.Sleep(climb)
+	before := rec.polls.Load()
+
+	if _, err := m.RetryDeadLetter(context.Background(), dead.ID); err != nil {
+		t.Fatalf("RetryDeadLetter: %v", err)
+	}
+
+	deadline := time.After(observe)
+	for {
+		if rec.polls.Load() > before {
+			return // woken
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("RetryDeadLetter did not wake the worker: still %d polls after %v", before, observe)
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}

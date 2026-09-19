@@ -212,6 +212,16 @@ func (m *Manager) RetryDeadLetter(ctx context.Context, deliveryID string) (*Deli
 		},
 	})
 
+	// Wake the delivery pool. A dead letter reset to pending is an ENQUEUE — the
+	// row is claimable the moment UpdateDelivery commits — so it has to wake the
+	// workers exactly as QueueDelivery does. Without this the redrive is held
+	// for up to QueueIdleMaxInterval on an otherwise idle queue, which is
+	// precisely the state a dead-letter sweep runs in: v0.7.0 added the idle
+	// backoff, v0.7.1 woke the three QUEUE paths, and this one was reached
+	// through neither. The bulk RetryDeadLetters goes through here per delivery,
+	// so it is covered by the same call.
+	m.Notify()
+
 	return delivery, nil
 }
 
