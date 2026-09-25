@@ -94,7 +94,13 @@ func TestNewManager(t *testing.T) {
 		manager, err := NewManager(config, repo, WithHTTPClient(customClient))
 
 		require.NoError(t, err)
-		assert.Equal(t, customClient, manager.httpClient)
+		// v0.8.0: a guarded COPY is used; the consumer's client is untouched.
+		assert.NotSame(t, customClient, manager.httpClient)
+		assert.Equal(t, customClient.Timeout, manager.httpClient.Timeout)
+		assert.Nil(t, customClient.Transport, "the consumer's client must not be mutated")
+		assert.Nil(t, customClient.CheckRedirect, "the consumer's client must not be mutated")
+		assert.IsType(t, &http.Transport{}, manager.httpClient.Transport)
+		assert.NotNil(t, manager.httpClient.CheckRedirect)
 	})
 
 	t.Run("error with nil HTTP client", func(t *testing.T) {
@@ -227,7 +233,7 @@ func TestWorkerPool(t *testing.T) {
 		config.WorkerCount = 2
 		config.QueuePollInterval = 100
 		repo := NewMockRepository()
-		manager, _ := NewManager(config, repo)
+		manager, _ := NewManager(config, repo, WithAllowPrivateDestinations())
 
 		// Create subscription
 		sub := &Subscription{
@@ -300,7 +306,7 @@ func TestDeliveryProcessing(t *testing.T) {
 
 		config := NewConfig("postgres://localhost/test")
 		repo := NewMockRepository()
-		manager, _ := NewManager(config, repo)
+		manager, _ := NewManager(config, repo, WithAllowPrivateDestinations())
 
 		ctx := context.Background()
 
@@ -345,7 +351,7 @@ func TestDeliveryProcessing(t *testing.T) {
 
 		config := NewConfig("postgres://localhost/test")
 		repo := NewMockRepository()
-		manager, _ := NewManager(config, repo)
+		manager, _ := NewManager(config, repo, WithAllowPrivateDestinations())
 
 		ctx := context.Background()
 
@@ -391,7 +397,7 @@ func TestDeliveryProcessing(t *testing.T) {
 
 		config := NewConfig("postgres://localhost/test")
 		repo := NewMockRepository()
-		manager, _ := NewManager(config, repo)
+		manager, _ := NewManager(config, repo, WithAllowPrivateDestinations())
 
 		ctx := context.Background()
 
@@ -436,7 +442,7 @@ func TestDeliveryProcessing(t *testing.T) {
 
 		config := NewConfig("postgres://localhost/test")
 		repo := NewMockRepository()
-		manager, _ := NewManager(config, repo)
+		manager, _ := NewManager(config, repo, WithAllowPrivateDestinations())
 
 		ctx := context.Background()
 
@@ -723,7 +729,7 @@ func TestManager_HTTPClientErrors(t *testing.T) {
 		httpClient := &http.Client{
 			Timeout: 100 * time.Millisecond, // Shorter than config timeout
 		}
-		manager, err := NewManager(config, repo, WithHTTPClient(httpClient))
+		manager, err := NewManager(config, repo, WithAllowPrivateDestinations(), WithHTTPClient(httpClient))
 		require.NoError(t, err)
 
 		ctx := context.Background()
@@ -816,7 +822,7 @@ func TestManager_HTTPClientErrors(t *testing.T) {
 	t.Run("HTTP 500 error", func(t *testing.T) {
 		config := NewConfig("postgres://localhost/test")
 		repo := NewMockRepository()
-		manager, err := NewManager(config, repo)
+		manager, err := NewManager(config, repo, WithAllowPrivateDestinations())
 		require.NoError(t, err)
 
 		ctx := context.Background()
@@ -872,7 +878,7 @@ func TestManager_HTTPClientErrors(t *testing.T) {
 	t.Run("HTTP 404 error (non-retryable)", func(t *testing.T) {
 		config := NewConfig("postgres://localhost/test")
 		repo := NewMockRepository()
-		manager, err := NewManager(config, repo)
+		manager, err := NewManager(config, repo, WithAllowPrivateDestinations())
 		require.NoError(t, err)
 
 		ctx := context.Background()
@@ -930,7 +936,7 @@ func TestManager_CircuitBreakerStateTransitions(t *testing.T) {
 		config := NewConfig("postgres://localhost/test")
 		config.CircuitBreakerThreshold = 3
 		repo := NewMockRepository()
-		manager, err := NewManager(config, repo)
+		manager, err := NewManager(config, repo, WithAllowPrivateDestinations())
 		require.NoError(t, err)
 
 		ctx := context.Background()
@@ -981,7 +987,7 @@ func TestManager_CircuitBreakerStateTransitions(t *testing.T) {
 		config := NewConfig("postgres://localhost/test")
 		config.CircuitBreakerTimeoutMs = 1000 // 1s timeout (minimum allowed)
 		repo := NewMockRepository()
-		manager, err := NewManager(config, repo)
+		manager, err := NewManager(config, repo, WithAllowPrivateDestinations())
 		require.NoError(t, err)
 
 		ctx := context.Background()
@@ -1043,7 +1049,7 @@ func TestManager_CircuitBreakerStateTransitions(t *testing.T) {
 		config := NewConfig("postgres://localhost/test")
 		config.CircuitBreakerHalfOpenRequests = 2
 		repo := NewMockRepository()
-		manager, err := NewManager(config, repo)
+		manager, err := NewManager(config, repo, WithAllowPrivateDestinations())
 		require.NoError(t, err)
 
 		ctx := context.Background()
@@ -1165,7 +1171,7 @@ func TestManager_EdgeCases(t *testing.T) {
 	t.Run("Empty payload", func(t *testing.T) {
 		config := NewConfig("postgres://localhost/test")
 		repo := NewMockRepository()
-		manager, err := NewManager(config, repo)
+		manager, err := NewManager(config, repo, WithAllowPrivateDestinations())
 		require.NoError(t, err)
 
 		ctx := context.Background()
@@ -1212,7 +1218,7 @@ func TestManager_EdgeCases(t *testing.T) {
 	t.Run("Very large payload", func(t *testing.T) {
 		config := NewConfig("postgres://localhost/test")
 		repo := NewMockRepository()
-		manager, err := NewManager(config, repo)
+		manager, err := NewManager(config, repo, WithAllowPrivateDestinations())
 		require.NoError(t, err)
 
 		ctx := context.Background()

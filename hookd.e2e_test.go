@@ -41,7 +41,7 @@ func TestE2E_SuccessfulDelivery(t *testing.T) {
 	config.QueuePollInterval = 100 // Poll frequently for fast tests
 
 	repo := NewMockRepository()
-	manager, err := NewManager(config, repo)
+	manager, err := NewManager(config, repo, WithAllowPrivateDestinations())
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -108,7 +108,7 @@ func TestE2E_WebhookHeaders(t *testing.T) {
 	config.QueuePollInterval = 100
 
 	repo := NewMockRepository()
-	manager, err := NewManager(config, repo)
+	manager, err := NewManager(config, repo, WithAllowPrivateDestinations())
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -204,7 +204,7 @@ func TestE2E_TestSubscription(t *testing.T) {
 	// Setup manager (no need to start workers for TestSubscription)
 	config := NewConfig("mock")
 	repo := NewMockRepository()
-	manager, err := NewManager(config, repo)
+	manager, err := NewManager(config, repo, WithAllowPrivateDestinations())
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -322,7 +322,7 @@ func TestE2E_WildcardEventTypes(t *testing.T) {
 	config.QueuePollInterval = 100
 
 	repo := NewMockRepository()
-	manager, err := NewManager(config, repo)
+	manager, err := NewManager(config, repo, WithAllowPrivateDestinations())
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -484,7 +484,7 @@ func TestE2E_RetryOnFailure(t *testing.T) {
 	config.DefaultInitialBackoffMs = 1000 // Slower retries so we can switch server mode between attempts
 
 	repo := NewMockRepository()
-	manager, err := NewManager(config, repo)
+	manager, err := NewManager(config, repo, WithAllowPrivateDestinations())
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -553,7 +553,7 @@ func TestE2E_MultipleDeliveries(t *testing.T) {
 	config.QueuePollInterval = 100
 
 	repo := NewMockRepository()
-	manager, err := NewManager(config, repo)
+	manager, err := NewManager(config, repo, WithAllowPrivateDestinations())
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -622,7 +622,7 @@ func TestE2E_IdempotencyWithRealDelivery(t *testing.T) {
 	config.QueuePollInterval = 100
 
 	repo := NewMockRepository()
-	manager, err := NewManager(config, repo)
+	manager, err := NewManager(config, repo, WithAllowPrivateDestinations())
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -692,7 +692,7 @@ func TestE2E_MultipleSubscriptionsToSameEndpoint(t *testing.T) {
 	config.QueuePollInterval = 100
 
 	repo := NewMockRepository()
-	manager, err := NewManager(config, repo)
+	manager, err := NewManager(config, repo, WithAllowPrivateDestinations())
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -755,7 +755,7 @@ func TestE2E_DeliveryTimeout(t *testing.T) {
 	config.DefaultMaxRetries = 1    // Only 1 retry
 
 	repo := NewMockRepository()
-	manager, err := NewManager(config, repo)
+	manager, err := NewManager(config, repo, WithAllowPrivateDestinations())
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -822,7 +822,7 @@ func TestE2E_CircuitBreakerOpensAndRecovers(t *testing.T) {
 	config.CircuitBreakerTimeoutMs = 2000 // Try recovery after 2s
 
 	repo := NewMockRepository()
-	manager, err := NewManager(config, repo)
+	manager, err := NewManager(config, repo, WithAllowPrivateDestinations())
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -912,7 +912,7 @@ func TestE2E_SubscriptionLifecycle(t *testing.T) {
 	config.QueuePollInterval = 100
 
 	repo := NewMockRepository()
-	manager, err := NewManager(config, repo)
+	manager, err := NewManager(config, repo, WithAllowPrivateDestinations())
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -1021,7 +1021,7 @@ func TestE2E_SignatureVerification(t *testing.T) {
 	config.QueuePollInterval = 100
 
 	repo := NewMockRepository()
-	manager, err := NewManager(config, repo)
+	manager, err := NewManager(config, repo, WithAllowPrivateDestinations())
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -1082,7 +1082,7 @@ func TestE2E_EventFiltering(t *testing.T) {
 	config.QueuePollInterval = 100
 
 	repo := NewMockRepository()
-	manager, err := NewManager(config, repo)
+	manager, err := NewManager(config, repo, WithAllowPrivateDestinations())
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -1148,7 +1148,7 @@ func TestE2E_CustomHeaders(t *testing.T) {
 	config.QueuePollInterval = 100
 
 	repo := NewMockRepository()
-	manager, err := NewManager(config, repo)
+	manager, err := NewManager(config, repo, WithAllowPrivateDestinations())
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -1205,7 +1205,7 @@ func TestE2E_LargePayload(t *testing.T) {
 	config.QueuePollInterval = 100
 
 	repo := NewMockRepository()
-	manager, err := NewManager(config, repo)
+	manager, err := NewManager(config, repo, WithAllowPrivateDestinations())
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -1286,7 +1286,7 @@ func TestE2E_GracefulShutdown(t *testing.T) {
 	config.ShutdownTimeoutSeconds = 5 // 5 second shutdown timeout
 
 	repo := NewMockRepository()
-	manager, err := NewManager(config, repo)
+	manager, err := NewManager(config, repo, WithAllowPrivateDestinations())
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -1358,7 +1358,7 @@ func TestE2E_DeadLetterQueueLifecycle(t *testing.T) {
 	config.QueuePollInterval = 100
 
 	repo := NewMockRepository()
-	manager, err := NewManager(config, repo)
+	manager, err := NewManager(config, repo, WithAllowPrivateDestinations())
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -1472,7 +1472,7 @@ func TestE2E_DeadLetterQueueBulkOperations(t *testing.T) {
 	config.QueuePollInterval = 100
 
 	repo := NewMockRepository()
-	manager, err := NewManager(config, repo)
+	manager, err := NewManager(config, repo, WithAllowPrivateDestinations())
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -1557,7 +1557,7 @@ func TestE2E_MetadataFiltering(t *testing.T) {
 	config.WorkerCount = 2
 	config.QueuePollInterval = 100 // Poll frequently (ms)
 
-	manager, err := NewManager(config, repo)
+	manager, err := NewManager(config, repo, WithAllowPrivateDestinations())
 	require.NoError(t, err)
 
 	t.Run("filter_matches_metadata", func(t *testing.T) {
@@ -1668,7 +1668,7 @@ func TestE2E_MetadataFiltering(t *testing.T) {
 		t.Logf("Created subscription without filters")
 
 		// Start fresh manager
-		manager2, err := NewManager(config, repo)
+		manager2, err := NewManager(config, repo, WithAllowPrivateDestinations())
 		require.NoError(t, err)
 		require.NoError(t, manager2.Start(ctx))
 		defer manager2.Stop()
@@ -1717,7 +1717,7 @@ func TestE2E_InlineDelivery(t *testing.T) {
 		config.QueuePollInterval = 100
 
 		repo := NewMockRepository()
-		manager, err := NewManager(config, repo)
+		manager, err := NewManager(config, repo, WithAllowPrivateDestinations())
 		require.NoError(t, err)
 
 		ctx := context.Background()
@@ -1779,7 +1779,7 @@ func TestE2E_InlineDelivery(t *testing.T) {
 		config.QueuePollInterval = 100
 
 		repo := NewMockRepository()
-		manager, err := NewManager(config, repo)
+		manager, err := NewManager(config, repo, WithAllowPrivateDestinations())
 		require.NoError(t, err)
 
 		ctx := context.Background()
@@ -1831,7 +1831,7 @@ func TestE2E_InlineDelivery(t *testing.T) {
 		config.QueuePollInterval = 100
 
 		repo := NewMockRepository()
-		manager, err := NewManager(config, repo)
+		manager, err := NewManager(config, repo, WithAllowPrivateDestinations())
 		require.NoError(t, err)
 
 		ctx := context.Background()
@@ -1888,7 +1888,7 @@ func TestE2E_InlineDelivery(t *testing.T) {
 		config.CircuitBreakerThreshold = 2 // Open after 2 failures
 
 		repo := NewMockRepository()
-		manager, err := NewManager(config, repo)
+		manager, err := NewManager(config, repo, WithAllowPrivateDestinations())
 		require.NoError(t, err)
 
 		ctx := context.Background()
@@ -1927,7 +1927,7 @@ func TestE2E_InlineDelivery(t *testing.T) {
 		// Setup manager
 		config := NewConfig("mock")
 		repo := NewMockRepository()
-		manager, err := NewManager(config, repo)
+		manager, err := NewManager(config, repo, WithAllowPrivateDestinations())
 		require.NoError(t, err)
 
 		ctx := context.Background()

@@ -7,7 +7,6 @@ package hookd
 import (
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"strings"
 	"time"
 
@@ -123,7 +122,14 @@ type CreateSubscriptionRequest struct {
 }
 
 // Validate implements the Validator interface for CreateSubscriptionRequest.
+// A URL is judged under the STRICT egress policy; the Manager validates
+// with its own policy (see WithAllowPrivateDestinations).
 func (r *CreateSubscriptionRequest) Validate() error {
+	return r.validate(strictEgressPolicy)
+}
+
+// validate is Validate under the given egress policy.
+func (r *CreateSubscriptionRequest) validate(policy egressPolicy) error {
 	// Validate tenant ID
 	if r.TenantID == "" {
 		return cuserr.NewValidationError("tenant_id", ErrMsgMissingTenantID)
@@ -136,7 +142,7 @@ func (r *CreateSubscriptionRequest) Validate() error {
 	if r.URL == "" {
 		return cuserr.NewValidationError("url", ErrMsgMissingURL)
 	}
-	if err := validateURL(r.URL); err != nil {
+	if err := validateURLWithPolicy(r.URL, policy); err != nil {
 		return err
 	}
 
@@ -209,13 +215,20 @@ type UpdateSubscriptionRequest struct {
 }
 
 // Validate implements the Validator interface for UpdateSubscriptionRequest.
+// A URL is judged under the STRICT egress policy; the Manager validates
+// with its own policy (see WithAllowPrivateDestinations).
 func (r *UpdateSubscriptionRequest) Validate() error {
+	return r.validate(strictEgressPolicy)
+}
+
+// validate is Validate under the given egress policy.
+func (r *UpdateSubscriptionRequest) validate(policy egressPolicy) error {
 	// Validate URL (if provided)
 	if r.URL != nil {
 		if *r.URL == "" {
 			return cuserr.NewValidationError("url", ErrMsgMissingURL)
 		}
-		if err := validateURL(*r.URL); err != nil {
+		if err := validateURLWithPolicy(*r.URL, policy); err != nil {
 			return err
 		}
 	}
@@ -341,12 +354,19 @@ type QueueInlineDeliveryRequest struct {
 }
 
 // Validate implements the Validator interface for QueueInlineDeliveryRequest.
+// A URL is judged under the STRICT egress policy; the Manager validates
+// with its own policy (see WithAllowPrivateDestinations).
 func (r *QueueInlineDeliveryRequest) Validate() error {
+	return r.validate(strictEgressPolicy)
+}
+
+// validate is Validate under the given egress policy.
+func (r *QueueInlineDeliveryRequest) validate(policy egressPolicy) error {
 	// Validate URL
 	if r.URL == "" {
 		return cuserr.NewValidationError("url", ErrMsgMissingURL)
 	}
-	if err := validateURL(r.URL); err != nil {
+	if err := validateURLWithPolicy(r.URL, policy); err != nil {
 		return err
 	}
 
@@ -588,26 +608,12 @@ func (p *RetryPolicy) Validate() error {
 	return nil
 }
 
-// validateURL validates a URL string.
+// validateURL validates a URL string under the STRICT egress policy: length,
+// absolute http(s), a host, and no IP-literal host in a refused range. The
+// Manager applies its own policy (which WithAllowPrivateDestinations widens)
+// through validateURLWithPolicy; see hookd.egress.go.
 func validateURL(urlStr string) error {
-	if len(urlStr) > MaxURLLength {
-		return cuserr.NewValidationError("url", ErrMsgURLTooLong)
-	}
-
-	parsedURL, err := url.Parse(urlStr)
-	if err != nil {
-		return cuserr.NewValidationError("url", ErrMsgInvalidURL)
-	}
-
-	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
-		return cuserr.NewValidationError("url", ErrMsgInvalidURLScheme)
-	}
-
-	if parsedURL.Host == "" {
-		return cuserr.NewValidationError("url", ErrMsgMissingURLHost)
-	}
-
-	return nil
+	return validateURLWithPolicy(urlStr, strictEgressPolicy)
 }
 
 // validateEventTypes validates an event types array.

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand/v2"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -36,19 +37,27 @@ type EventBus interface {
 
 // Manager is the main webhook management orchestrator.
 type Manager struct {
-	repo            Repository
-	eventBus        EventBus
-	ctx             context.Context
-	config          *Config
-	logger          *zap.Logger
-	httpClient      *http.Client
-	cancel          context.CancelFunc
-	workerSem       chan struct{}
-	wake            chan struct{}
-	wg              sync.WaitGroup
-	startedMu       sync.RWMutex
-	started         bool
-	testRateLimiter sync.Map // map[subscriptionID]time.Time - rate limiting for TestSubscription
+	repo       Repository
+	eventBus   EventBus
+	ctx        context.Context
+	config     *Config
+	logger     *zap.Logger
+	httpClient *http.Client
+	cancel     context.CancelFunc
+
+	// Egress guard (v0.8.0, hookd.egress.go). customHTTPClient is what
+	// WithHTTPClient was given; httpClient is always derived from it (or from
+	// the default transport) by buildHTTPClient, never used as-is.
+	customHTTPClient  *http.Client
+	egressRefusalHook func(cause string)
+	egressResolver    egressHostResolver
+	workerSem         chan struct{}
+	wake              chan struct{}
+	wg                sync.WaitGroup
+	startedMu         sync.RWMutex
+	started           bool
+	egressPolicy      egressPolicy // zero value = STRICT
+	testRateLimiter   sync.Map     // map[subscriptionID]time.Time - rate limiting for TestSubscription
 }
 
 // ManagerOption is a functional option for configuring the Manager.
@@ -86,27 +95,17 @@ func NewManager(config *Config, repo Repository, opts ...ManagerOption) (*Manage
 		return nil, NewConfigurationError("logger", "failed to create default logger: "+err.Error())
 	}
 
-	// Create default HTTP client with timeout
-	httpClient := &http.Client{
-		Timeout: config.DeliveryTimeout(),
-		Transport: &http.Transport{
-			MaxIdleConns:        100,
-			MaxIdleConnsPerHost: 10,
-			IdleConnTimeout:     90 * time.Second,
-		},
-	}
-
 	// Create no-op event bus by default
 	var eventBus EventBus = &noOpEventBus{}
 
 	m := &Manager{
-		config:     config,
-		repo:       repo,
-		eventBus:   eventBus,
-		logger:     logger,
-		httpClient: httpClient,
-		workerSem:  make(chan struct{}, config.WorkerCount),
-		wake:       make(chan struct{}, config.WorkerCount),
+		config:         config,
+		repo:           repo,
+		eventBus:       eventBus,
+		logger:         logger,
+		egressResolver: net.DefaultResolver,
+		workerSem:      make(chan struct{}, config.WorkerCount),
+		wake:           make(chan struct{}, config.WorkerCount),
 	}
 
 	// Apply options
@@ -114,6 +113,16 @@ func NewManager(config *Config, repo Repository, opts ...ManagerOption) (*Manage
 		if err := opt(m); err != nil {
 			return nil, err
 		}
+	}
+
+	// The delivery client is built AFTER the options, so the egress policy,
+	// the refusal hook and any consumer client are all known (option order is
+	// irrelevant). See buildHTTPClient for the WithHTTPClient semantics.
+	if err := m.buildHTTPClient(m.egressResolver); err != nil {
+		return nil, err
+	}
+	if m.egressPolicy.allowPrivate {
+		m.logger.Warn(LogMsgEgressPrivateAllowed)
 	}
 
 	return m, nil
@@ -131,12 +140,21 @@ func WithLogger(logger *zap.Logger) ManagerOption {
 }
 
 // WithHTTPClient sets a custom HTTP client for webhook delivery.
+//
+// ⚠ v0.8.0: the client is NOT used as-is. hookd derives a guarded copy (the
+// client itself is never mutated): redirects are not followed, Proxy is nil,
+// HTTP/2 is off and every dial goes through the egress policy; the client's
+// Timeout, Jar and its Transport's settings (TLS config, pool sizes, its own
+// DialContext as the underlying dialer) are kept. A client whose Transport is
+// not an *http.Transport, or sets DialTLS/DialTLSContext, cannot carry the
+// guard: NewManager then fails unless WithAllowPrivateDestinations is also
+// given. See buildHTTPClient in hookd.egress.go.
 func WithHTTPClient(client *http.Client) ManagerOption {
 	return func(m *Manager) error {
 		if client == nil {
 			return NewConfigurationError("http_client", "HTTP client cannot be nil")
 		}
-		m.httpClient = client
+		m.customHTTPClient = client
 		return nil
 	}
 }
@@ -537,7 +555,9 @@ func (m *Manager) attemptDelivery(ctx context.Context, delivery *Delivery, sub *
 	attempt.ResponseHeaders = responseHeaders
 
 	if err != nil {
-		attempt.Error = err.Error()
+		// A guard decision is recorded as the one opaque text; the cause went
+		// to the operator (log + WithEgressRefusalHook), never to the row.
+		attempt.Error = subscriberVisibleError(err)
 	}
 
 	// Save attempt

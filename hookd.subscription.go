@@ -51,8 +51,8 @@ import (
 //	    Secret:     "secure_secret_key",
 //	})
 func (m *Manager) CreateSubscription(ctx context.Context, req *CreateSubscriptionRequest) (*Subscription, error) {
-	// Validate request
-	if err := req.Validate(); err != nil {
+	// Validate request (URL judged under this Manager's egress policy)
+	if err := req.validate(m.egressPolicy); err != nil {
 		m.logger.Error("invalid subscription request",
 			zap.Error(err),
 			zap.String("tenant_id", req.TenantID),
@@ -217,6 +217,11 @@ func (m *Manager) UpdateSubscription(ctx context.Context, id string, req *Update
 	updated := false
 
 	if req.URL != nil && *req.URL != "" {
+		// Before v0.8.0 an update's URL was not validated at all, so an update
+		// could store any scheme or an internal IP literal that a create refused.
+		if err := validateURLWithPolicy(*req.URL, m.egressPolicy); err != nil {
+			return nil, err
+		}
 		normalizedURL := normalizeURL(*req.URL)
 		if normalizedURL != sub.URL {
 			sub.URL = normalizedURL
@@ -578,7 +583,7 @@ func (m *Manager) TestSubscription(ctx context.Context, subscriptionID string) (
 			Success:      false,
 			StatusCode:   0,
 			ResponseTime: responseTime,
-			Error:        err.Error(),
+			Error:        subscriberVisibleError(err),
 		}, nil
 	}
 	defer resp.Body.Close()

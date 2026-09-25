@@ -68,7 +68,7 @@ func TestWorkerSemaphore_ActualConcurrencyLimit(t *testing.T) {
 	config.DeliveryTimeoutMs = 5000
 
 	repo := NewMockRepository()
-	manager, err := NewManager(config, repo)
+	manager, err := NewManager(config, repo, WithAllowPrivateDestinations())
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -190,7 +190,7 @@ func TestWorkerSemaphore_StressTest(t *testing.T) {
 	config.QueuePollInterval = 20 // Very fast polling for stress test
 
 	repo := NewMockRepository()
-	manager, err := NewManager(config, repo)
+	manager, err := NewManager(config, repo, WithAllowPrivateDestinations())
 	require.NoError(t, err)
 
 	ctx := context.Background()

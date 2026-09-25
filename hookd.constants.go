@@ -292,6 +292,12 @@ const (
 	// ErrMsgURLTooLong is the error message for URL exceeding max length.
 	ErrMsgURLTooLong = "URL exceeds maximum length"
 
+	// ErrMsgURLDestinationRefused is the write-time refusal for a URL whose host
+	// is an IP literal the egress policy refuses (loopback, private, link-local,
+	// reserved, ...). A HOSTNAME is never resolved at write time; see
+	// hookd.egress.go.
+	ErrMsgURLDestinationRefused = "URL host is not a permitted webhook destination"
+
 	// ErrMsgMissingTenantID is the error message for missing tenant ID.
 	ErrMsgMissingTenantID = "tenant_id is required"
 
@@ -561,7 +567,7 @@ const (
 
 	// UserAgentVersion is the current version for user agent.
 	// This should match versions.yaml project.version.
-	UserAgentVersion = "0.5.0"
+	UserAgentVersion = "0.8.0"
 )
 
 // UserAgent is the complete user agent string used for webhook deliveries.
@@ -598,4 +604,65 @@ const (
 
 	// ErrMsgRateLimited is the error message for rate limited requests.
 	ErrMsgRateLimited = "test subscription rate limited, try again in %d seconds"
+
+	// ErrMsgHTTPClientUnguardable is returned by NewManager when a client passed
+	// with WithHTTPClient cannot carry the egress guard (its Transport is not an
+	// *http.Transport, or it sets DialTLS/DialTLSContext) and the guarantee was
+	// not waived with WithAllowPrivateDestinations.
+	ErrMsgHTTPClientUnguardable = "HTTP client cannot carry the egress guard: pass an *http.Transport without DialTLS/DialTLSContext, or opt out with WithAllowPrivateDestinations"
+
+	// ErrMsgEgressRefusalHookNil is returned when WithEgressRefusalHook is given nil.
+	ErrMsgEgressRefusalHookNil = "egress refusal hook cannot be nil"
+)
+
+// Egress Guard Constants (v0.8.0, see hookd.egress.go).
+const (
+	// ErrMsgEgressDestinationUnreachable is the ONE text a subscriber can read
+	// for a refused destination, a failed lookup and an empty DNS answer alike.
+	// They are collapsed on purpose: "refused by policy" versus "no such host"
+	// would tell a subscriber which internal names exist.
+	ErrMsgEgressDestinationUnreachable = "webhook destination unreachable"
+
+	// EgressRefusalCauseInternalAddress: a candidate address is outside the policy.
+	EgressRefusalCauseInternalAddress = "internal_address"
+
+	// EgressRefusalCauseMalformedAddress: the dial address could not be split.
+	EgressRefusalCauseMalformedAddress = "malformed_address"
+
+	// EgressRefusalCauseLookupFailed: the one DNS lookup the dial judges failed.
+	EgressRefusalCauseLookupFailed = "lookup_failed"
+
+	// EgressRefusalCauseEmptyAnswer: the lookup succeeded with no addresses.
+	EgressRefusalCauseEmptyAnswer = "empty_answer"
+
+	// EgressLookupNetwork is the network passed to the resolver: both families,
+	// so a mixed A/AAAA answer is judged whole.
+	EgressLookupNetwork = "ip"
+
+	// URLSchemeHTTP and URLSchemeHTTPS are the only schemes a webhook URL may use.
+	URLSchemeHTTP  = "http"
+	URLSchemeHTTPS = "https"
+
+	// ALPNProtocolHTTP2 is stripped from a consumer TLS config's NextProtos, so
+	// the guarded transport stays on HTTP/1.1.
+	ALPNProtocolHTTP2 = "h2"
+
+	// Default delivery transport pool sizes (unchanged from v0.7.x).
+	DefaultHTTPMaxIdleConns               = 100
+	DefaultHTTPMaxIdleConnsPerHost        = 10
+	DefaultHTTPIdleConnTimeoutSeconds int = 90
+
+	// LogMsgEgressRefused is logged (WARN) with the cause for every refusal.
+	LogMsgEgressRefused = "webhook egress refused"
+
+	// LogFieldEgressCause is the log field carrying the refusal cause.
+	LogFieldEgressCause = "cause"
+
+	// LogMsgEgressGuardWaived is logged (WARN) at construction when the guard is
+	// not applied to a consumer-supplied client (opaque RoundTripper + opt-in).
+	LogMsgEgressGuardWaived = "webhook egress guard NOT applied to custom HTTP client (WithAllowPrivateDestinations)"
+
+	// LogMsgEgressPrivateAllowed is logged (WARN) at construction when the
+	// private-destination opt-in is active.
+	LogMsgEgressPrivateAllowed = "webhook egress admits private destinations (WithAllowPrivateDestinations): not for production"
 )

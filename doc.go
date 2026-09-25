@@ -208,6 +208,17 @@
 //	expected := "sha256=" + hex.EncodeToString(mac.Sum(nil))
 //	valid := hmac.Equal([]byte(signature), []byte(expected))
 //
+// Egress (v0.8.0, default-deny): deliveries and TestSubscription dial only
+// global-unicast destinations — loopback, private, link-local (cloud metadata),
+// CGNAT, multicast and reserved ranges are refused, every resolved address is
+// judged and the judged literal is dialed, redirects are not followed, Proxy is
+// nil and HTTP/2 is off. A subscriber only ever reads the opaque
+// ErrMsgEgressDestinationUnreachable; operators get the cause through
+// WithEgressRefusalHook and a WARN log. Tests delivering to httptest servers
+// opt in explicitly:
+//
+//	manager, _ := hookd.NewManager(config, repo, hookd.WithAllowPrivateDestinations())
+//
 // # Production Deployment
 //
 // For production use:

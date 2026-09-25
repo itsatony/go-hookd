@@ -208,7 +208,7 @@ func (m *Manager) QueueInlineDelivery(ctx context.Context, req *QueueInlineDeliv
 	if req == nil {
 		return nil, NewValidationError("request", ErrMsgRequestRequired)
 	}
-	if err := req.Validate(); err != nil {
+	if err := req.validate(m.egressPolicy); err != nil {
 		m.logger.Error("invalid inline delivery request",
 			zap.Error(err),
 			zap.String("url", req.URL),

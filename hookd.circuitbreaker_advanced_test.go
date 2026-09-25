@@ -36,7 +36,7 @@ func TestCircuitBreaker_OpenToHalfOpenTransition(t *testing.T) {
 	config.CircuitBreakerHalfOpenRequests = 2
 
 	repo := NewMockRepository()
-	manager, err := NewManager(config, repo)
+	manager, err := NewManager(config, repo, WithAllowPrivateDestinations())
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -131,7 +131,7 @@ func TestCircuitBreaker_HalfOpenToClosedTransition(t *testing.T) {
 	config.CircuitBreakerHalfOpenRequests = 2 // Need 2 successes to close
 
 	repo := NewMockRepository()
-	manager, err := NewManager(config, repo)
+	manager, err := NewManager(config, repo, WithAllowPrivateDestinations())
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -332,7 +332,7 @@ func TestCircuitBreaker_ConcurrentStateUpdates(t *testing.T) {
 	config.WorkerCount = 3 // Multiple workers
 
 	repo := NewMockRepository()
-	manager, err := NewManager(config, repo)
+	manager, err := NewManager(config, repo, WithAllowPrivateDestinations())
 	require.NoError(t, err)
 
 	ctx := context.Background()

@@ -6,8 +6,18 @@ A webhook delivery management library for Go applications. Handles webhook subsc
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Test Coverage](https://img.shields.io/badge/coverage-60%25-yellow.svg)](https://github.com/itsatony/go-hookd)
 
-> **Status**: Production Ready (v0.7.2)
+> **Status**: Production Ready (v0.8.0)
 > Core functionality is implemented, tested, and production-ready. The API is stable with comprehensive test coverage.
+>
+> ⚠ **v0.8.0 BREAKING BEHAVIOUR — default-deny egress guard.** Deliveries and
+> `TestSubscription` now refuse loopback, private (RFC 1918 / ULA), link-local
+> (incl. cloud metadata `169.254.169.254`), CGNAT, multicast and reserved
+> destinations — by IP literal at write time and by resolved address at dial
+> time — and no longer follow redirects. Tests or dev setups that deliver to
+> `httptest` servers, `localhost` or in-cluster Services must opt in with
+> `hookd.WithAllowPrivateDestinations()`. A client passed with `WithHTTPClient`
+> is guarded too. See [Egress guard (SSRF protection)](#egress-guard-ssrf-protection)
+> and [Upgrading to v0.8.0](#upgrading-to-v080).
 >
 > **v0.7.x**: The worker pool now backs off while the delivery queue is empty, so its
 > idle database cost is proportional to traffic rather than to `WorkerCount`. Tune with
@@ -353,6 +363,64 @@ To opt out entirely, set `QueueIdleMaxInterval` equal to `QueuePollInterval`, or
 ⚠ Both fields default when left at their zero value, so a `Config` built as a struct
 literal by code that predates them keeps working — an upgrade does not become a boot
 failure. An explicitly set out-of-range value is still refused.
+
+### Egress guard (SSRF protection)
+
+A webhook URL is chosen by a **subscriber**, but it is dialled from inside *your*
+network. Since v0.8.0 every delivery and every `TestSubscription` goes through an
+egress guard, **on by default**:
+
+| Rule | What it means |
+|------|---------------|
+| Allow rule, not a deny list | Only global-unicast addresses are dialled. Refused: loopback, RFC 1918, ULA `fc00::/7`, link-local `169.254/16` + `fe80::/10` (cloud metadata), CGNAT `100.64/10`, `0.0.0.0/8`, multicast, unspecified, broadcast, benchmarking `198.18/15`, documentation (`192.0.2/24`, `198.51.100/24`, `203.0.113/24`, `2001:db8::/32`), `240/4`, IETF `192.0.0/24`, NAT64 / 6to4 / IPv4-compatible IPv6, site-local `fec0::/10`, discard `100::/64`. IPv4-mapped IPv6 is unmapped first; an address with a zone is refused. |
+| Resolve once, judge all, dial the literal | The dial resolves the host itself, refuses the **whole** dial if **any** answer is refused, and connects to the judged IP — no second lookup, so DNS rebinding cannot swap the answer. TLS still verifies against the URL's hostname. |
+| No redirects | A 3xx is recorded as the endpoint's answer (status + headers) and the attempt fails like any other non-2xx; the `Location` is never followed. |
+| No proxy, HTTP/1.1 | `Proxy` is nil (a proxy would be judged instead of the target); HTTP/2 is off so every connection is opened by the guarded dialer. |
+| Write-time check | `CreateSubscription`, `UpdateSubscription` (whose URL was previously not validated at all) and `QueueInlineDelivery` refuse a non-http(s) URL and an **IP-literal** host in a refused range (`ErrMsgURLDestinationRefused`). Hostnames are **not** resolved at write time — that would be TOCTOU and an oracle; the dial judges them. |
+| One opaque error | A refused destination, a failed lookup and an empty DNS answer all record the same text, `webhook destination unreachable` (`ErrMsgEgressDestinationUnreachable`), in `DeliveryAttempt.Error`, `TestResult.Error` and delivery events — otherwise the difference would tell a subscriber which internal names exist. `errors.Is(err, hookd.ErrEgressDestinationUnreachable)` identifies it in code. |
+
+**Operator signal.** The cause is never shown to the subscriber, but it is logged
+(WARN `webhook egress refused`, field `cause`) and passed to an optional hook, e.g.
+for a Prometheus counter:
+
+```go
+refused := prometheus.NewCounterVec(prometheus.CounterOpts{
+    Name: "myapp_webhook_egress_refused_total",
+}, []string{"cause"})
+
+manager, err := hookd.NewManager(cfg, repo,
+    hookd.WithEgressRefusalHook(func(cause string) { refused.WithLabelValues(cause).Inc() }),
+)
+// causes: internal_address, lookup_failed, empty_answer, malformed_address
+```
+
+The hook runs synchronously on the delivery goroutine and must not block.
+
+**Opt-in for tests and dev: `WithAllowPrivateDestinations()`.** It re-admits
+exactly loopback, RFC 1918 / ULA and CGNAT (where `httptest`, `localhost` and
+in-cluster Services / pod IPs live). Link-local (metadata), multicast,
+unspecified, `0.0.0.0/8` and reserved ranges stay refused; redirects stay
+unfollowed; errors stay opaque. It logs a WARN at construction. **Never enable
+it in production.**
+
+```go
+manager, err := hookd.NewManager(cfg, repo, hookd.WithAllowPrivateDestinations()) // tests / dev only
+```
+
+**`WithHTTPClient(client)` is guarded too.** The client you pass is never mutated
+and never used as-is: hookd uses a copy whose `CheckRedirect` is replaced by the
+no-follow rule and whose `Transport` is a guarded **clone**. Your `Timeout`, `Jar`,
+TLS config, pool sizes and your own `DialContext` (as the dialer that connects to
+the judged IP) are kept; `Proxy` is cleared and `"h2"` is removed from ALPN.
+
+| Your `client.Transport` | Result |
+|---|---|
+| `nil` | a guarded clone of `http.DefaultTransport` |
+| `*http.Transport` | a guarded clone of it |
+| `*http.Transport` with `DialTLS`/`DialTLSContext` set | `NewManager` fails (`ErrMsgHTTPClientUnguardable`) — that hook would bypass the guarded dialer for https |
+| any other `http.RoundTripper` (e.g. an instrumentation wrapper) | `NewManager` fails, **unless** `WithAllowPrivateDestinations()` is also given — then it is used with only the redirect rule, and a WARN is logged |
+
+Option order does not matter: the client is built after all options are applied.
 
 ### Understanding Retry Logic
 
@@ -955,6 +1023,34 @@ Essential metrics to track via event bus:
 5. Worker utilization
 6. Dead letter queue size
 
+## Upgrading to v0.8.0
+
+v0.8.0 changes one default and nothing else in the public API.
+
+1. **Production code needs no change** if every webhook target is a public
+   hostname or IP. Subscriptions that already point at an internal target stay
+   stored but every delivery to them now fails with
+   `webhook destination unreachable` (and your refusal hook / WARN log names the
+   cause) — audit them before upgrading.
+2. **Tests that deliver to `httptest` servers (127.0.0.1) or `localhost`** must
+   construct their Manager with `hookd.WithAllowPrivateDestinations()`. Do not
+   weaken production configuration to make them pass; thread an explicit
+   test/dev flag through to `NewManager`.
+3. **Dev clusters whose receivers are in-cluster Services** (`*.svc`,
+   `*.svc.cluster.local`, pod IPs, `100.64/10`) need the same opt-in, behind an
+   explicit config flag that is off in production.
+4. **Consumers passing `WithHTTPClient`**: an `*http.Transport` keeps working
+   (now guarded); an opaque `RoundTripper` or a transport with
+   `DialTLS`/`DialTLSContext` makes `NewManager` fail — pass a plain
+   `*http.Transport`, or opt out explicitly.
+5. **Redirects are no longer followed**: an endpoint that answers 3xx now fails
+   (the 3xx is recorded) instead of being delivered at the `Location`.
+6. **HTTP/1.1 only**: deliveries no longer negotiate HTTP/2.
+7. `UpdateSubscription` now validates a new URL (it previously accepted any string).
+8. A consumer that runs its own URL check at its API (e.g. an SSRF validator)
+   should keep it — but it is no longer the only line: the dial-time guard closes
+   the rebinding and redirect gaps a write-time check cannot.
+
 ## Limitations and Known Issues
 
 ### Current Limitations
@@ -983,7 +1079,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for full guidelines.
 
 ## Project Status
 
-**Current Version**: v0.7.2 (Production Ready)
+**Current Version**: v0.8.0 (Production Ready)
 
 **What's Implemented:**
 - ✓ Core subscription and delivery management
@@ -1000,6 +1096,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for full guidelines.
 - ✓ PostgreSQL migration helper
 - ✓ Prometheus metrics (`prometheus/` package)
 - ✓ Subscription testing endpoint
+- ✓ Default-deny SSRF egress guard (v0.8.0)
 
 **What's Coming:**
 - Distributed circuit breaker (Redis)

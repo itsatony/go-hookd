@@ -186,7 +186,7 @@ func TestProcessDeliveries_ErrorHandling(t *testing.T) {
 		config.WorkerCount = 1
 		repo := NewMockRepository()
 		logger := zaptest.NewLogger(t)
-		manager, err := NewManager(config, repo, WithLogger(logger))
+		manager, err := NewManager(config, repo, WithAllowPrivateDestinations(), WithLogger(logger))
 		require.NoError(t, err)
 
 		// Need to start manager to initialize context
@@ -208,7 +208,7 @@ func TestProcessDeliveries_ErrorHandling(t *testing.T) {
 		config := NewConfig("postgres://localhost/test")
 		config.WorkerCount = 2
 		repo := NewMockRepository()
-		manager, _ := NewManager(config, repo)
+		manager, _ := NewManager(config, repo, WithAllowPrivateDestinations())
 
 		ctx := context.Background()
 
@@ -448,7 +448,7 @@ func TestStop_InFlightDeliveries(t *testing.T) {
 		config.WorkerCount = 2
 		config.QueuePollInterval = 50 // Fast polling
 		repo := NewMockRepository()
-		manager, _ := NewManager(config, repo)
+		manager, _ := NewManager(config, repo, WithAllowPrivateDestinations())
 
 		ctx := context.Background()
 
@@ -510,7 +510,7 @@ func TestStop_InFlightDeliveries(t *testing.T) {
 		config := NewConfig("postgres://localhost/test")
 		repo := NewMockRepository()
 		logger := zaptest.NewLogger(t)
-		manager, err := NewManager(config, repo, WithLogger(logger))
+		manager, err := NewManager(config, repo, WithAllowPrivateDestinations(), WithLogger(logger))
 		require.NoError(t, err)
 
 		ctx := context.Background()
@@ -543,7 +543,7 @@ func TestE2E_EventPublishing(t *testing.T) {
 
 		// Create custom event bus to track events
 		eventBus := &testEventBus{events: make([]any, 0)}
-		manager, _ := NewManager(config, repo, WithEventBus(eventBus))
+		manager, _ := NewManager(config, repo, WithAllowPrivateDestinations(), WithEventBus(eventBus))
 
 		ctx := context.Background()
 

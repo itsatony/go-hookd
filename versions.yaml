@@ -4,7 +4,7 @@ manifest_version: "1.0"
 # Project version (semantic versioning)
 project:
   name: "go-hookd"
-  version: "0.7.2"
+  version: "0.8.0"
   description: "Enterprise webhook management package"
 
 # Database schema versions (migration numbers)
@@ -13,8 +13,9 @@ schemas:
 
 # Component versions (internal modules)
 components:
-  manager: "0.7.2"
-  delivery_engine: "0.5.0"
+  manager: "0.8.0"
+  delivery_engine: "0.6.0"
+  egress_guard: "0.1.0"  # v0.8.0 default-deny SSRF guard (hookd.egress.go)
   circuit_breaker: "0.3.0"
   idempotency_store: "0.3.0"
   prometheus_collector: "0.1.0"
