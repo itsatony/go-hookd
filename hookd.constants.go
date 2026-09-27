@@ -7,6 +7,8 @@
 // Excellence. Always.
 package hookd
 
+import "time"
+
 // ID Prefixes - Used for generating prefixed nanoIDs.
 // Format: {prefix}_{nanoID} (e.g., sub_6ByTSYmGzT2c).
 const (
@@ -567,7 +569,7 @@ const (
 
 	// UserAgentVersion is the current version for user agent.
 	// This should match versions.yaml project.version.
-	UserAgentVersion = "0.8.0"
+	UserAgentVersion = "0.9.0"
 )
 
 // UserAgent is the complete user agent string used for webhook deliveries.
@@ -665,4 +667,124 @@ const (
 	// LogMsgEgressPrivateAllowed is logged (WARN) at construction when the
 	// private-destination opt-in is active.
 	LogMsgEgressPrivateAllowed = "webhook egress admits private destinations (WithAllowPrivateDestinations): not for production"
+)
+
+// PostgreSQL connection-pool defaults for PostgresRepository (v0.9.0).
+//
+// These are the values every version before v0.9.0 hardcoded. They remain the
+// defaults so upgrading changes nothing; a consumer with a connection budget
+// (managed PostgreSQL, several pods during a rolling update) overrides them with
+// WithMaxOpenConns / WithMaxIdleConns / WithConnMaxLifetime / WithConnMaxIdleTime.
+const (
+	// DefaultPostgresMaxOpenConns is the default database/sql MaxOpenConns.
+	DefaultPostgresMaxOpenConns = 25
+
+	// DefaultPostgresMaxIdleConns is the default database/sql MaxIdleConns. When
+	// only MaxOpenConns is overridden below this value, the idle default is
+	// clamped DOWN to MaxOpenConns (database/sql would clamp it anyway).
+	DefaultPostgresMaxIdleConns = 5
+
+	// DefaultPostgresConnMaxLifetime is the default database/sql ConnMaxLifetime.
+	DefaultPostgresConnMaxLifetime = 5 * time.Minute
+
+	// DefaultPostgresConnMaxIdleTime is the default database/sql ConnMaxIdleTime.
+	DefaultPostgresConnMaxIdleTime = 1 * time.Minute
+
+	// PostgresPingTimeout bounds the connection check in the constructors.
+	PostgresPingTimeout = 5 * time.Second
+
+	// PostgresDriverName is the database/sql driver name used by go-hookd.
+	PostgresDriverName = "postgres"
+)
+
+// Pool-option validation messages.
+const (
+	// ErrMsgMaxOpenConnsInvalid is returned when WithMaxOpenConns gets n <= 0.
+	ErrMsgMaxOpenConnsInvalid = "max_open_conns must be greater than 0"
+
+	// ErrMsgMaxIdleConnsInvalid is returned when WithMaxIdleConns gets n < 0.
+	ErrMsgMaxIdleConnsInvalid = "max_idle_conns must be 0 or greater (0 retains no idle connections)"
+
+	// ErrMsgMaxIdleExceedsOpen is returned when an EXPLICIT WithMaxIdleConns is
+	// larger than the effective MaxOpenConns.
+	ErrMsgMaxIdleExceedsOpen = "max_idle_conns must not exceed max_open_conns"
+
+	// ErrMsgConnMaxLifetimeInvalid is returned when WithConnMaxLifetime gets d <= 0.
+	ErrMsgConnMaxLifetimeInvalid = "conn_max_lifetime must be greater than 0"
+
+	// ErrMsgConnMaxIdleTimeInvalid is returned when WithConnMaxIdleTime gets d <= 0.
+	ErrMsgConnMaxIdleTimeInvalid = "conn_max_idle_time must be greater than 0"
+
+	// ErrMsgSchemaLockTimeoutInvalid is returned when WithSchemaLockTimeout gets
+	// a duration below SchemaLockTimeoutMin.
+	ErrMsgSchemaLockTimeoutInvalid = "schema_lock_timeout must be at least 1ms"
+)
+
+// SchemaManager pool and advisory-lock constants (v0.9.0).
+const (
+	// SchemaManagerMaxOpenConns bounds the pool NewSchemaManagerFromURL opens.
+	// Schema work runs entirely on ONE dedicated connection, so one is enough.
+	SchemaManagerMaxOpenConns = 1
+
+	// SchemaManagerMaxIdleConns is 0 so the manager holds NO connection between
+	// calls: consumers keep the SchemaManager for the service lifetime, and a
+	// boot-only helper must not occupy a slot of the connection budget forever.
+	SchemaManagerMaxIdleConns = 0
+
+	// DefaultSchemaLockTimeout bounds how long EnsureSchema/DropSchema wait for
+	// another process holding the same prefix's schema lock. Override with
+	// WithSchemaLockTimeout.
+	DefaultSchemaLockTimeout = 60 * time.Second
+
+	// SchemaLockTimeoutMin is the smallest accepted lock timeout
+	// (PostgreSQL's lock_timeout has millisecond resolution; 0 would disable it).
+	SchemaLockTimeoutMin = time.Millisecond
+
+	// SchemaLockReleaseTimeout bounds the unlock round-trip. It uses a fresh
+	// context so a cancelled caller context cannot leave the lock held.
+	SchemaLockReleaseTimeout = 5 * time.Second
+
+	// SchemaLockClassID is the first key of the two-int4 session advisory lock
+	// serializing schema setup PER TABLE PREFIX ("hkds"). The two-int4 key space
+	// is disjoint from the single-bigint key space, so it cannot collide with a
+	// consumer's own pg_advisory_lock(bigint) keys.
+	SchemaLockClassID int32 = 0x686b6473
+
+	// SchemaDDLLockClassID is the class of the TRANSACTION-level advisory lock
+	// taken as the first statement of every schema DDL batch ("hkdx", object id
+	// SchemaDDLLockObjectID). It serializes the DDL itself across ALL prefixes,
+	// because `CREATE EXTENSION IF NOT EXISTS` is database-global and races
+	// between two consumers with different prefixes. It is held only for the
+	// duration of the DDL transaction (milliseconds), never while waiting.
+	SchemaDDLLockClassID int32 = 0x686b6478
+
+	// SchemaDDLLockObjectID is the second key of the DDL lock.
+	SchemaDDLLockObjectID int32 = 0
+
+	// SchemaLockNamespace is hashed together with the table prefix into the
+	// second key of the per-prefix schema lock.
+	SchemaLockNamespace = "go-hookd:schema:"
+)
+
+// SQL used by the schema lock.
+const (
+	sqlSchemaLockSetTimeout   = "SELECT set_config('lock_timeout', $1, false)"
+	sqlSchemaLockResetTimeout = "RESET lock_timeout"
+	sqlSchemaLockAcquire      = "SELECT pg_advisory_lock($1::int4, $2::int4)"
+	sqlSchemaLockRelease      = "SELECT pg_advisory_unlock($1::int4, $2::int4)"
+	sqlSchemaDDLLockFmt       = "SELECT pg_advisory_xact_lock(%d, %d);\n"
+	schemaLockTimeoutUnit     = "ms"
+)
+
+// Schema-lock error and operation labels.
+const (
+	// ErrMsgSchemaLockTimeout is the error message when the schema lock could not
+	// be acquired within the lock timeout.
+	ErrMsgSchemaLockTimeout = "timed out waiting for the go-hookd schema lock held by another process (see WithSchemaLockTimeout)"
+
+	opAcquireSchemaConn = "acquire_schema_connection"
+	opAcquireSchemaLock = "acquire_schema_lock"
+	opReleaseSchemaLock = "release_schema_lock"
+	opCreateSchema      = "create_schema"
+	opDropSchema        = "drop_schema"
 )

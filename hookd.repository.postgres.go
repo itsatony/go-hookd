@@ -22,6 +22,52 @@ import (
 type PostgresRepository struct {
 	db           *sql.DB
 	schemaConfig *SchemaConfig
+	pool         postgresPoolConfig
+}
+
+// postgresPoolConfig is the database/sql pool configuration of a PostgresRepository.
+// maxIdleSet records whether MaxIdleConns was stated explicitly, because an
+// explicit value above MaxOpenConns is refused while the DEFAULT is clamped.
+type postgresPoolConfig struct {
+	maxOpenConns    int
+	maxIdleConns    int
+	maxIdleSet      bool
+	connMaxLifetime time.Duration
+	connMaxIdleTime time.Duration
+}
+
+// defaultPostgresPoolConfig returns the pre-v0.9.0 hardcoded pool values.
+func defaultPostgresPoolConfig() postgresPoolConfig {
+	return postgresPoolConfig{
+		maxOpenConns:    DefaultPostgresMaxOpenConns,
+		maxIdleConns:    DefaultPostgresMaxIdleConns,
+		connMaxLifetime: DefaultPostgresConnMaxLifetime,
+		connMaxIdleTime: DefaultPostgresConnMaxIdleTime,
+	}
+}
+
+// resolve validates the configuration after all options are applied and
+// returns the effective values.
+//
+// Rule: an EXPLICIT WithMaxIdleConns above the effective MaxOpenConns is a
+// validation error (the caller asked for something impossible); the DEFAULT
+// idle count is clamped down to MaxOpenConns (the caller only lowered the cap).
+func (c postgresPoolConfig) resolve() (postgresPoolConfig, error) {
+	if c.maxIdleConns > c.maxOpenConns {
+		if c.maxIdleSet {
+			return c, cuserr.NewValidationError("max_idle_conns", ErrMsgMaxIdleExceedsOpen)
+		}
+		c.maxIdleConns = c.maxOpenConns
+	}
+	return c, nil
+}
+
+// apply configures db with the pool values.
+func (c postgresPoolConfig) apply(db *sql.DB) {
+	db.SetMaxOpenConns(c.maxOpenConns)
+	db.SetMaxIdleConns(c.maxIdleConns)
+	db.SetConnMaxLifetime(c.connMaxLifetime)
+	db.SetConnMaxIdleTime(c.connMaxIdleTime)
 }
 
 // PostgresRepositoryOption is a functional option for configuring PostgresRepository.
@@ -54,6 +100,61 @@ func WithTablePrefix(prefix string) PostgresRepositoryOption {
 	}
 }
 
+// WithMaxOpenConns sets the maximum number of open connections of the
+// repository's database/sql pool (default DefaultPostgresMaxOpenConns = 25).
+//
+// This is the ceiling go-hookd itself can occupy on the database: size it into
+// your connection budget (per pod) alongside your own pools. n must be > 0.
+// If MaxIdleConns was left at its default and exceeds n, it is clamped to n.
+func WithMaxOpenConns(n int) PostgresRepositoryOption {
+	return func(r *PostgresRepository) error {
+		if n <= 0 {
+			return cuserr.NewValidationError("max_open_conns", ErrMsgMaxOpenConnsInvalid)
+		}
+		r.pool.maxOpenConns = n
+		return nil
+	}
+}
+
+// WithMaxIdleConns sets the maximum number of idle connections retained by the
+// repository's pool (default DefaultPostgresMaxIdleConns = 5). n must be >= 0
+// (0 retains no idle connection) and must not exceed the effective
+// MaxOpenConns — an explicit value above it is refused, not clamped.
+func WithMaxIdleConns(n int) PostgresRepositoryOption {
+	return func(r *PostgresRepository) error {
+		if n < 0 {
+			return cuserr.NewValidationError("max_idle_conns", ErrMsgMaxIdleConnsInvalid)
+		}
+		r.pool.maxIdleConns = n
+		r.pool.maxIdleSet = true
+		return nil
+	}
+}
+
+// WithConnMaxLifetime sets the maximum lifetime of a pooled connection
+// (default DefaultPostgresConnMaxLifetime = 5m). d must be > 0.
+func WithConnMaxLifetime(d time.Duration) PostgresRepositoryOption {
+	return func(r *PostgresRepository) error {
+		if d <= 0 {
+			return cuserr.NewValidationError("conn_max_lifetime", ErrMsgConnMaxLifetimeInvalid)
+		}
+		r.pool.connMaxLifetime = d
+		return nil
+	}
+}
+
+// WithConnMaxIdleTime sets the maximum time a pooled connection may stay idle
+// before it is closed (default DefaultPostgresConnMaxIdleTime = 1m). d must be > 0.
+func WithConnMaxIdleTime(d time.Duration) PostgresRepositoryOption {
+	return func(r *PostgresRepository) error {
+		if d <= 0 {
+			return cuserr.NewValidationError("conn_max_idle_time", ErrMsgConnMaxIdleTimeInvalid)
+		}
+		r.pool.connMaxIdleTime = d
+		return nil
+	}
+}
+
 // NewPostgresRepository creates a new PostgreSQL repository instance.
 //
 // The connectionString should be in the format:
@@ -70,7 +171,7 @@ func WithTablePrefix(prefix string) PostgresRepositoryOption {
 //   - The connection cannot be established
 //   - The database cannot be pinged
 func NewPostgresRepository(connectionString string, opts ...PostgresRepositoryOption) (*PostgresRepository, error) {
-	r := &PostgresRepository{}
+	r := &PostgresRepository{pool: defaultPostgresPoolConfig()}
 
 	// Apply options
 	for _, opt := range opts {
@@ -84,22 +185,26 @@ func NewPostgresRepository(connectionString string, opts ...PostgresRepositoryOp
 		return nil, cuserr.NewValidationError("table_prefix", ErrMsgPrefixRequired)
 	}
 
+	// Validate the pool configuration before opening anything.
+	pool, err := r.pool.resolve()
+	if err != nil {
+		return nil, err
+	}
+	r.pool = pool
+
 	// Open database connection
-	db, err := sql.Open("postgres", connectionString)
+	db, err := sql.Open(PostgresDriverName, connectionString)
 	if err != nil {
 		return nil, cuserr.NewExternalError("database", "postgres", err,
 			cuserr.WithMetadata("operation", "open"),
 		)
 	}
 
-	// Configure connection pool
-	db.SetMaxOpenConns(25)
-	db.SetMaxIdleConns(5)
-	db.SetConnMaxLifetime(5 * time.Minute)
-	db.SetConnMaxIdleTime(1 * time.Minute)
+	// Configure connection pool (defaults, or the With*Conns/With*Time options)
+	r.pool.apply(db)
 
 	// Verify connection
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), PostgresPingTimeout)
 	defer cancel()
 
 	if err := db.PingContext(ctx); err != nil {
@@ -113,6 +218,16 @@ func NewPostgresRepository(connectionString string, opts ...PostgresRepositoryOp
 
 	r.db = db
 	return r, nil
+}
+
+// PoolStats returns the database/sql statistics of the repository's own pool
+// (open, in-use, idle, wait counts), so a consumer can observe go-hookd's share
+// of its connection budget.
+func (r *PostgresRepository) PoolStats() sql.DBStats {
+	if r.db == nil {
+		return sql.DBStats{}
+	}
+	return r.db.Stats()
 }
 
 // SchemaConfig returns the schema configuration for this repository.
