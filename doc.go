@@ -219,6 +219,14 @@
 //
 //	manager, _ := hookd.NewManager(config, repo, hookd.WithAllowPrivateDestinations())
 //
+// Connection budget and concurrent boot (v0.9.0): NewPostgresRepository takes
+// WithMaxOpenConns / WithMaxIdleConns / WithConnMaxLifetime / WithConnMaxIdleTime
+// (defaults 25 / 5 / 5m / 1m). SchemaManager.EnsureSchema and DropSchema
+// serialize on a per-prefix session advisory lock (SchemaLockKey), bounded by
+// WithSchemaLockTimeout, so several processes may boot at once:
+//
+//	repo, _ := hookd.NewPostgresRepository(dbURL, hookd.WithTablePrefix("svc"), hookd.WithMaxOpenConns(4))
+//
 // # Production Deployment
 //
 // For production use:

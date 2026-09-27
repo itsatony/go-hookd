@@ -6,7 +6,7 @@ A webhook delivery management library for Go applications. Handles webhook subsc
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Test Coverage](https://img.shields.io/badge/coverage-60%25-yellow.svg)](https://github.com/itsatony/go-hookd)
 
-> **Status**: Production Ready (v0.8.0)
+> **Status**: Production Ready (v0.9.0)
 > Core functionality is implemented, tested, and production-ready. The API is stable with comprehensive test coverage.
 >
 > ⚠ **v0.8.0 BREAKING BEHAVIOUR — default-deny egress guard.** Deliveries and
@@ -285,6 +285,57 @@ repoB, _ := hookd.NewPostgresRepository(dbURL, hookd.WithTablePrefix("payments")
 - **Validation**: Prefix must be lowercase alphanumeric + underscore, max 32 characters
 - **Idempotent**: `EnsureSchema()` is safe to call multiple times (creates only if missing)
 - **Schema Version**: On version mismatch, schema is dropped and recreated (no data migration)
+- **Concurrent boot (v0.9.0+)**: `EnsureSchema()`/`DropSchema()` serialize on a per-prefix PostgreSQL advisory lock, so several pods booting together create the schema exactly once (see [Connection budget and concurrent boot](#connection-budget-and-concurrent-boot))
+
+### Connection budget and concurrent boot
+
+go-hookd opens its own `database/sql` pool in `NewPostgresRepository`. On a
+connection-budgeted database (managed PostgreSQL, several pods overlapping during
+a rolling update) size it with these options (v0.9.0+). The defaults are exactly
+the values every earlier version hardcoded, so not passing them changes nothing.
+
+| Option | Default | Rule |
+|---|---|---|
+| `WithMaxOpenConns(n int)` | `25` (`DefaultPostgresMaxOpenConns`) | `n > 0`. The ceiling go-hookd can occupy per process. |
+| `WithMaxIdleConns(n int)` | `5` (`DefaultPostgresMaxIdleConns`) | `n >= 0` (`0` keeps no idle connection). An **explicit** value above the effective MaxOpenConns is refused; the **default** is clamped down to MaxOpenConns. |
+| `WithConnMaxLifetime(d time.Duration)` | `5m` (`DefaultPostgresConnMaxLifetime`) | `d > 0` |
+| `WithConnMaxIdleTime(d time.Duration)` | `1m` (`DefaultPostgresConnMaxIdleTime`) | `d > 0` |
+
+Invalid values fail `NewPostgresRepository` with a validation error before any
+connection is opened. `repo.PoolStats()` returns the pool's `sql.DBStats`.
+
+```go
+repo, err := hookd.NewPostgresRepository(dbURL,
+	hookd.WithTablePrefix("myservice"),
+	hookd.WithMaxOpenConns(4),
+	hookd.WithMaxIdleConns(1),
+)
+```
+
+**SchemaManager** options (passed to `NewSchemaManager(db, cfg, opts...)` or
+`NewSchemaManagerFromURL(url, cfg, opts...)`):
+
+| Option | Default | Rule |
+|---|---|---|
+| `WithSchemaLockTimeout(d time.Duration)` | `60s` (`DefaultSchemaLockTimeout`) | `d >= 1ms`. How long `EnsureSchema`/`DropSchema` wait for another process holding the same prefix's schema lock; on expiry they return a `cuserr` timeout error (`errors.Is(err, cuserr.ErrTimeout)`). |
+
+- **Lock**: session-level `pg_advisory_lock(SchemaLockClassID, hash(prefix))` on
+  ONE dedicated connection (`hookd.SchemaLockKey(prefix)` returns the keys). It
+  uses the two-`int4` key space, which never collides with an application's own
+  `pg_advisory_lock(bigint)` keys. Different prefixes do not wait for each other.
+  The version is re-checked after the lock is acquired, so only the first booter
+  creates/upgrades the schema. The lock is released on every path (a connection
+  whose unlock cannot be confirmed is discarded, which ends the session).
+- **DDL**: the DDL batch itself additionally takes a short transaction-level lock
+  shared by all prefixes, because `CREATE EXTENSION IF NOT EXISTS` is
+  database-global and would otherwise race between two consumers.
+- **Poolers**: session-level advisory locks need a direct connection or a
+  SESSION-mode pooler; do not run `EnsureSchema` through PgBouncer transaction
+  pooling.
+- **`NewSchemaManagerFromURL` footprint**: its private pool is bounded to 1 open
+  and 0 idle connections (`SchemaManagerMaxOpenConns`/`SchemaManagerMaxIdleConns`),
+  so a SchemaManager kept for the service lifetime holds no connection between
+  calls. Do not build anything else on its `DB()`.
 
 ## Configuration
 
@@ -988,6 +1039,9 @@ go test -cover .
 # Generate coverage report
 go test -coverprofile=coverage.out .
 go tool cover -html=coverage.out
+
+# Real-PostgreSQL schema-lock / pool tests (testcontainers; Docker or Podman)
+make test-integration-isolated   # = go test -race -tags=integration ./integration/
 ```
 
 ## Performance Considerations
@@ -1022,6 +1076,25 @@ Essential metrics to track via event bus:
 4. Circuit breaker state changes
 5. Worker utilization
 6. Dead letter queue size
+
+## Upgrading to v0.9.0
+
+v0.9.0 is additive; no consumer change is required.
+
+1. `NewPostgresRepository` accepts `WithMaxOpenConns`, `WithMaxIdleConns`,
+   `WithConnMaxLifetime`, `WithConnMaxIdleTime`; defaults are the old hardcoded
+   25 / 5 / 5m / 1m. A consumer on a connection-budgeted database should pass them.
+2. `EnsureSchema`/`DropSchema` are now safe to run concurrently from several
+   processes (advisory lock + re-check). A consumer that wrapped `EnsureSchema`
+   in its own advisory lock can keep it (it nests harmlessly) or remove it.
+3. `NewSchemaManagerFromURL`'s pool is bounded to 1 open / 0 idle connections.
+   Nothing in the library used more; a caller that built its own work on
+   `schemaMgr.DB()` gets a one-connection pool now.
+4. `NewSchemaManager` and `NewSchemaManagerFromURL` take optional
+   `...SchemaManagerOption` (`WithSchemaLockTimeout`). Existing calls compile
+   unchanged.
+5. Schema setup now needs permission to take advisory locks (any role can) and
+   must not go through a transaction-mode pooler.
 
 ## Upgrading to v0.8.0
 
@@ -1079,7 +1152,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for full guidelines.
 
 ## Project Status
 
-**Current Version**: v0.8.0 (Production Ready)
+**Current Version**: v0.9.0 (Production Ready)
 
 **What's Implemented:**
 - ✓ Core subscription and delivery management
@@ -1097,6 +1170,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for full guidelines.
 - ✓ Prometheus metrics (`prometheus/` package)
 - ✓ Subscription testing endpoint
 - ✓ Default-deny SSRF egress guard (v0.8.0)
+- ✓ Configurable repository pool + concurrent-boot-safe schema setup (v0.9.0)
 
 **What's Coming:**
 - Distributed circuit breaker (Redis)

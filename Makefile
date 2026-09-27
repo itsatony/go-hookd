@@ -2,7 +2,7 @@
 # Enterprise-grade webhook management package
 # vAudience.AI GmbH
 
-.PHONY: all build test test-race test-short test-integration coverage lint fmt vet tidy clean gates help
+.PHONY: all build test test-race test-short test-integration test-integration-isolated coverage lint fmt vet tidy clean gates help
 
 # Variables
 GO := go
@@ -28,6 +28,7 @@ help:
 	@echo "  test-race             - Run tests with race detector (explicit)"
 	@echo "  test-short            - Run fast tests only (skip integration)"
 	@echo "  test-integration      - Run integration tests with testcontainers"
+	@echo "  test-integration-isolated - Run ./integration/ (schema lock, pool) with testcontainers"
 	@echo "  coverage              - Generate coverage report (enforces ${COVERAGE_THRESHOLD}% threshold)"
 	@echo ""
 	@echo "Code Quality:"
@@ -69,6 +70,13 @@ test-integration:
 	@echo "==> Note: Requires Docker/Podman and testcontainers support"
 	$(GO) test -tags=$(INTEGRATION_TAGS) $(GOFLAGS) -timeout=10m ./...
 	@echo "==> Integration tests passed!"
+
+# Run the isolated real-PostgreSQL integration package (schema lock, pool).
+# It lives in ./integration/ so it compiles independently of the root package.
+test-integration-isolated:
+	@echo "==> Running isolated integration tests (./integration/)..."
+	$(GO) test -race -tags=$(INTEGRATION_TAGS) -count=1 -timeout=10m ./integration/
+	@echo "==> Isolated integration tests passed!"
 
 # Generate coverage report with threshold enforcement
 coverage:
