@@ -692,6 +692,11 @@ func (r *PostgresRepository) DeleteSubscription(ctx context.Context, id string) 
 // ListSubscriptions retrieves subscriptions matching the given filter.
 // Returns an empty slice if no subscriptions match.
 func (r *PostgresRepository) ListSubscriptions(ctx context.Context, filter *SubscriptionFilter) ([]*Subscription, error) {
+	// ⛔ Defence in depth: refuse a tenant-less scan unless AllTenants is set, so
+	// the WHERE-drop below can only widen to the whole table on explicit opt-in.
+	if err := filter.requireTenantScope(); err != nil {
+		return nil, err
+	}
 	query := fmt.Sprintf(`
 		SELECT id, tenant_id, url, secret, event_types, filters, status,
 		       retry_policy, headers, metadata, created_at, updated_at
@@ -973,6 +978,12 @@ func (r *PostgresRepository) GetPendingDeliveries(ctx context.Context, limit int
 // ListDeliveries retrieves deliveries matching the given filter.
 // Returns an empty slice if no deliveries match.
 func (r *PostgresRepository) ListDeliveries(ctx context.Context, filter *DeliveryFilter) ([]*Delivery, error) {
+	// ⛔ Defence in depth: refuse a tenant-less scan unless AllTenants is set, so
+	// the WHERE-drop below can only widen to the whole table on explicit opt-in.
+	// This is the exact site of the pre-v0.10.0 cross-tenant delivery leak.
+	if err := filter.requireTenantScope(); err != nil {
+		return nil, err
+	}
 	query := fmt.Sprintf(`
 		SELECT id, subscription_id, tenant_id, event_type, payload,
 		       url, secret, status, attempt_count, max_attempts,

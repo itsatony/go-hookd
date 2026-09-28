@@ -422,6 +422,28 @@ type SubscriptionFilter struct {
 
 	// Offset is the number of results to skip (optional)
 	Offset int `json:"offset"`
+
+	// AllTenants opts into a CROSS-TENANT listing when TenantID is empty.
+	//
+	// ⛔ AN EMPTY TenantID ALONE IS FAIL-CLOSED (ErrMsgTenantScopeRequired): it
+	// means "refuse", never "every tenant". This field is the ONLY way to scan
+	// across tenants, and it exists so that intent is explicit and greppable at
+	// the call site rather than implied by an omitted field. A per-tenant caller
+	// must leave it false; only an operator/system path (a global dispatch bridge
+	// or a cross-tenant dead-letter sweeper) sets it true, on a route it has
+	// already authorised for that.
+	AllTenants bool `json:"all_tenants,omitempty"`
+}
+
+// requireTenantScope fails closed when the filter would select every tenant
+// without AllTenants set. It is the one predicate every List path (manager,
+// postgres, tx, mock) shares, so a filter naming no tenant can never silently
+// widen to the whole table.
+func (f *SubscriptionFilter) requireTenantScope() error {
+	if f.TenantID == "" && !f.AllTenants {
+		return cuserr.NewValidationError("tenant_id", ErrMsgTenantScopeRequired)
+	}
+	return nil
 }
 
 // DeliveryFilter defines filtering criteria for listing deliveries.
@@ -440,6 +462,26 @@ type DeliveryFilter struct {
 	TenantID       string  `json:"tenant_id,omitempty"`
 	Limit          int     `json:"limit"`
 	Offset         int     `json:"offset"`
+
+	// AllTenants opts into a CROSS-TENANT listing when TenantID is empty.
+	//
+	// ⛔ AN EMPTY TenantID ALONE IS FAIL-CLOSED (ErrMsgTenantScopeRequired): it
+	// means "refuse", never "every tenant". Before v0.10.0 an empty TenantID here
+	// silently dropped the WHERE clause and returned EVERY tenant's deliveries,
+	// payloads included — a caller with an org-less identity could read the whole
+	// table. This field is now the only way to scan across tenants: a per-tenant
+	// caller leaves it false; only an operator/system path (a cross-tenant
+	// dead-letter sweeper, say) sets it true, on a route it has already authorised.
+	AllTenants bool `json:"all_tenants,omitempty"`
+}
+
+// requireTenantScope fails closed when the filter would select every tenant
+// without AllTenants set. It is the one predicate every List path shares.
+func (f *DeliveryFilter) requireTenantScope() error {
+	if f.TenantID == "" && !f.AllTenants {
+		return cuserr.NewValidationError("tenant_id", ErrMsgTenantScopeRequired)
+	}
+	return nil
 }
 
 // DeliveryEvent is published to the event bus for delivery lifecycle events.

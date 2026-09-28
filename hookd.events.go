@@ -474,6 +474,13 @@ func (m *Manager) ListDeliveries(ctx context.Context, filter *DeliveryFilter) ([
 		return nil, NewValidationError("filter", ErrMsgFilterRequired)
 	}
 
+	// ⛔ Fail closed on a tenant-less listing (v0.10.0). An empty TenantID must
+	// never be read as "every tenant"; a cross-tenant scan requires
+	// filter.AllTenants explicitly. See DeliveryFilter.AllTenants.
+	if err := filter.requireTenantScope(); err != nil {
+		return nil, err
+	}
+
 	// List deliveries
 	deliveries, err := m.repo.ListDeliveries(ctx, filter)
 	if err != nil {

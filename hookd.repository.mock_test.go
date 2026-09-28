@@ -233,7 +233,7 @@ func TestMockRepository_ListSubscriptions(t *testing.T) {
 	require.NoError(t, repo.CreateSubscription(ctx, sub3))
 
 	t.Run("All subscriptions", func(t *testing.T) {
-		filter := &SubscriptionFilter{Limit: 100}
+		filter := &SubscriptionFilter{AllTenants: true, Limit: 100}
 		subs, err := repo.ListSubscriptions(ctx, filter)
 		require.NoError(t, err)
 		assert.Len(t, subs, 3)
@@ -253,7 +253,7 @@ func TestMockRepository_ListSubscriptions(t *testing.T) {
 	})
 
 	t.Run("Filter by status", func(t *testing.T) {
-		filter := &SubscriptionFilter{Status: SubscriptionStatusPaused, Limit: 100}
+		filter := &SubscriptionFilter{AllTenants: true, Status: SubscriptionStatusPaused, Limit: 100}
 		subs, err := repo.ListSubscriptions(ctx, filter)
 		require.NoError(t, err)
 		assert.Len(t, subs, 1)
@@ -261,20 +261,20 @@ func TestMockRepository_ListSubscriptions(t *testing.T) {
 	})
 
 	t.Run("Filter by event types", func(t *testing.T) {
-		filter := &SubscriptionFilter{EventTypes: []string{"user.created"}, Limit: 100}
+		filter := &SubscriptionFilter{AllTenants: true, EventTypes: []string{"user.created"}, Limit: 100}
 		subs, err := repo.ListSubscriptions(ctx, filter)
 		require.NoError(t, err)
 		assert.Len(t, subs, 3) // All have user.created
 	})
 
 	t.Run("Limit and offset", func(t *testing.T) {
-		filter := &SubscriptionFilter{Limit: 2, Offset: 0}
+		filter := &SubscriptionFilter{AllTenants: true, Limit: 2, Offset: 0}
 		subs, err := repo.ListSubscriptions(ctx, filter)
 		require.NoError(t, err)
 		assert.Len(t, subs, 2)
 		assert.Equal(t, "sub_test3", subs[0].ID)
 
-		filter = &SubscriptionFilter{Limit: 2, Offset: 1}
+		filter = &SubscriptionFilter{AllTenants: true, Limit: 2, Offset: 1}
 		subs, err = repo.ListSubscriptions(ctx, filter)
 		require.NoError(t, err)
 		assert.Len(t, subs, 2)
@@ -903,7 +903,7 @@ func TestMockRepositoryTx_ListSubscriptions(t *testing.T) {
 	defer tx.Rollback()
 
 	t.Run("List all", func(t *testing.T) {
-		filter := &SubscriptionFilter{Limit: 100}
+		filter := &SubscriptionFilter{AllTenants: true, Limit: 100}
 		subs, err := tx.ListSubscriptions(ctx, filter)
 		require.NoError(t, err)
 		assert.Len(t, subs, 3)
@@ -917,14 +917,14 @@ func TestMockRepositoryTx_ListSubscriptions(t *testing.T) {
 	})
 
 	t.Run("Filter by status", func(t *testing.T) {
-		filter := &SubscriptionFilter{Status: SubscriptionStatusActive, Limit: 100}
+		filter := &SubscriptionFilter{AllTenants: true, Status: SubscriptionStatusActive, Limit: 100}
 		subs, err := tx.ListSubscriptions(ctx, filter)
 		require.NoError(t, err)
 		assert.Len(t, subs, 3)
 	})
 
 	t.Run("With limit and offset", func(t *testing.T) {
-		filter := &SubscriptionFilter{Limit: 2, Offset: 1}
+		filter := &SubscriptionFilter{AllTenants: true, Limit: 2, Offset: 1}
 		subs, err := tx.ListSubscriptions(ctx, filter)
 		require.NoError(t, err)
 		assert.Len(t, subs, 2)
@@ -937,7 +937,7 @@ func TestMockRepositoryTx_ListSubscriptions(t *testing.T) {
 		require.NoError(t, err)
 
 		// Should see 4 subscriptions in transaction
-		filter := &SubscriptionFilter{Limit: 100}
+		filter := &SubscriptionFilter{AllTenants: true, Limit: 100}
 		subs, err := tx.ListSubscriptions(ctx, filter)
 		require.NoError(t, err)
 		assert.Len(t, subs, 4)

@@ -385,8 +385,13 @@ func (m *Manager) ListSubscriptions(ctx context.Context, filter *SubscriptionFil
 		return nil, NewValidationError("filter", ErrMsgFilterRequired)
 	}
 
-	if filter.TenantID == "" {
-		return nil, NewValidationError("tenant_id", ErrMsgMissingTenantID)
+	// ⛔ Fail closed on a tenant-less listing. An empty TenantID must never be
+	// read as "every tenant"; a cross-tenant scan requires filter.AllTenants
+	// explicitly (v0.10.0). Before it, an empty TenantID here was refused
+	// outright — the opt-in now makes a deliberate cross-tenant listing (e.g. a
+	// global dispatch bridge) expressible without reopening the fail-open hole.
+	if err := filter.requireTenantScope(); err != nil {
+		return nil, err
 	}
 
 	// List subscriptions

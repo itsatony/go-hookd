@@ -327,6 +327,10 @@ func (r *MockRepository) DeleteSubscription(ctx context.Context, id string) erro
 
 // ListSubscriptions retrieves subscriptions matching the given filter.
 func (r *MockRepository) ListSubscriptions(ctx context.Context, filter *SubscriptionFilter) ([]*Subscription, error) {
+	// Mirror the real repositories' fail-closed tenant scope (v0.10.0).
+	if err := filter.requireTenantScope(); err != nil {
+		return nil, err
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -518,6 +522,10 @@ func (r *MockRepository) UnlockAllDeliveries() {
 
 // ListDeliveries retrieves deliveries matching the given filter.
 func (r *MockRepository) ListDeliveries(ctx context.Context, filter *DeliveryFilter) ([]*Delivery, error) {
+	// Mirror the real repositories' fail-closed tenant scope (v0.10.0).
+	if err := filter.requireTenantScope(); err != nil {
+		return nil, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -1144,6 +1152,10 @@ func (tx *MockRepositoryTx) DeleteSubscription(ctx context.Context, id string) e
 
 // ListSubscriptions lists subscriptions within the transaction.
 func (tx *MockRepositoryTx) ListSubscriptions(ctx context.Context, filter *SubscriptionFilter) ([]*Subscription, error) {
+	// Mirror the real repositories' fail-closed tenant scope (v0.10.0).
+	if err := filter.requireTenantScope(); err != nil {
+		return nil, err
+	}
 	tx.mu.RLock()
 	defer tx.mu.RUnlock()
 
@@ -1266,6 +1278,10 @@ func (tx *MockRepositoryTx) GetPendingDeliveries(ctx context.Context, limit int)
 
 // ListDeliveries retrieves deliveries matching the given filter within the transaction.
 func (tx *MockRepositoryTx) ListDeliveries(ctx context.Context, filter *DeliveryFilter) ([]*Delivery, error) {
+	// Mirror the real repositories' fail-closed tenant scope (v0.10.0).
+	if err := filter.requireTenantScope(); err != nil {
+		return nil, err
+	}
 	tx.mu.Lock()
 	defer tx.mu.Unlock()
 

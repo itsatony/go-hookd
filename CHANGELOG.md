@@ -3,6 +3,44 @@
 All notable changes to go-hookd. Earlier releases are described in their tag
 commit messages (`git log --tags`) and in README "Upgrading to vX" sections.
 
+## v0.10.0 — 2026-09-28
+
+Security fix. **Behaviour change — a cross-tenant lister must opt in explicitly.**
+
+### Security
+- **Tenant-less listings are now fail-CLOSED.** `Manager.ListDeliveries`,
+  `PostgresRepository.ListDeliveries`, `PostgresRepositoryTx.ListDeliveries` and
+  their `ListSubscriptions` siblings now REFUSE a filter whose `TenantID` is empty
+  unless the new `AllTenants` opt-in is set, returning a validation error
+  (`ErrMsgTenantScopeRequired`). Before this, an empty `TenantID` silently dropped
+  the `WHERE tenant_id = $1` clause and returned **every tenant's** rows —
+  deliveries include the webhook payload. A caller holding an org-less identity
+  (e.g. a bare service-to-service credential; charonmw ≥ v0.23 no longer promotes
+  such a caller to a system org) could enumerate the whole table. Reported against
+  trove (`WebhookService.ListDeliveries`); the enforcing end was proven reachable
+  on a live dev deployment.
+
+### Added
+- `DeliveryFilter.AllTenants bool` and `SubscriptionFilter.AllTenants bool` — the
+  only way to scan across tenants. Omitted/false is per-tenant and fail-closed.
+- `ErrMsgTenantScopeRequired` constant.
+
+### ⚠ Consumer action required (only if you list across tenants)
+An empty `TenantID` used to mean "every tenant". If any of your call sites relied
+on that, set `AllTenants: true` explicitly there — it is a one-line change and it
+makes the cross-tenant intent greppable. Per-tenant callers (the vast majority)
+need **no change**: they already pass a `TenantID`. Known cross-tenant callers in
+the fleet that must adopt the opt-in when they upgrade past their current pin:
+- **deepr** `internal/webhook/dpr.webhook.dlq_sweeper.go` — the dead-letter
+  redrive sweeper lists deliveries across all tenants (currently on go-hookd
+  v0.9.0; unaffected until it bumps).
+- **skope** `internal/webhook.bridge.internal.go` — the event dispatch bridge
+  lists subscriptions across all tenants (retired; currently on v0.6.0).
+
+`Manager.ListSubscriptions` previously refused an empty `TenantID` outright; it now
+accepts one when `AllTenants` is set, so a deliberate cross-tenant subscription
+scan is expressible without reopening the fail-open hole.
+
 ## v0.9.0 — 2026-09-27
 
 Additive; no consumer change required.
