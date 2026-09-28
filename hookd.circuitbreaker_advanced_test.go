@@ -87,7 +87,7 @@ func TestCircuitBreaker_OpenToHalfOpenTransition(t *testing.T) {
 	require.NoError(t, err)
 
 	// Process delivery - should transition circuit to HALF_OPEN
-	manager.processDelivery(ctx, delivery)
+	manager.processDelivery(ctx, claimForTest(t, manager, delivery))
 
 	// CRITICAL ASSERTIONS
 	updatedState, err := repo.GetCircuitBreakerState(ctx, server.URL)
@@ -181,7 +181,7 @@ func TestCircuitBreaker_HalfOpenToClosedTransition(t *testing.T) {
 	require.NoError(t, err)
 
 	// Process delivery - should close circuit
-	manager.processDelivery(ctx, delivery)
+	manager.processDelivery(ctx, claimForTest(t, manager, delivery))
 
 	// ASSERTIONS
 	updatedState, err := repo.GetCircuitBreakerState(ctx, server.URL)
@@ -268,7 +268,7 @@ func TestCircuitBreaker_HalfOpenToOpenReopen(t *testing.T) {
 	require.NoError(t, err)
 
 	// Process delivery - should fail and reopen circuit
-	manager.processDelivery(ctx, delivery1)
+	manager.processDelivery(ctx, claimForTest(t, manager, delivery1))
 	// processDelivery logs errors internally, doesn't return them
 
 	// ASSERTIONS - Circuit should be OPEN again
@@ -295,7 +295,7 @@ func TestCircuitBreaker_HalfOpenToOpenReopen(t *testing.T) {
 	require.NoError(t, err)
 
 	// Try to process second delivery - should be blocked
-	manager.processDelivery(ctx, delivery2)
+	manager.processDelivery(ctx, claimForTest(t, manager, delivery2))
 	// Delivery should be blocked by circuit breaker (logged internally)
 
 	// Verify second delivery was not attempted

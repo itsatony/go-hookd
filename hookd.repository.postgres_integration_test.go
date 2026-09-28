@@ -401,7 +401,7 @@ func TestPostgresRepository_GetPendingDeliveries_Integration(t *testing.T) {
 	}
 
 	// Get pending deliveries
-	deliveries, err := repo.GetPendingDeliveries(ctx, 10)
+	deliveries, err := repo.ClaimPendingDeliveries(ctx, 10, testClaimLease)
 
 	// Verify
 	require.NoError(t, err)
@@ -467,7 +467,7 @@ func TestPostgresRepository_GetPendingDeliveries_SkipLocked_Integration(t *testi
 	require.NoError(t, err)
 
 	// Try to get pending deliveries from main repo (should skip locked)
-	deliveries, err := repo.GetPendingDeliveries(ctx, 10)
+	deliveries, err := repo.ClaimPendingDeliveries(ctx, 10, testClaimLease)
 	require.NoError(t, err)
 
 	// Verify: locked delivery should be skipped

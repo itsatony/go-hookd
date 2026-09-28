@@ -25,7 +25,18 @@ type Config struct {
 	WorkerCount       int // Number of concurrent delivery workers (default: 10)
 	QueuePollInterval int // Queue polling interval in milliseconds (default: 1000)
 	DeliveryTimeoutMs int // HTTP delivery timeout in milliseconds (default: 30000)
-	MaxBatchSize      int // Maximum deliveries to fetch per poll (default: 100)
+	MaxBatchSize      int // Deliveries one worker claims per poll (default: 1, see DefaultMaxBatchSize)
+
+	// ClaimLeaseMs is how long, in milliseconds, a worker's claim on a delivery
+	// lasts (v0.11.0). A claimed delivery is invisible to every other worker until
+	// the lease expires; the worker renews it immediately before sending, so one
+	// lease must outlast one attempt: it must be >= DeliveryTimeoutMs +
+	// DeliveryBookkeepingTimeout + MinClaimLeaseMarginMs. 0 (the default) means
+	// DeliveryTimeoutMs + DefaultClaimLeaseMarginMs. It is also the delay before a
+	// delivery held by a crashed worker is picked up again. Leases are measured
+	// on the DATABASE clock (NOW()); a failover to a primary whose clock runs
+	// ahead shortens in-flight leases by that skew.
+	ClaimLeaseMs int
 
 	// QueueIdleMaxInterval is the ceiling, in milliseconds, that a worker's poll
 	// interval backs off to while consecutive polls return no deliveries
@@ -80,7 +91,7 @@ func NewConfig(databaseURL string) *Config {
 		WorkerCount:       DefaultWorkerCount,
 		QueuePollInterval: DefaultQueuePollIntervalMs,
 		DeliveryTimeoutMs: DefaultDeliveryTimeoutMs,
-		MaxBatchSize:      100,
+		MaxBatchSize:      DefaultMaxBatchSize,
 
 		QueueIdleMaxInterval:   DefaultQueueIdleMaxIntervalMs,
 		QueueIdleBackoffFactor: DefaultQueueIdleBackoffFactor,
@@ -184,7 +195,42 @@ func (c *Config) validateWorkerPool() error {
 	if c.QueueIdleBackoffFactor < 1.0 {
 		return NewConfigurationError("queue_idle_backoff_factor", ErrMsgInvalidIdleBackoffFactor)
 	}
+	// ClaimLeaseMs 0 = derived (see ClaimLease); an explicit value must outlast
+	// one attempt, or a slow send could be re-claimed and delivered twice.
+	if c.ClaimLeaseMs != 0 && c.ClaimLeaseMs < c.minClaimLeaseMs() {
+		return NewConfigurationError("claim_lease_ms", ErrMsgInvalidClaimLease)
+	}
 	return nil
+}
+
+// minClaimLeaseMs is the shortest lease that outlasts one delivery attempt.
+func (c *Config) minClaimLeaseMs() int {
+	return c.DeliveryTimeoutMs + int(DeliveryBookkeepingTimeout/time.Millisecond) + MinClaimLeaseMarginMs
+}
+
+// EffectiveBatchSize is how many deliveries one poll actually claims:
+// MaxBatchSize, capped so a worker can finish its whole batch within one lease
+// (ClaimLease / (DeliveryTimeout + DeliveryBookkeepingTimeout), at least 1).
+// Rows beyond that would sit hidden from idle workers until the lease lapsed.
+func (c *Config) EffectiveBatchSize() int {
+	perAttempt := c.DeliveryTimeout() + DeliveryBookkeepingTimeout
+	limit := int(c.ClaimLease() / perAttempt)
+	if limit < 1 {
+		limit = 1
+	}
+	if c.MaxBatchSize < limit {
+		return c.MaxBatchSize
+	}
+	return limit
+}
+
+// ClaimLease returns the claim lease as a time.Duration: ClaimLeaseMs, or when it
+// is 0, DeliveryTimeoutMs + DefaultClaimLeaseMarginMs.
+func (c *Config) ClaimLease() time.Duration {
+	if c.ClaimLeaseMs != 0 {
+		return time.Duration(c.ClaimLeaseMs) * time.Millisecond
+	}
+	return time.Duration(c.DeliveryTimeoutMs+DefaultClaimLeaseMarginMs) * time.Millisecond
 }
 
 // validateRetryPolicy validates retry policy configuration.

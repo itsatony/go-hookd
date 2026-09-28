@@ -10,7 +10,7 @@
 //   - Idempotency keys to prevent duplicate deliveries
 //   - Multi-tenancy support with tenant-isolated subscriptions
 //   - HMAC-SHA256 payload signing for secure webhook verification
-//   - PostgreSQL backend with SKIP LOCKED for concurrent processing
+//   - PostgreSQL backend: leased claims (UPDATE ... FOR UPDATE SKIP LOCKED) for concurrent processing
 //   - Event-driven architecture with pluggable event bus
 //
 // # Quick Start

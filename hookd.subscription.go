@@ -494,6 +494,13 @@ func (m *Manager) DisableSubscription(ctx context.Context, id string) (*Subscrip
 // - Does NOT retry on failure
 // - Returns the result immediately
 //
+// ⚠ The ping is NOT shaped like a delivery. Its body is hookd's own
+// {"type", "timestamp" (unix int), "message"} rather than the caller's payload,
+// its X-Webhook-Delivery-ID is the literal "test_ping", and it carries no
+// X-Webhook-Idempotency-Key. A receiver that validates bodies strictly will
+// reject it; the signature and every other header ARE computed exactly as for a
+// delivery, so it does prove connectivity and signature verification.
+//
 // This is useful for validating endpoint connectivity before enabling a subscription
 // or for debugging delivery failures.
 //
@@ -526,13 +533,15 @@ func (m *Manager) TestSubscription(ctx context.Context, subscriptionID string) (
 				fmt.Sprintf(ErrMsgRateLimited, TestSubscriptionCooldownSeconds))
 		}
 	}
-	m.testRateLimiter.Store(subscriptionID, time.Now())
 
 	// Get subscription
 	sub, err := m.GetSubscription(ctx, subscriptionID)
 	if err != nil {
 		return nil, err
 	}
+	// Only an EXISTING subscription takes a cooldown slot: storing before the
+	// lookup let arbitrary ids grow the map without bound (v0.11.0).
+	m.testRateLimiter.Store(subscriptionID, time.Now())
 
 	// Create test payload
 	testPayload := map[string]any{
@@ -546,7 +555,7 @@ func (m *Manager) TestSubscription(ctx context.Context, subscriptionID string) (
 	if err != nil {
 		return &TestResult{
 			Success: false,
-			Error:   ErrMsgMarshalTestPayload + ": " + err.Error(),
+			Error:   ErrMsgMarshalTestPayload,
 		}, nil
 	}
 
@@ -555,7 +564,7 @@ func (m *Manager) TestSubscription(ctx context.Context, subscriptionID string) (
 	if err != nil {
 		return &TestResult{
 			Success: false,
-			Error:   ErrMsgCreateRequest + ": " + err.Error(),
+			Error:   ErrMsgCreateRequest,
 		}, nil
 	}
 
@@ -568,15 +577,30 @@ func (m *Manager) TestSubscription(ctx context.Context, subscriptionID string) (
 		req.Header.Set(key, value)
 	}
 
+	// Resolve the signing secret for this ping (per call, never cached).
+	secret, err := m.resolveSigningSecret(ctx, SecretRequest{
+		Ref:            sub.Secret,
+		TenantID:       sub.TenantID,
+		SubscriptionID: sub.ID,
+		DeliveryID:     TestPingDeliveryID,
+	})
+	if err != nil {
+		return &TestResult{
+			Success: false,
+			Error:   subscriberVisibleError(err),
+		}, nil
+	}
+
 	// Calculate and add signature
 	timestamp := fmt.Sprintf("%d", time.Now().Unix())
-	signature := calculateSignature(sub.Secret, timestamp, payloadJSON)
+	signature := calculateSignature(secret, timestamp, payloadJSON)
 	req.Header.Set(HeaderSignature, signature)
 	req.Header.Set(HeaderTimestamp, timestamp)
 	req.Header.Set(HeaderDeliveryID, TestPingDeliveryID)
 	req.Header.Set(HeaderSubscriptionID, sub.ID)
 	req.Header.Set(HeaderEventType, EventTypeTestPing)
 	req.Header.Set(HeaderAttemptNumber, "1")
+	req.Header.Del(HeaderIdempotencyKey) // a ping never carries one
 
 	// Execute request with timing
 	startTime := time.Now()

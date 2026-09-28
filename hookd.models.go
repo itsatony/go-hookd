@@ -57,6 +57,12 @@ type Delivery struct {
 	URL string `json:"url,omitempty" db:"url"`
 	// Secret is the HMAC key for inline deliveries (empty for subscription-based)
 	Secret string `json:"-" db:"secret"`
+	// IdempotencyKey is the key the queuer supplied (QueueDeliveryRequest /
+	// QueueInlineDeliveryRequest), empty if none. Since v0.11.0 it is stored and
+	// sent on every attempt as X-Webhook-Idempotency-Key, and carried on
+	// delivery events. ⚠ It is visible to the receiver and to every EventBus
+	// subscriber: never put sensitive data in it.
+	IdempotencyKey string `json:"idempotency_key,omitempty" db:"idempotency_key"`
 }
 
 // DeliveryAttempt represents a single delivery attempt.
@@ -323,7 +329,7 @@ func (r *QueueDeliveryRequest) Validate() error {
 		return cuserr.NewValidationError("payload", ErrMsgPayloadTooLarge)
 	}
 
-	return nil
+	return validateIdempotencyKey(r.IdempotencyKey)
 }
 
 // QueueInlineDeliveryRequest is the request to queue an inline delivery.
@@ -403,7 +409,7 @@ func (r *QueueInlineDeliveryRequest) validate(policy egressPolicy) error {
 		return cuserr.NewValidationError("max_retries", "max_retries cannot be negative")
 	}
 
-	return nil
+	return validateIdempotencyKey(r.IdempotencyKey)
 }
 
 // SubscriptionFilter defines filtering criteria for listing subscriptions.
@@ -493,6 +499,11 @@ type DeliveryEvent struct {
 	TenantID       string         `json:"tenant_id"`
 	EventType      string         `json:"event_type"`
 	Status         string         `json:"status"`
+	// IdempotencyKey is the queuer's key (v0.11.0), so a consumer that queues
+	// from its own outbox can map an outcome back to its own row. ⚠ It reaches
+	// every EventBus subscriber (and the receiver, as a header): never put
+	// sensitive data in it.
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
 }
 
 // AuditEvent is published to the event bus for audit trail.
@@ -552,8 +563,11 @@ type CleanupFilter struct {
 	// Use DeliveryStatusSuccess, DeliveryStatusFailed, DeliveryStatusDeadLetter, etc.
 	Status *string `json:"status,omitempty"`
 
-	// TenantID filters by tenant (optional).
-	// If empty, cleanup applies across all tenants.
+	// TenantID scopes the cleanup to one tenant.
+	//
+	// ⛔ Since v0.11.0 an empty TenantID is REFUSED (ErrMsgTenantScopeRequired)
+	// unless AllTenants is set: a destructive sweep across every tenant must say
+	// so, exactly like the v0.10.0 List paths.
 	TenantID string `json:"tenant_id,omitempty"`
 
 	// SubscriptionID filters by subscription (optional).
@@ -561,10 +575,35 @@ type CleanupFilter struct {
 
 	// EventType filters by event type (optional).
 	EventType *string `json:"event_type,omitempty"`
+
+	// AllTenants is the explicit opt-in to count or delete across ALL tenants
+	// when TenantID is empty (a fleet-wide retention sweep). It is not itself a
+	// filter constraint: Validate still requires at least one real constraint.
+	// When TenantID is set, TenantID wins and AllTenants has no effect.
+	AllTenants bool `json:"all_tenants,omitempty"`
+}
+
+// requireTenantScope fails closed when a cleanup filter would count or delete
+// across every tenant without AllTenants set. It is the same rule the List
+// paths apply (DeliveryFilter.requireTenantScope), shared by every
+// Count/DeleteDeliveriesByFilter implementation (postgres, tx, mock) and by
+// Manager.CleanupDeliveries via Validate. A nil filter is refused too.
+func (f *CleanupFilter) requireTenantScope() error {
+	if f == nil {
+		return cuserr.NewValidationError("filter", ErrMsgCleanupFilterRequired)
+	}
+	if f.TenantID == "" && !f.AllTenants {
+		return cuserr.NewValidationError("tenant_id", ErrMsgTenantScopeRequired)
+	}
+	return nil
 }
 
 // Validate validates the CleanupFilter.
 func (f *CleanupFilter) Validate() error {
+	if err := f.requireTenantScope(); err != nil {
+		return err
+	}
+
 	// At least one constraint must be provided to prevent accidental mass deletion
 	if f.CreatedBefore == nil && f.CreatedAfter == nil && f.Status == nil &&
 		f.TenantID == "" && f.SubscriptionID == nil && f.EventType == nil {
@@ -705,5 +744,21 @@ func validateEventTypes(eventTypes []string) error {
 		}
 	}
 
+	return nil
+}
+
+// validateIdempotencyKey refuses a key that cannot be sent as the
+// X-Webhook-Idempotency-Key header (every attempt would fail) or stored
+// (VARCHAR(255)): at most MaxIdempotencyKeyLength bytes of printable ASCII
+// (space allowed, control characters and non-ASCII refused).
+func validateIdempotencyKey(key string) error {
+	if len(key) > MaxIdempotencyKeyLength {
+		return cuserr.NewValidationError("idempotency_key", ErrMsgInvalidIdempotencyKey)
+	}
+	for i := 0; i < len(key); i++ {
+		if key[i] < 0x20 || key[i] > 0x7e {
+			return cuserr.NewValidationError("idempotency_key", ErrMsgInvalidIdempotencyKey)
+		}
+	}
 	return nil
 }

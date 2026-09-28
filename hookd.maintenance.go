@@ -61,6 +61,7 @@ func (m *Manager) GetMaintenanceStats(ctx context.Context) (*MaintenanceStats, e
 //	filter := &CleanupFilter{
 //	    Status: ptr(DeliveryStatusSuccess),
 //	    CreatedBefore: ptr(time.Now().AddDate(0, 0, -30)),
+//	    AllTenants: true, // or TenantID: "t1" — one of the two is required
 //	}
 //
 //	// Dry-run to see what would be deleted
@@ -73,7 +74,8 @@ func (m *Manager) GetMaintenanceStats(ctx context.Context) (*MaintenanceStats, e
 //
 // Thread Safety: This method is safe for concurrent use.
 func (m *Manager) CleanupDeliveries(ctx context.Context, filter *CleanupFilter, dryRun bool) (*CleanupResult, error) {
-	// Validate filter
+	// Validate filter. Since v0.11.0 this refuses a nil filter and an empty
+	// TenantID without AllTenants (fail-closed tenant scope, like the List paths).
 	if err := filter.Validate(); err != nil {
 		return nil, err
 	}
@@ -201,6 +203,11 @@ func (m *Manager) CleanupIdempotencyKeys(ctx context.Context, dryRun bool) (*Ide
 // CleanupSuccessfulDeliveries is a convenience method to cleanup successful deliveries
 // older than the specified duration.
 //
+// ⛔ It sweeps ACROSS ALL TENANTS (its filter sets CleanupFilter.AllTenants). The
+// same is true of CleanupFailedDeliveries, CleanupDeadLetterDeliveries and
+// CleanupAllCompletedDeliveries. For a per-tenant sweep call CleanupDeliveries
+// with a TenantID.
+//
 // This is equivalent to calling CleanupDeliveries with a filter for successful
 // deliveries created before the cutoff time.
 //
@@ -211,6 +218,7 @@ func (m *Manager) CleanupSuccessfulDeliveries(ctx context.Context, olderThan tim
 	filter := &CleanupFilter{
 		Status:        &status,
 		CreatedBefore: &cutoff,
+		AllTenants:    true, // ⛔ fleet-wide by contract: this helper takes no tenant
 	}
 	return m.CleanupDeliveries(ctx, filter, dryRun)
 }
@@ -228,6 +236,7 @@ func (m *Manager) CleanupFailedDeliveries(ctx context.Context, olderThan time.Du
 	filter := &CleanupFilter{
 		Status:        &status,
 		CreatedBefore: &cutoff,
+		AllTenants:    true, // ⛔ fleet-wide by contract: this helper takes no tenant
 	}
 	return m.CleanupDeliveries(ctx, filter, dryRun)
 }
@@ -244,6 +253,7 @@ func (m *Manager) CleanupDeadLetterDeliveries(ctx context.Context, olderThan tim
 	filter := &CleanupFilter{
 		Status:        &status,
 		CreatedBefore: &cutoff,
+		AllTenants:    true, // ⛔ fleet-wide by contract: this helper takes no tenant
 	}
 	return m.CleanupDeliveries(ctx, filter, dryRun)
 }
@@ -267,6 +277,7 @@ func (m *Manager) CleanupAllCompletedDeliveries(ctx context.Context, olderThan t
 	successFilter := &CleanupFilter{
 		Status:        &successStatus,
 		CreatedBefore: &cutoff,
+		AllTenants:    true, // ⛔ fleet-wide by contract: this helper takes no tenant
 	}
 	successResult, err := m.CleanupDeliveries(ctx, successFilter, dryRun)
 	if err != nil {
@@ -280,6 +291,7 @@ func (m *Manager) CleanupAllCompletedDeliveries(ctx context.Context, olderThan t
 	failedFilter := &CleanupFilter{
 		Status:        &failedStatus,
 		CreatedBefore: &cutoff,
+		AllTenants:    true, // ⛔ fleet-wide by contract: this helper takes no tenant
 	}
 	failedResult, err := m.CleanupDeliveries(ctx, failedFilter, dryRun)
 	if err != nil {

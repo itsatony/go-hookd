@@ -177,7 +177,7 @@ func (m *SchemaManager) EnsureSchema(ctx context.Context) error {
 		return err
 	}
 	if exists && currentVersion == SchemaVersion {
-		return nil
+		return m.ensureAdditiveColumns(ctx)
 	}
 
 	// Process the template before taking the lock (pure, no I/O).
@@ -295,19 +295,20 @@ func (m *SchemaManager) getSchemaVersion(ctx context.Context, q querier) (exists
 	// Check if the subscriptions table exists (primary table)
 	tableName := m.schemaConfig.TableSubscriptions()
 
-	// Query to check if table exists and get its comment
+	// ⛔ The table is looked up with to_regclass, i.e. through search_path —
+	// EXACTLY how schema.sql's unqualified DROP/CREATE resolve it. Any other
+	// lookup ('public', current_schema()) can disagree with the DDL, and then
+	// "not found" here is followed by a DROP that finds (and empties) a table
+	// elsewhere on the search_path.
 	query := `
-		SELECT obj_description(c.oid) AS comment
-		FROM pg_class c
-		JOIN pg_namespace n ON n.oid = c.relnamespace
-		WHERE c.relname = $1
-		  AND n.nspname = 'public'
-		  AND c.relkind = 'r'
+		SELECT c.oid IS NOT NULL, obj_description(c.oid, 'pg_class')
+		FROM (SELECT to_regclass($1)::oid AS oid) c
 	`
 
+	var found bool
 	var comment sql.NullString
-	err = q.QueryRowContext(ctx, query, tableName).Scan(&comment)
-	if err == sql.ErrNoRows {
+	err = q.QueryRowContext(ctx, query, tableName).Scan(&found, &comment)
+	if err == nil && !found {
 		return false, "", nil
 	}
 	if err != nil {
@@ -429,4 +430,91 @@ func (m *SchemaManager) GetSchemaInfo(ctx context.Context) (*SchemaInfo, error) 
 		LatestVersion: SchemaVersion,
 		NeedsUpgrade:  exists && version != SchemaVersion,
 	}, nil
+}
+
+// additiveColumn is a NULLABLE column added to the baseline schema after its
+// SchemaVersion was fixed. It is applied in place — never by bumping
+// SchemaVersion, because a version change makes EnsureSchema DROP and recreate
+// every table, and an OLDER binary booting during a rolling deploy would read a
+// newer version comment as "different" and drop the upgraded schema. A nullable
+// column is invisible to older binaries (every query names its columns).
+type additiveColumn struct {
+	tableSuffix string
+	column      string
+	sqlType     string
+}
+
+// schemaAdditiveColumns are applied by EnsureSchema to an existing
+// SchemaVersion schema that lacks them. Fresh schemas get them from schema.sql.
+var schemaAdditiveColumns = []additiveColumn{
+	// v0.11.0 (go-hookd#2): the queuer's key, sent as X-Webhook-Idempotency-Key.
+	{tableSuffix: TableSuffixDeliveries, column: "idempotency_key", sqlType: "VARCHAR(255)"},
+}
+
+// Operation names and statements for additive schema changes.
+const (
+	sqlSetAdditiveLockTimeout = "SET lock_timeout = '5s'"
+	sqlResetLockTimeout       = "RESET lock_timeout"
+	opCheckAdditiveColumns    = "check_additive_columns"
+	opAddAdditiveColumn       = "add_additive_column"
+)
+
+// missingAdditiveColumns lists the additive columns the schema lacks.
+func (m *SchemaManager) missingAdditiveColumns(ctx context.Context, q querier) ([]additiveColumn, error) {
+	var missing []additiveColumn
+	for _, col := range schemaAdditiveColumns {
+		var present bool
+		// Resolved through search_path, like the ALTER that follows (see
+		// getSchemaVersion).
+		err := q.QueryRowContext(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM pg_attribute
+				WHERE attrelid = to_regclass($1) AND attname = $2 AND NOT attisdropped
+			)`, m.schemaConfig.tableName(col.tableSuffix), col.column).Scan(&present)
+		if err != nil {
+			return nil, cuserr.NewExternalError("database", "postgres", err,
+				cuserr.WithMetadata("operation", opCheckAdditiveColumns),
+			)
+		}
+		if !present {
+			missing = append(missing, col)
+		}
+	}
+	return missing, nil
+}
+
+// ensureAdditiveColumns adds any missing additive column. The check is lock
+// free (the common case: nothing to do); the ALTER runs under the per-prefix
+// schema lock and re-checks, so concurrent boots add each column once.
+func (m *SchemaManager) ensureAdditiveColumns(ctx context.Context) error {
+	missing, err := m.missingAdditiveColumns(ctx, m.db)
+	if err != nil || len(missing) == 0 {
+		return err
+	}
+	return m.withSchemaLock(ctx, func(conn *sql.Conn) error {
+		missing, err := m.missingAdditiveColumns(ctx, conn)
+		if err != nil {
+			return err
+		}
+		// ADD COLUMN takes ACCESS EXCLUSIVE; bounded so a boot behind a long
+		// transaction fails fast (and retries next boot) instead of queueing
+		// every other query on the table behind it.
+		if _, err := conn.ExecContext(ctx, sqlSetAdditiveLockTimeout); err != nil {
+			return cuserr.NewExternalError("database", "postgres", err,
+				cuserr.WithMetadata("operation", opAddAdditiveColumn),
+			)
+		}
+		defer func() { _, _ = conn.ExecContext(context.WithoutCancel(ctx), sqlResetLockTimeout) }()
+		for _, col := range missing {
+			stmt := fmt.Sprintf(`ALTER TABLE %s ADD COLUMN IF NOT EXISTS %s %s`,
+				m.schemaConfig.tableName(col.tableSuffix), col.column, col.sqlType)
+			if _, err := conn.ExecContext(ctx, stmt); err != nil {
+				return cuserr.NewExternalError("database", "postgres", err,
+					cuserr.WithMetadata("operation", opAddAdditiveColumn),
+					cuserr.WithMetadata("column", col.column),
+				)
+			}
+		}
+		return nil
+	})
 }

@@ -349,7 +349,7 @@ func TestMultiPrefix_ConcurrentOperations(t *testing.T) {
 
 		// Poll queues - each should get their own deliveries
 		for i, repo := range repos {
-			deliveries, err := repo.GetPendingDeliveries(ctx, 20)
+			deliveries, err := repo.ClaimPendingDeliveries(ctx, 20, testClaimLease)
 			require.NoError(t, err)
 			assert.Len(t, deliveries, 10, "repo %d should have 10 pending deliveries", i)
 

@@ -149,8 +149,9 @@ func copyDelivery(dlv *Delivery) *Delivery {
 		MaxAttempts:    dlv.MaxAttempts,
 		CreatedAt:      dlv.CreatedAt,
 		// Inline delivery fields
-		URL:    dlv.URL,
-		Secret: dlv.Secret,
+		URL:            dlv.URL,
+		Secret:         dlv.Secret,
+		IdempotencyKey: dlv.IdempotencyKey,
 	}
 
 	if dlv.Payload != nil {
@@ -441,68 +442,6 @@ func (r *MockRepository) DeleteDelivery(ctx context.Context, id string) error {
 	delete(r.lockedDeliveries, id)
 
 	return nil
-}
-
-// GetPendingDeliveries retrieves pending deliveries ready for processing.
-// Simulates SKIP LOCKED by excluding deliveries that are currently locked.
-func (r *MockRepository) GetPendingDeliveries(ctx context.Context, limit int) ([]*Delivery, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	// Error injection for testing
-	if r.injectError != nil {
-		return nil, r.injectError
-	}
-
-	now := time.Now()
-	results := []*Delivery{}
-
-	// Collect pending deliveries
-	candidates := []*Delivery{}
-	for _, delivery := range r.deliveries {
-		// Skip if not pending
-		if delivery.Status != DeliveryStatusPending {
-			continue
-		}
-
-		// Skip if locked (SKIP LOCKED simulation)
-		if r.lockedDeliveries[delivery.ID] {
-			continue
-		}
-
-		// Skip if not ready for retry
-		if delivery.NextRetryAt != nil && delivery.NextRetryAt.After(now) {
-			continue
-		}
-
-		candidates = append(candidates, delivery)
-	}
-
-	// Sort by next_retry_at (or created_at if null), then created_at
-	sort.Slice(candidates, func(i, j int) bool {
-		iTime := candidates[i].CreatedAt
-		if candidates[i].NextRetryAt != nil {
-			iTime = *candidates[i].NextRetryAt
-		}
-
-		jTime := candidates[j].CreatedAt
-		if candidates[j].NextRetryAt != nil {
-			jTime = *candidates[j].NextRetryAt
-		}
-
-		if iTime.Equal(jTime) {
-			return candidates[i].CreatedAt.Before(candidates[j].CreatedAt)
-		}
-		return iTime.Before(jTime)
-	})
-
-	// Apply limit and lock deliveries
-	for i := 0; i < len(candidates) && i < limit; i++ {
-		results = append(results, copyDelivery(candidates[i]))
-		r.lockedDeliveries[candidates[i].ID] = true
-	}
-
-	return results, nil
 }
 
 // UnlockDelivery unlocks a delivery (for testing purposes).
@@ -836,6 +775,13 @@ func (r *MockRepository) Close() error {
 
 // CountDeliveriesByFilter counts deliveries matching the cleanup filter.
 func (r *MockRepository) CountDeliveriesByFilter(ctx context.Context, filter *CleanupFilter) (int64, error) {
+	// ⛔ Fail closed (v0.11.0): an empty TenantID drops the tenant clause below,
+	// so it is only allowed on the explicit AllTenants opt-in — and, as in
+	// Manager.CleanupDeliveries, at least one real constraint is required, so
+	// AllTenants alone can never mean "the whole table".
+	if err := filter.Validate(); err != nil {
+		return 0, err
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -850,6 +796,13 @@ func (r *MockRepository) CountDeliveriesByFilter(ctx context.Context, filter *Cl
 
 // DeleteDeliveriesByFilter deletes deliveries matching the cleanup filter.
 func (r *MockRepository) DeleteDeliveriesByFilter(ctx context.Context, filter *CleanupFilter) (int64, error) {
+	// ⛔ Fail closed (v0.11.0): an empty TenantID drops the tenant clause below,
+	// so it is only allowed on the explicit AllTenants opt-in — and, as in
+	// Manager.CleanupDeliveries, at least one real constraint is required, so
+	// AllTenants alone can never mean "the whole table".
+	if err := filter.Validate(); err != nil {
+		return 0, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -1231,51 +1184,6 @@ func (tx *MockRepositoryTx) UpdateDelivery(ctx context.Context, delivery *Delive
 	return nil
 }
 
-// GetPendingDeliveries retrieves pending deliveries within the transaction.
-func (tx *MockRepositoryTx) GetPendingDeliveries(ctx context.Context, limit int) ([]*Delivery, error) {
-	tx.mu.Lock()
-	defer tx.mu.Unlock()
-
-	now := time.Now()
-	results := []*Delivery{}
-	candidates := []*Delivery{}
-
-	for _, delivery := range tx.deliveries {
-		if delivery.Status != DeliveryStatusPending {
-			continue
-		}
-		if tx.lockedDeliveries[delivery.ID] {
-			continue
-		}
-		if delivery.NextRetryAt != nil && delivery.NextRetryAt.After(now) {
-			continue
-		}
-		candidates = append(candidates, delivery)
-	}
-
-	sort.Slice(candidates, func(i, j int) bool {
-		iTime := candidates[i].CreatedAt
-		if candidates[i].NextRetryAt != nil {
-			iTime = *candidates[i].NextRetryAt
-		}
-		jTime := candidates[j].CreatedAt
-		if candidates[j].NextRetryAt != nil {
-			jTime = *candidates[j].NextRetryAt
-		}
-		if iTime.Equal(jTime) {
-			return candidates[i].CreatedAt.Before(candidates[j].CreatedAt)
-		}
-		return iTime.Before(jTime)
-	})
-
-	for i := 0; i < len(candidates) && i < limit; i++ {
-		results = append(results, copyDelivery(candidates[i]))
-		tx.lockedDeliveries[candidates[i].ID] = true
-	}
-
-	return results, nil
-}
-
 // ListDeliveries retrieves deliveries matching the given filter within the transaction.
 func (tx *MockRepositoryTx) ListDeliveries(ctx context.Context, filter *DeliveryFilter) ([]*Delivery, error) {
 	// Mirror the real repositories' fail-closed tenant scope (v0.10.0).
@@ -1499,6 +1407,13 @@ func (tx *MockRepositoryTx) Close() error {
 
 // CountDeliveriesByFilter counts deliveries matching the cleanup filter within the transaction.
 func (tx *MockRepositoryTx) CountDeliveriesByFilter(ctx context.Context, filter *CleanupFilter) (int64, error) {
+	// ⛔ Fail closed (v0.11.0): an empty TenantID drops the tenant clause below,
+	// so it is only allowed on the explicit AllTenants opt-in — and, as in
+	// Manager.CleanupDeliveries, at least one real constraint is required, so
+	// AllTenants alone can never mean "the whole table".
+	if err := filter.Validate(); err != nil {
+		return 0, err
+	}
 	tx.mu.RLock()
 	defer tx.mu.RUnlock()
 
@@ -1513,6 +1428,13 @@ func (tx *MockRepositoryTx) CountDeliveriesByFilter(ctx context.Context, filter 
 
 // DeleteDeliveriesByFilter deletes deliveries matching the cleanup filter within the transaction.
 func (tx *MockRepositoryTx) DeleteDeliveriesByFilter(ctx context.Context, filter *CleanupFilter) (int64, error) {
+	// ⛔ Fail closed (v0.11.0): an empty TenantID drops the tenant clause below,
+	// so it is only allowed on the explicit AllTenants opt-in — and, as in
+	// Manager.CleanupDeliveries, at least one real constraint is required, so
+	// AllTenants alone can never mean "the whole table".
+	if err := filter.Validate(); err != nil {
+		return 0, err
+	}
 	tx.mu.Lock()
 	defer tx.mu.Unlock()
 

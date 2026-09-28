@@ -7,6 +7,7 @@ package hookd
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand/v2"
@@ -14,6 +15,7 @@ import (
 	"net/http"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/itsatony/go-cuserr"
 	"go.uber.org/zap"
@@ -49,6 +51,7 @@ type Manager struct {
 	// WithHTTPClient was given; httpClient is always derived from it (or from
 	// the default transport) by buildHTTPClient, never used as-is.
 	customHTTPClient  *http.Client
+	secretResolver    SecretResolver // v0.11.0, hookd.secret.go; never nil
 	egressRefusalHook func(cause string)
 	egressResolver    egressHostResolver
 	workerSem         chan struct{}
@@ -104,6 +107,7 @@ func NewManager(config *Config, repo Repository, opts ...ManagerOption) (*Manage
 		eventBus:       eventBus,
 		logger:         logger,
 		egressResolver: net.DefaultResolver,
+		secretResolver: StoredSecretResolver{},
 		workerSem:      make(chan struct{}, config.WorkerCount),
 		wake:           make(chan struct{}, config.WorkerCount),
 	}
@@ -123,6 +127,12 @@ func NewManager(config *Config, repo Repository, opts ...ManagerOption) (*Manage
 	}
 	if m.egressPolicy.allowPrivate {
 		m.logger.Warn(LogMsgEgressPrivateAllowed)
+	}
+	if eff := config.EffectiveBatchSize(); eff < config.MaxBatchSize {
+		m.logger.Warn(LogMsgBatchSizeClamped,
+			zap.Int(LogFieldConfiguredBatchSize, config.MaxBatchSize),
+			zap.Int(LogFieldEffectiveBatchSize, eff),
+		)
 	}
 
 	return m, nil
@@ -390,35 +400,73 @@ func (m *Manager) Notify() {
 	}
 }
 
-// processDeliveries fetches and processes pending deliveries.
+// processDeliveries claims and processes a batch of pending deliveries.
 //
-// It returns the number of deliveries the poll found, which the worker loop uses to
-// decide whether to back off. A failed poll returns 0: an unreachable database is
-// the case where backing off is most wanted, not least.
+// It returns the number of deliveries the poll claimed, which the worker loop uses
+// to decide whether to back off. A failed poll returns 0: an unreachable database
+// is the case where backing off is most wanted, not least.
+//
+// The claim is a lease (see hookd.repository.claim.go): up to MaxBatchSize rows
+// become invisible to other workers until the lease expires, and each one is
+// re-fenced immediately before it is sent. If the Manager is stopped mid-batch,
+// the rows not yet started are released so a restart need not wait out a lease.
 func (m *Manager) processDeliveries(workerID int) int {
-	ctx, cancel := context.WithTimeout(m.ctx, 30*time.Second)
-	defer cancel()
-
-	// Get pending deliveries (SKIP LOCKED in repository)
-	deliveries, err := m.repo.GetPendingDeliveries(ctx, 1)
+	claimCtx, cancel := context.WithTimeout(m.ctx, ClaimQueryTimeout)
+	deliveries, err := m.repo.ClaimPendingDeliveries(claimCtx, m.config.EffectiveBatchSize(), m.config.ClaimLease())
+	cancel()
 	if err != nil {
-		m.logger.Error("failed to get pending deliveries",
+		m.logger.Error("failed to claim pending deliveries",
 			zap.Int("worker_id", workerID),
 			zap.Error(err),
 		)
 		return 0
 	}
 
-	// Process each delivery
-	for _, delivery := range deliveries {
-		m.processDelivery(ctx, delivery)
+	for i, delivery := range deliveries {
+		if m.stopping() {
+			m.releaseClaims(deliveries[i:])
+			break
+		}
+		m.processDelivery(m.ctx, delivery)
 	}
 
 	return len(deliveries)
 }
 
-// processDelivery processes a single delivery.
-func (m *Manager) processDelivery(ctx context.Context, delivery *Delivery) {
+// stopping reports whether Stop has been called (false before Start).
+func (m *Manager) stopping() bool {
+	return m.ctx != nil && m.ctx.Err() != nil
+}
+
+// releaseClaims hands claimed-but-unstarted deliveries back to the queue (due
+// now). It runs during shutdown, so it uses a context detached from m.ctx. A
+// failure only means the row waits for its lease to expire.
+func (m *Manager) releaseClaims(deliveries []*Delivery) {
+	ctx, cancel := context.WithTimeout(context.Background(), DeliveryBookkeepingTimeout)
+	defer cancel()
+	for _, delivery := range deliveries {
+		if delivery.NextRetryAt == nil {
+			continue
+		}
+		if err := m.repo.ReleaseDeliveryClaim(ctx, delivery.ID, *delivery.NextRetryAt, nil); err != nil {
+			m.logger.Warn("failed to release delivery claim",
+				zap.String("delivery_id", delivery.ID),
+				zap.Error(err),
+			)
+		}
+	}
+}
+
+// processDelivery processes a single claimed delivery.
+//
+// Every early return below leaves the row claimed: it becomes due again when the
+// lease expires, which doubles as a backoff for a subscription that cannot be
+// read or is inactive (before v0.11.0 such a row was re-polled every interval).
+func (m *Manager) processDelivery(parent context.Context, delivery *Delivery) {
+	// Pre-send reads: bounded, and cancelled by shutdown (nothing sent yet).
+	ctx, cancel := context.WithTimeout(parent, DeliveryBookkeepingTimeout)
+	defer cancel()
+
 	var sub *Subscription
 	var targetURL string
 
@@ -437,6 +485,10 @@ func (m *Manager) processDelivery(ctx context.Context, delivery *Delivery) {
 		var err error
 		sub, err = m.repo.GetSubscription(ctx, delivery.SubscriptionID)
 		if err != nil {
+			if m.stopping() {
+				m.releaseClaims([]*Delivery{delivery})
+				return
+			}
 			m.logger.Error("failed to get subscription",
 				zap.String("delivery_id", delivery.ID),
 				zap.String("subscription_id", delivery.SubscriptionID),
@@ -470,11 +522,25 @@ func (m *Manager) processDelivery(ctx context.Context, delivery *Delivery) {
 	if cbState != nil && cbState.State == CircuitBreakerStateOpen {
 		// Circuit is open, check if we should retry
 		if cbState.NextRetryAt.After(time.Now()) {
-			m.logger.Debug("circuit breaker open, skipping delivery",
+			m.logger.Debug("circuit breaker open, deferring delivery",
 				zap.String("delivery_id", delivery.ID),
 				zap.String("url", targetURL),
 				zap.Time("next_retry_at", cbState.NextRetryAt),
 			)
+			// Park the row until the circuit may half-open, instead of holding
+			// it for a whole lease or re-polling it every interval.
+			if delivery.NextRetryAt != nil {
+				retryAt := cbState.NextRetryAt
+				relCtx, relCancel := context.WithTimeout(context.WithoutCancel(ctx), DeliveryBookkeepingTimeout)
+				relErr := m.repo.ReleaseDeliveryClaim(relCtx, delivery.ID, *delivery.NextRetryAt, &retryAt)
+				relCancel()
+				if relErr != nil {
+					m.logger.Debug("could not defer delivery to circuit retry time",
+						zap.String("delivery_id", delivery.ID),
+						zap.Error(relErr),
+					)
+				}
+			}
 			return
 		}
 
@@ -495,7 +561,56 @@ func (m *Manager) processDelivery(ctx context.Context, delivery *Delivery) {
 
 // attemptDelivery attempts to deliver a webhook to the subscription endpoint.
 // For inline deliveries, sub may be nil - delivery.URL and delivery.Secret are used instead.
-func (m *Manager) attemptDelivery(ctx context.Context, delivery *Delivery, sub *Subscription) {
+//
+// preCtx carries the pre-send reads' deadline and shutdown cancellation. The
+// claim is renewed on it immediately before the send; everything after the send
+// runs on a fresh context detached from shutdown, because a webhook that was
+// sent must be recorded — an aborted record is a duplicate delivery later.
+func (m *Manager) attemptDelivery(preCtx context.Context, delivery *Delivery, sub *Subscription) {
+	// ⛔ Fence: only the current claim holder may send. A lost claim means another
+	// worker owns the row now (or it was completed / rewritten) — do nothing.
+	if delivery.NextRetryAt == nil {
+		m.logger.Error("delivery has no claim token, not sending",
+			zap.String("delivery_id", delivery.ID),
+		)
+		return
+	}
+	// t0 is taken BEFORE the renewal, so it precedes the renewal statement's
+	// NOW() in real time: a deadline measured from t0 ends inside the new lease
+	// however long the renewal takes, and whatever the app/DB clock offset.
+	t0 := time.Now()
+	renewCtx, renewCancel := context.WithTimeout(preCtx, ClaimRenewTimeout)
+	renewed, err := m.repo.RenewDeliveryClaim(renewCtx, delivery.ID, *delivery.NextRetryAt, m.config.ClaimLease())
+	renewCancel()
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrDeliveryClaimLost):
+			m.logger.Info("delivery claim lost before send, skipping",
+				zap.String("delivery_id", delivery.ID),
+			)
+		case m.stopping():
+			// Shutting down: hand the row back instead of leaving it leased.
+			m.logger.Debug("shutdown before send, releasing delivery claim",
+				zap.String("delivery_id", delivery.ID),
+			)
+			m.releaseClaims([]*Delivery{delivery})
+		default:
+			m.logger.Error("failed to renew delivery claim, not sending",
+				zap.String("delivery_id", delivery.ID),
+				zap.Error(err),
+			)
+		}
+		return
+	}
+	delivery.NextRetryAt = &renewed
+
+	// One deadline for the rest of the attempt — send AND record — ending
+	// MinClaimLeaseMarginMs before the lease just renewed can lapse. Validate
+	// guarantees that leaves at least DeliveryTimeout + DeliveryBookkeepingTimeout.
+	attemptDeadline := t0.Add(m.config.ClaimLease() - time.Duration(MinClaimLeaseMarginMs)*time.Millisecond)
+	ctx, cancel := context.WithDeadline(context.WithoutCancel(preCtx), attemptDeadline)
+	defer cancel()
+
 	delivery.AttemptCount++
 	attemptNumber := delivery.AttemptCount
 
@@ -539,9 +654,9 @@ func (m *Manager) attemptDelivery(ctx context.Context, delivery *Delivery, sub *
 		AttemptedAt:   time.Now(),
 	}
 
-	// Create separate context with timeout for HTTP request
-	// This allows in-flight deliveries to complete during graceful shutdown
-	httpCtx, httpCancel := context.WithTimeout(context.Background(), m.config.DeliveryTimeout())
+	// The HTTP request gets its own DeliveryTimeout inside ctx, which is detached
+	// from shutdown, so an in-flight delivery completes during graceful shutdown.
+	httpCtx, httpCancel := context.WithTimeout(ctx, m.config.DeliveryTimeout())
 	defer httpCancel()
 
 	// Make HTTP request
@@ -555,8 +670,8 @@ func (m *Manager) attemptDelivery(ctx context.Context, delivery *Delivery, sub *
 	attempt.ResponseHeaders = responseHeaders
 
 	if err != nil {
-		// A guard decision is recorded as the one opaque text; the cause went
-		// to the operator (log + WithEgressRefusalHook), never to the row.
+		// A guard or resolver decision is recorded as its one opaque text; the
+		// cause went to the operator (log / hook), never to the row.
 		attempt.Error = subscriberVisibleError(err)
 	}
 
@@ -619,6 +734,34 @@ func (m *Manager) executeWebhookRequest(ctx context.Context, delivery *Delivery,
 		req.Header.Set(key, value)
 	}
 
+	// Resolve the signing secret for THIS attempt (never cached): the stored
+	// value is a reference; see hookd.secret.go. Nothing is sent on failure.
+	// Tenancy comes from the row that SUPPLIES the secret: the subscription
+	// for a subscription delivery, the delivery row for an inline one. A
+	// delivery whose tenant disagrees with its subscription's is refused (fail
+	// closed) rather than resolved under either.
+	secretReq := SecretRequest{
+		Ref:            secret,
+		TenantID:       delivery.TenantID,
+		DeliveryID:     delivery.ID,
+		IdempotencyKey: delivery.IdempotencyKey,
+	}
+	if sub != nil {
+		if sub.TenantID != delivery.TenantID {
+			m.logger.Warn(LogMsgSigningSecretTenantMismatch,
+				zap.String(LogFieldDeliveryID, delivery.ID),
+				zap.String(LogFieldSubscriptionID, sub.ID),
+			)
+			return 0, "", nil, ErrSigningSecretUnavailable
+		}
+		secretReq.TenantID = sub.TenantID
+		secretReq.SubscriptionID = sub.ID
+	}
+	secret, err = m.resolveSigningSecret(ctx, secretReq)
+	if err != nil {
+		return 0, "", nil, err
+	}
+
 	// Calculate and add signature
 	timestamp := fmt.Sprintf("%d", time.Now().Unix())
 	signature := calculateSignature(secret, timestamp, payloadJSON)
@@ -628,6 +771,15 @@ func (m *Manager) executeWebhookRequest(ctx context.Context, delivery *Delivery,
 	req.Header.Set(HeaderSubscriptionID, delivery.SubscriptionID) // Empty for inline
 	req.Header.Set(HeaderEventType, delivery.EventType)
 	req.Header.Set(HeaderAttemptNumber, fmt.Sprintf("%d", delivery.AttemptCount))
+	// Sent only when the queuer supplied a key (go-hookd#2): a receiver that
+	// wants exactly-once on the CALLER's key reads this; X-Webhook-Delivery-ID
+	// is always present and is the library's own id.
+	// A subscriber's custom header of that name never survives: the header
+	// means "the queuer's key" or is absent.
+	req.Header.Del(HeaderIdempotencyKey)
+	if delivery.IdempotencyKey != "" {
+		req.Header.Set(HeaderIdempotencyKey, delivery.IdempotencyKey)
+	}
 
 	// Make request
 	resp, err := m.httpClient.Do(req)
@@ -637,20 +789,17 @@ func (m *Manager) executeWebhookRequest(ctx context.Context, delivery *Delivery,
 	defer resp.Body.Close()
 
 	// Read response body
-	body, err := io.ReadAll(resp.Body)
+	// Bounded: the endpoint is subscriber-controlled, and only
+	// MaxResponseBodyLength bytes are ever stored — an unbounded read let one
+	// endpoint stream a worker out of memory.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBodyLength+1))
 	if err != nil {
 		return resp.StatusCode, "", nil, cuserr.NewInternalError("http_client", err,
 			cuserr.WithMetadata("operation", "read_response_body"),
 		)
 	}
 
-	// Extract response headers
-	responseHeaders := make(map[string]string)
-	for key := range resp.Header {
-		responseHeaders[key] = resp.Header.Get(key)
-	}
-
-	return resp.StatusCode, string(body), responseHeaders, nil
+	return resp.StatusCode, storableText(string(body)), storableResponseHeaders(resp.Header), nil
 }
 
 // handleDeliverySuccess handles a successful delivery.
@@ -662,10 +811,12 @@ func (m *Manager) handleDeliverySuccess(ctx context.Context, delivery *Delivery,
 		zap.Int("status_code", attempt.StatusCode),
 	)
 
-	// Update delivery status
+	// Update delivery status (and drop the claim lease: a completed row has no
+	// next retry)
 	delivery.Status = DeliveryStatusSuccess
 	now := time.Now()
 	delivery.CompletedAt = &now
+	delivery.NextRetryAt = nil
 
 	if err := m.repo.UpdateDelivery(ctx, delivery); err != nil {
 		m.logger.Error("failed to update delivery status",
@@ -697,14 +848,15 @@ func (m *Manager) handleDeliveryFailure(ctx context.Context, delivery *Delivery,
 		zap.Error(err),
 	)
 
-	// Update circuit breaker (record failure) - use sub.URL or delivery.URL for inline
+	// The circuit breaker is updated LAST (deferred): the delivery's own record
+	// — retry schedule or dead letter — gets the bookkeeping budget first.
 	var endpoint string
 	if sub != nil {
 		endpoint = sub.URL
 	} else {
 		endpoint = delivery.URL
 	}
-	m.updateCircuitBreakerFailure(ctx, endpoint)
+	defer m.updateCircuitBreakerFailure(ctx, endpoint)
 
 	// Check if status code is non-retryable (4xx except 408, 429)
 	isNonRetryable := attempt.StatusCode >= 400 && attempt.StatusCode < 500 &&
@@ -887,6 +1039,7 @@ func (m *Manager) publishDeliveryEvent(topic string, delivery *Delivery, sub *Su
 		TenantID:       delivery.TenantID,
 		EventType:      delivery.EventType,
 		Status:         delivery.Status,
+		IdempotencyKey: delivery.IdempotencyKey,
 		Timestamp:      time.Now(),
 		Metadata: map[string]any{
 			"attempt_count": delivery.AttemptCount,
@@ -926,7 +1079,12 @@ func truncateString(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen] + "..."
+	// Cut on a rune boundary so the kept prefix stays valid UTF-8.
+	cut := maxLen
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "..."
 }
 
 // =============================================================================

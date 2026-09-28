@@ -3,6 +3,7 @@ package testutil
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"testing"
@@ -417,43 +418,102 @@ func (r *TransactionalRepository) GetDeliveryAttempts(ctx context.Context, deliv
 	return attempts, rows.Err()
 }
 
-// GetPendingDeliveries retrieves pending deliveries within the transaction
-func (r *TransactionalRepository) GetPendingDeliveries(ctx context.Context, limit int) ([]*hookd.Delivery, error) {
+// ClaimPendingDeliveries claims due deliveries within the transaction, with the
+// same lease semantics as hookd.PostgresRepository.ClaimPendingDeliveries.
+func (r *TransactionalRepository) ClaimPendingDeliveries(ctx context.Context, limit int, lease time.Duration) ([]*hookd.Delivery, error) {
+	if limit < 1 || lease <= 0 {
+		return nil, fmt.Errorf("%s / %s", hookd.ErrMsgInvalidClaimLimit, hookd.ErrMsgInvalidClaimLeaseDuration)
+	}
 	query := fmt.Sprintf(`
-		SELECT id, subscription_id, tenant_id, event_type, payload, status,
-			   attempt_count, max_attempts, next_retry_at,
-			   completed_at, created_at
-		FROM %s
-		WHERE status = $1
-			AND (next_retry_at IS NULL OR next_retry_at <= $2)
-		ORDER BY created_at ASC
-		LIMIT $3
-		FOR UPDATE SKIP LOCKED
+		WITH due AS (
+			SELECT id FROM %[1]s
+			WHERE status = $1
+			  AND (next_retry_at IS NULL OR next_retry_at <= NOW())
+			ORDER BY COALESCE(next_retry_at, created_at), created_at
+			LIMIT $2
+			FOR UPDATE SKIP LOCKED
+		)
+		UPDATE %[1]s AS d
+		SET next_retry_at = NOW() + ($3::bigint * INTERVAL '1 microsecond')
+		FROM due WHERE d.id = due.id
+		RETURNING d.id, COALESCE(d.subscription_id, ''), d.tenant_id, d.event_type, d.status,
+		          d.attempt_count, d.max_attempts, d.next_retry_at, d.completed_at, d.created_at
 	`, r.schemaConfig.TableDeliveries())
 
-	rows, err := r.tx.QueryContext(ctx, query, hookd.DeliveryStatusPending, time.Now(), limit)
+	rows, err := r.tx.QueryContext(ctx, query, hookd.DeliveryStatusPending, limit, lease.Microseconds())
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var deliveries []*hookd.Delivery
 	for rows.Next() {
 		var delivery hookd.Delivery
-		err := rows.Scan(
+		if err := rows.Scan(
 			&delivery.ID, &delivery.SubscriptionID, &delivery.TenantID,
-			&delivery.EventType, &delivery.Payload, &delivery.Status,
+			&delivery.EventType, &delivery.Status,
 			&delivery.AttemptCount, &delivery.MaxAttempts,
 			&delivery.NextRetryAt, &delivery.CompletedAt,
 			&delivery.CreatedAt,
-		)
-		if err != nil {
+		); err != nil {
 			return nil, err
 		}
 		deliveries = append(deliveries, &delivery)
 	}
-
 	return deliveries, rows.Err()
+}
+
+// RenewDeliveryClaim re-arms a held claim within the transaction.
+func (r *TransactionalRepository) RenewDeliveryClaim(ctx context.Context, id string, claimedUntil time.Time, lease time.Duration) (time.Time, error) {
+	query := fmt.Sprintf(`
+		UPDATE %s
+		SET next_retry_at = GREATEST(NOW() + ($4::bigint * INTERVAL '1 microsecond'),
+		                             next_retry_at + INTERVAL '1 microsecond')
+		WHERE id = $1 AND status = $2 AND next_retry_at = $3
+		RETURNING next_retry_at`, r.schemaConfig.TableDeliveries())
+	var renewed time.Time
+	err := r.tx.QueryRowContext(ctx, query, id, hookd.DeliveryStatusPending, claimedUntil, lease.Microseconds()).Scan(&renewed)
+	if errors.Is(err, sql.ErrNoRows) {
+		return time.Time{}, hookd.ErrDeliveryClaimLost
+	}
+	return renewed, err
+}
+
+// RequeueDeadLetter re-queues a dead letter only if it is still dead-lettered.
+func (r *TransactionalRepository) RequeueDeadLetter(ctx context.Context, id string) (*hookd.Delivery, error) {
+	res, err := r.tx.ExecContext(ctx, fmt.Sprintf(`UPDATE %s
+		SET status = $2, attempt_count = 0, next_retry_at = NOW(), completed_at = NULL
+		WHERE id = $1 AND status = $3`, r.schemaConfig.TableDeliveries()),
+		id, hookd.DeliveryStatusPending, hookd.DeliveryStatusDeadLetter)
+	if err != nil {
+		return nil, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if n == 0 {
+		return nil, hookd.ErrDeliveryNotDeadLetter
+	}
+	return r.GetDelivery(ctx, id)
+}
+
+// ReleaseDeliveryClaim returns a held, unsent delivery within the transaction.
+func (r *TransactionalRepository) ReleaseDeliveryClaim(ctx context.Context, id string, claimedUntil time.Time, retryAt *time.Time) error {
+	query := fmt.Sprintf(`UPDATE %s SET next_retry_at = $4
+		WHERE id = $1 AND status = $2 AND next_retry_at = $3`, r.schemaConfig.TableDeliveries())
+	res, err := r.tx.ExecContext(ctx, query, id, hookd.DeliveryStatusPending, claimedUntil, retryAt)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return hookd.ErrDeliveryClaimLost
+	}
+	return nil
 }
 
 // ListDeliveries retrieves deliveries matching a filter (stub implementation for testutil)

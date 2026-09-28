@@ -925,7 +925,7 @@ func TestPostgresRepositoryTx_GetPendingDeliveries_Integration(t *testing.T) {
 		require.NoError(t, err)
 		defer tx.Rollback()
 
-		deliveries, err := tx.GetPendingDeliveries(ctx, 10)
+		deliveries, err := tx.ClaimPendingDeliveries(ctx, 10, testClaimLease)
 		require.NoError(t, err)
 		require.GreaterOrEqual(t, len(deliveries), 3)
 	})
@@ -962,7 +962,7 @@ func TestPostgresRepositoryTx_GetPendingDeliveries_Integration(t *testing.T) {
 		require.NoError(t, err)
 		defer tx2.Rollback()
 
-		deliveries, err := tx2.GetPendingDeliveries(ctx, 10)
+		deliveries, err := tx2.ClaimPendingDeliveries(ctx, 10, testClaimLease)
 		require.NoError(t, err)
 
 		// Verify locked delivery is skipped

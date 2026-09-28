@@ -123,6 +123,10 @@ CREATE TABLE {{.Prefix}}_hookd_deliveries (
     -- Timestamps
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
 
+    -- Caller-supplied idempotency key, sent as X-Webhook-Idempotency-Key
+    -- (v0.11.0; added to existing schemas additively by EnsureSchema)
+    idempotency_key VARCHAR(255),
+
     -- Constraints
     CONSTRAINT chk_{{.Prefix}}_hookd_deliveries_status CHECK (status IN ('pending', 'success', 'failed', 'dead_letter')),
     CONSTRAINT chk_{{.Prefix}}_hookd_deliveries_attempts CHECK (attempt_count >= 0),

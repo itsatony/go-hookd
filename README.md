@@ -6,7 +6,7 @@ A webhook delivery management library for Go applications. Handles webhook subsc
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Test Coverage](https://img.shields.io/badge/coverage-60%25-yellow.svg)](https://github.com/itsatony/go-hookd)
 
-> **Status**: Production Ready (v0.10.0)
+> **Status**: Production Ready (v0.11.0)
 > Core functionality is implemented, tested, and production-ready. The API is stable with comprehensive test coverage.
 >
 > ⚠ **v0.8.0 BREAKING BEHAVIOUR — default-deny egress guard.** Deliveries and
@@ -347,7 +347,8 @@ config := hookd.NewConfig(databaseURL)
 // Worker Configuration
 config.WorkerCount = 10                    // Number of concurrent delivery workers
 config.QueuePollInterval = 1000            // How often to check for pending deliveries (ms)
-config.MaxBatchSize = 100                  // Max deliveries to fetch per poll
+config.MaxBatchSize = 1                    // Deliveries one worker claims per poll (default 1)
+config.ClaimLeaseMs = 0                    // Claim lease; 0 = DeliveryTimeoutMs + 60s
 
 // Idle Polling (see "Idle polling and Notify")
 config.QueueIdleMaxInterval = 30000        // Poll interval ceiling while the queue is empty (ms)
@@ -1077,6 +1078,59 @@ Essential metrics to track via event bus:
 5. Worker utilization
 6. Dead letter queue size
 
+## Upgrading to v0.11.0
+
+Correctness + security release. **Consumer action is required only in the cases
+listed; everything else is a drop-in upgrade** (`EnsureSchema` must run at boot,
+as it does in every known consumer).
+
+1. **Delivery claims are leases now (go-hookd#1).** The poll no longer relies on
+   an autocommit `FOR UPDATE SKIP LOCKED` (whose lock was gone before the worker
+   saw the row, so two workers could send the same delivery). A worker claims a
+   row by moving its `next_retry_at` to now + `ClaimLease`, and re-fences the
+   claim right before sending. A worker that crashes leaves its rows due again
+   after the lease (default `DeliveryTimeoutMs` + 60s = 90s).
+   - `MaxBatchSize` is now honoured (it was ignored; every poll took 1). The
+     default is now **1**. A poll claims at most `Config.EffectiveBatchSize()` —
+     `MaxBatchSize` capped to what one lease covers (lease / (DeliveryTimeout +
+     10s); 2 at the defaults, WARN logged when it clamps) — so deepr's 200 claims
+     2 per poll unless `ClaimLeaseMs` is raised.
+   - ⚠ **Rollout:** `EnsureSchema` must run (it adds `idempotency_key`) before a
+     v0.11.0 process serves traffic, and during a mixed v0.10/v0.11 fleet a
+     v0.10 worker's unfenced poll can still double-send with a v0.11 worker —
+     roll the webhook workers over together, or accept that brief window.
+   - `RetryDeadLetter` is now one conditional statement (`RequeueDeadLetter`),
+     so concurrent redrives re-queue a row once; a second gets
+     `ErrDeliveryNotDeadLetter`. ⚠ A consumer's own `UpdateDelivery` on a
+     pending row bypasses the lease — don't use it to reschedule.
+   - Custom `Repository` implementations: `GetPendingDeliveries` is replaced by
+     `ClaimPendingDeliveries`, `RenewDeliveryClaim`, `ReleaseDeliveryClaim`,
+     and `RequeueDeadLetter` is new.
+2. **Cleanup is fail-closed on tenant scope (go-hookd#7).** `CleanupDeliveries`
+   and every `Count/DeleteDeliveriesByFilter` refuse an empty `TenantID` unless
+   `CleanupFilter.AllTenants` is set (as `ListDeliveries` has since v0.10.0).
+   The `Cleanup{Successful,Failed,DeadLetter,AllCompleted}Deliveries` helpers
+   are documented fleet-wide sweeps and set it themselves.
+3. **`X-Webhook-Idempotency-Key` is sent (go-hookd#2)** whenever the queuer gave
+   an `IdempotencyKey`. `EnsureSchema` adds the nullable
+   `deliveries.idempotency_key` column **in place** (no data loss, schema version
+   unchanged, safe with older binaries during a rolling deploy). The
+   `User-Agent` now carries the real module version.
+4. **Pluggable signing secrets (go-hookd#3).** `WithSecretResolver(r)` makes the
+   stored `secret` a reference resolved on every attempt (never cached) from a
+   row-sourced `SecretRequest{Ref, TenantID, SubscriptionID, DeliveryID,
+   IdempotencyKey}`; nothing is sent if it fails. Default behaviour is unchanged.
+   For subscription deliveries the tenancy fields come from the subscription row
+   (a tenant mismatch with the delivery is refused). ⚠ For **inline**
+   deliveries `Ref`, `TenantID` and `IdempotencyKey` are whatever the queuer
+   asserted; `IdempotencyKey` is a lookup hint, never an authorization input, and
+   it is visible to receivers and EventBus subscribers — no sensitive data.
+5. **Egress:** `WithAllowPrivateDestinations()` no longer waives the dial guard
+   for a `WithHTTPClient` client hookd cannot wrap (an opaque RoundTripper, or a
+   transport with `DialTLS`/`DialTLSContext`); such a client is now always a
+   configuration error. Response bodies are read at most
+   `MaxResponseBodyLength` + 1 bytes.
+
 ## Upgrading to v0.10.0
 
 Security fix with a behaviour change for **cross-tenant** listers only.
@@ -1168,7 +1222,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for full guidelines.
 
 ## Project Status
 
-**Current Version**: v0.10.0 (Production Ready)
+**Current Version**: v0.11.0 (Production Ready)
 
 **What's Implemented:**
 - ✓ Core subscription and delivery management

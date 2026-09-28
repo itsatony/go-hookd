@@ -3,6 +3,128 @@
 All notable changes to go-hookd. Earlier releases are described in their tag
 commit messages (`git log --tags`) and in README "Upgrading to vX" sections.
 
+## v0.11.0 — 2026-09-28
+
+Correctness and security. **Consumer action is required only as listed under
+"⚠ Consumer action"**; see README "Upgrading to v0.11.0".
+
+### Fixed
+- **Duplicate delivery under concurrent workers (go-hookd#1).** The poll was an
+  autocommit `SELECT ... FOR UPDATE SKIP LOCKED`: the row lock ended with the
+  statement, so the row was unlocked and still `pending` before the worker sent
+  it, and two non-overlapping polls could both deliver it. Claims are now
+  **leases**: one `UPDATE ... SET next_retry_at = now + lease` over a
+  `FOR UPDATE SKIP LOCKED` subselect (`ClaimPendingDeliveries`), so the claim
+  survives the statement; the claimed `next_retry_at` is a strictly increasing
+  **fencing token**, re-checked by `RenewDeliveryClaim` immediately before the
+  HTTP send — a worker whose claim lapsed and was re-taken skips the row instead
+  of sending it. No schema change, no reaper (a crashed worker's rows become due
+  when the lease runs out). Proven against real PostgreSQL by barrier-released
+  concurrent claimers and concurrent Managers (`./integration/`).
+- Post-send bookkeeping (attempt record, status, dead letter) runs on a context
+  detached from shutdown, so a sent webhook is always recorded; claimed but
+  unstarted rows are released on `Stop`; an open circuit breaker parks a row
+  until its retry time instead of re-polling it every interval.
+- **`X-Webhook-Idempotency-Key` was declared and never sent (go-hookd#2).** The
+  queuer's `IdempotencyKey` is now stored on the delivery
+  (`Delivery.IdempotencyKey`, nullable `deliveries.idempotency_key`) and sent on
+  every attempt; absent when none was given.
+- **User-Agent version drift (go-hookd#2):** v0.7.2–v0.10.0 announced stale
+  versions. The version now comes from the binary's build info; the fallback
+  constant is pinned to `versions.yaml` by a test.
+- Response bodies from subscriber endpoints are read at most
+  `MaxResponseBodyLength`+1 bytes (was unbounded; only 10 KB was ever kept).
+
+### Security
+- **Cleanup is fail-closed on tenant scope (go-hookd#7).** `CleanupFilter` gains
+  `AllTenants`; `Manager.CleanupDeliveries`, `CleanupFilter.Validate` and every
+  `Count/DeleteDeliveriesByFilter` (postgres, tx, mock) refuse an empty
+  `TenantID` without it (`ErrMsgTenantScopeRequired`), and a nil filter. Before,
+  an empty tenant deleted — and the dry run counted — every tenant's deliveries.
+- **Egress guard can no longer be waived (go-hookd#3).**
+  `WithAllowPrivateDestinations()` used to also accept a `WithHTTPClient` client
+  the guard cannot wrap and use it UNGUARDED (link-local / cloud metadata
+  included). Such a client is now always a configuration error; the opt-in only
+  ever re-admits loopback, RFC 1918/ULA and CGNAT. Source pins (AST tests) keep
+  `allowPrivate` settable only by that option and the delivery client buildable
+  only by `buildHTTPClient`. Default transport gains a 10s TLS handshake timeout.
+
+### Added
+- **`SecretResolver` / `WithSecretResolver(r)` (go-hookd#3).** The stored secret
+  becomes a reference, resolved on EVERY attempt and TestSubscription (never
+  cached); a failed resolve sends nothing and records the opaque
+  `ErrMsgSigningSecretUnavailable` (cause logged, never stored). Default
+  `StoredSecretResolver` keeps today's behaviour. `SecretResolverFunc` adapter.
+  The resolver receives a `SecretRequest` — `Ref` (the stored column) plus the
+  ROW's `TenantID`, `SubscriptionID`, `DeliveryID` and `IdempotencyKey` — so a
+  tenancy-scoped resolver (agora's Tresor lookup) never trusts in-flight input.
+  Its error is logged by type only (the text may name a vault path).
+- `DeliveryEvent.IdempotencyKey`, so a consumer queueing from its own outbox can
+  map `delivery.success` / `delivery.dead_letter` back to its row.
+- `Config.ClaimLeaseMs` (0 = `DeliveryTimeoutMs` + 60s; explicit values must be
+  ≥ `DeliveryTimeoutMs` + 15s), `Config.ClaimLease()`, `ErrDeliveryClaimLost`.
+- `SchemaManager.EnsureSchema` applies **additive nullable columns in place**
+  (`schemaAdditiveColumns`, under the schema lock) instead of bumping
+  `SchemaVersion` — a bump DROPs every table, and an older binary booting during
+  a rolling deploy would drop the upgraded schema.
+
+### Hardened after independent code + security review
+- The attempt deadline is measured from BEFORE the pre-send renewal (renewal
+  bounded by `ClaimRenewTimeout` = 2s < the 5s margin), so a slow renewal cannot
+  push an attempt past its lease.
+- `RetryDeadLetter` → one conditional `RequeueDeadLetter` statement (new
+  Repository method); concurrent redrives re-queue once (`ErrDeliveryNotDeadLetter`).
+- Rows whose pre-send reads/renewal are cut by `Stop` are released, not left leased.
+- `Config.EffectiveBatchSize()` caps a poll to what one lease covers (WARN when
+  it clamps `MaxBatchSize`).
+- `IdempotencyKey` is validated at queue time (≤255 visible ASCII): it is now a
+  header, and an invalid one would have failed every attempt.
+- Resolver: a panic or an empty secret from a custom resolver fails the attempt
+  (nothing sent); a subscription delivery whose tenant differs from its
+  subscription's is refused before `Resolve`; `SecretRequest` tenancy comes from
+  the secret-bearing row.
+- Repository `Count/DeleteDeliveriesByFilter` run the full `CleanupFilter.Validate`
+  (so `AllTenants` alone can never mean "the whole table").
+- Egress: response header block capped (16 KiB) and stored headers bounded
+  (32 keys, 512 B each, first value); stored body/headers forced to valid UTF-8;
+  a consumer client's cookie jar is dropped; Teredo, SIIT, SRv6 SID and RFC 9637
+  ranges refused; a subscriber custom header can't spoof
+  `X-Webhook-Idempotency-Key`; TestSubscription errors are fixed strings and an
+  unknown id takes no rate-limit slot.
+- Schema existence checks resolve the table with `to_regclass` — through
+  `search_path`, exactly like the unqualified DDL — instead of hardcoding
+  `'public'` (with tables outside public, the check never matched and EnsureSchema
+  re-ran the destructive create path every boot); the additive ALTER runs with
+  a 5s `lock_timeout`.
+- The delivery record is written before the circuit-breaker update.
+
+### Changed
+- `Config.MaxBatchSize` is honoured (it was ignored); default changed 100 → 1,
+  preserving the old effective behaviour.
+
+### ⚠ Consumer action required
+- **Custom `Repository` implementations:** replace `GetPendingDeliveries` with
+  `ClaimPendingDeliveries`, `RenewDeliveryClaim`, `ReleaseDeliveryClaim`; add
+  `RequeueDeadLetter`.
+- **Idempotency keys are validated at queue time:** a key with a control
+  character (CR, LF, TAB, …) or non-ASCII byte, or longer than 255 bytes, is now
+  refused by `QueueDelivery` / `QueueInlineDelivery` (it is sent as a header,
+  where it would have failed every attempt). Spaces are allowed.
+- **Rollout:** run `EnsureSchema` first; roll webhook workers over together (a
+  v0.10 worker's unfenced poll can double-send alongside a v0.11 one).
+- **Fleet-wide `CleanupDeliveries` callers:** set `CleanupFilter.AllTenants`.
+  (No known fleet caller: deepr calls only `GetMaintenanceStats`.)
+- **`WithHTTPClient` with an opaque RoundTripper (+ `WithAllowPrivateDestinations`):**
+  pass an `*http.Transport` instead. (No known fleet caller.)
+- **deepr** sets `MaxBatchSize: 200`; it is clamped to 2 at the default lease
+  (WARN at boot). Set a small value explicitly to silence it.
+
+### Notes
+- `PostgresRepositoryTx`'s CRUD methods still use the pre-v0.6.0 unprefixed
+  table names (they have not worked since v0.6.0; no production path calls
+  `BeginTx`). The new claim and the cleanup methods on it are correct. Tracked
+  separately.
+
 ## v0.10.0 — 2026-09-28
 
 Security fix. **Behaviour change — a cross-tenant lister must opt in explicitly.**

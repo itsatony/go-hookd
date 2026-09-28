@@ -25,6 +25,17 @@ var (
 	// ErrDeliveryNotFound indicates a delivery was not found.
 	ErrDeliveryNotFound = cuserr.NewNotFoundError("delivery", "")
 
+	// ErrDeliveryClaimLost is returned by RenewDeliveryClaim and
+	// ReleaseDeliveryClaim when the row no longer carries the caller's claim: it
+	// is no longer pending, or its lease lapsed and another worker re-claimed it,
+	// or someone rewrote it. The caller MUST NOT send the delivery. Test with
+	// errors.Is.
+	ErrDeliveryClaimLost = cuserr.NewNotFoundError("delivery_claim", "")
+
+	// ErrDeliveryNotDeadLetter is returned by RequeueDeadLetter for a delivery
+	// that exists but is not (or no longer) dead-lettered.
+	ErrDeliveryNotDeadLetter = cuserr.NewValidationError("delivery", ErrMsgDeliveryNotDeadLetter)
+
 	// ErrCircuitBreakerNotFound indicates circuit breaker state was not found.
 	ErrCircuitBreakerNotFound = cuserr.NewNotFoundError("circuit_breaker", "")
 
