@@ -14,12 +14,15 @@ import (
 	"github.com/itsatony/go-hookd/verify"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 // recordingResolver counts calls and maps refs to secrets.
 type recordingResolver struct {
 	mu    sync.Mutex
 	refs  []string
+	reqs  []SecretRequest
 	calls atomic.Int32
 	fail  atomic.Bool
 }
@@ -30,10 +33,11 @@ const (
 	testVaultCause  = "tresor: permission denied for path tresor://agora/webhooks/sub-1"
 )
 
-func (r *recordingResolver) Resolve(_ context.Context, ref string) (string, error) {
+func (r *recordingResolver) Resolve(_ context.Context, req SecretRequest) (string, error) {
 	r.calls.Add(1)
 	r.mu.Lock()
-	r.refs = append(r.refs, ref)
+	r.refs = append(r.refs, req.Ref)
+	r.reqs = append(r.reqs, req)
 	r.mu.Unlock()
 	if r.fail.Load() {
 		return "", errors.New(testVaultCause)
@@ -87,6 +91,9 @@ func TestSecretResolver_ResolvedPerAttemptAndUsedToSign(t *testing.T) {
 
 	assert.Equal(t, int32(2), res.calls.Load(), "Resolve runs once PER ATTEMPT, never cached")
 	assert.Equal(t, []string{testSecretRef, testSecretRef}, res.refs, "the stored value is passed verbatim as the ref")
+	assert.Equal(t, SecretRequest{
+		Ref: testSecretRef, TenantID: "tenant_res", SubscriptionID: "sub_res", DeliveryID: d.ID,
+	}, res.reqs[0], "every field is row-sourced")
 	assert.Equal(t, int32(2), rc.hits.Load())
 	assert.Equal(t, int32(2), rc.verified.Load(), "signed with the RESOLVED secret")
 }
@@ -150,8 +157,8 @@ func TestWithSecretResolver_Nil(t *testing.T) {
 }
 
 func TestSecretResolverFunc(t *testing.T) {
-	f := SecretResolverFunc(func(_ context.Context, ref string) (string, error) { return strings.ToUpper(ref), nil })
-	got, err := f.Resolve(context.Background(), "abc")
+	f := SecretResolverFunc(func(_ context.Context, req SecretRequest) (string, error) { return strings.ToUpper(req.Ref), nil })
+	got, err := f.Resolve(context.Background(), SecretRequest{Ref: "abc"})
 	require.NoError(t, err)
 	assert.Equal(t, "ABC", got)
 }
@@ -177,4 +184,66 @@ func TestDelivery_ResponseBodyReadIsBounded(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, attempts, 1)
 	assert.Equal(t, strings.Repeat("x", MaxResponseBodyLength)+"...", attempts[0].ResponseBody, "kept body is capped (truncateString marks the cut)")
+}
+
+// TestSecretResolver_LogsNeverCarryTheCause: the resolver's error text (which can
+// name the vault path) reaches neither the attempt row nor the log line.
+func TestSecretResolver_LogsNeverCarryTheCause(t *testing.T) {
+	core, logs := observer.New(zap.DebugLevel)
+	res := &recordingResolver{}
+	res.fail.Store(true)
+	rc := newReceiver(t, testResolvedKey, http.StatusOK)
+	m, repo := newEgressTestManager(t, WithAllowPrivateDestinations(), WithSecretResolver(res), WithLogger(zap.New(core)))
+	d := seedSubscriptionDelivery(t, m, repo, rc.server.URL, testSecretRef)
+	m.processDelivery(context.Background(), claimForTest(t, m, d))
+
+	require.NotZero(t, logs.FilterMessage(LogMsgSigningSecretUnavailable).Len())
+	for _, entry := range logs.All() {
+		assert.NotContains(t, entry.Message, "tresor")
+		for _, f := range entry.Context {
+			assert.NotContains(t, f.String, "tresor", "field %s", f.Key)
+			if err, ok := f.Interface.(error); ok {
+				assert.NotContains(t, err.Error(), "tresor", "field %s", f.Key)
+			}
+		}
+	}
+}
+
+// TestDeliveryEvent_CarriesIdempotencyKey: outcomes map back to the queuer's row.
+func TestDeliveryEvent_CarriesIdempotencyKey(t *testing.T) {
+	bus := &recordingBus{}
+	rc := newReceiver(t, "stored-secret-value-123", http.StatusOK)
+	m, repo := newEgressTestManager(t, WithAllowPrivateDestinations(), WithEventBus(bus))
+	d := seedSubscriptionDelivery(t, m, repo, rc.server.URL, "stored-secret-value-123")
+	require.NoError(t, repo.UpdateDelivery(context.Background(), func() *Delivery { c := copyDelivery(d); c.IdempotencyKey = "outbox-row-7"; return c }()))
+	d.IdempotencyKey = "outbox-row-7"
+	m.processDelivery(context.Background(), claimForTest(t, m, d))
+
+	ev := bus.last(EventTopicDeliverySuccess)
+	require.NotNil(t, ev)
+	assert.Equal(t, "outbox-row-7", ev.IdempotencyKey)
+}
+
+type recordingBus struct {
+	mu     sync.Mutex
+	events map[string]*DeliveryEvent
+}
+
+func (b *recordingBus) Publish(topic string, data any) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.events == nil {
+		b.events = map[string]*DeliveryEvent{}
+	}
+	if ev, ok := data.(*DeliveryEvent); ok {
+		b.events[topic] = ev
+	}
+}
+
+func (b *recordingBus) Subscribe(string, func(any)) func() { return func() {} }
+
+func (b *recordingBus) last(topic string) *DeliveryEvent {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.events[topic]
 }

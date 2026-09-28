@@ -704,7 +704,13 @@ func (m *Manager) executeWebhookRequest(ctx context.Context, delivery *Delivery,
 
 	// Resolve the signing secret for THIS attempt (never cached): the stored
 	// value is a reference; see hookd.secret.go. Nothing is sent on failure.
-	secret, err = m.resolveSigningSecret(ctx, secret, delivery.ID)
+	secret, err = m.resolveSigningSecret(ctx, SecretRequest{
+		Ref:            secret,
+		TenantID:       delivery.TenantID,
+		SubscriptionID: delivery.SubscriptionID,
+		DeliveryID:     delivery.ID,
+		IdempotencyKey: delivery.IdempotencyKey,
+	})
 	if err != nil {
 		return 0, "", nil, err
 	}
@@ -988,6 +994,7 @@ func (m *Manager) publishDeliveryEvent(topic string, delivery *Delivery, sub *Su
 		TenantID:       delivery.TenantID,
 		EventType:      delivery.EventType,
 		Status:         delivery.Status,
+		IdempotencyKey: delivery.IdempotencyKey,
 		Timestamp:      time.Now(),
 		Metadata: map[string]any{
 			"attempt_count": delivery.AttemptCount,

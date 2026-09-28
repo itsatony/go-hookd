@@ -55,6 +55,12 @@ Correctness and security. **Consumer action is required only as listed under
   cached); a failed resolve sends nothing and records the opaque
   `ErrMsgSigningSecretUnavailable` (cause logged, never stored). Default
   `StoredSecretResolver` keeps today's behaviour. `SecretResolverFunc` adapter.
+  The resolver receives a `SecretRequest` — `Ref` (the stored column) plus the
+  ROW's `TenantID`, `SubscriptionID`, `DeliveryID` and `IdempotencyKey` — so a
+  tenancy-scoped resolver (agora's Tresor lookup) never trusts in-flight input.
+  Its error is logged by type only (the text may name a vault path).
+- `DeliveryEvent.IdempotencyKey`, so a consumer queueing from its own outbox can
+  map `delivery.success` / `delivery.dead_letter` back to its row.
 - `Config.ClaimLeaseMs` (0 = `DeliveryTimeoutMs` + 60s; explicit values must be
   ≥ `DeliveryTimeoutMs` + 15s), `Config.ClaimLease()`, `ErrDeliveryClaimLost`.
 - `SchemaManager.EnsureSchema` applies **additive nullable columns in place**

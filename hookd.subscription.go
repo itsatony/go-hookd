@@ -576,7 +576,12 @@ func (m *Manager) TestSubscription(ctx context.Context, subscriptionID string) (
 	}
 
 	// Resolve the signing secret for this ping (per call, never cached).
-	secret, err := m.resolveSigningSecret(ctx, sub.Secret, TestPingDeliveryID)
+	secret, err := m.resolveSigningSecret(ctx, SecretRequest{
+		Ref:            sub.Secret,
+		TenantID:       sub.TenantID,
+		SubscriptionID: sub.ID,
+		DeliveryID:     TestPingDeliveryID,
+	})
 	if err != nil {
 		return &TestResult{
 			Success: false,

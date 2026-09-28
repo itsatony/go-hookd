@@ -733,6 +733,9 @@ const (
 	// LogFieldDeliveryID is the log field naming a delivery.
 	LogFieldDeliveryID = "delivery_id"
 
+	// LogFieldErrorType is the log field carrying an error's Go type only.
+	LogFieldErrorType = "error_type"
+
 	// LogMsgEgressPrivateAllowed is logged (WARN) at construction when the
 	// private-destination opt-in is active.
 	LogMsgEgressPrivateAllowed = "webhook egress admits private destinations (WithAllowPrivateDestinations): not for production"

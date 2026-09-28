@@ -1106,8 +1106,9 @@ as it does in every known consumer).
    unchanged, safe with older binaries during a rolling deploy). The
    `User-Agent` now carries the real module version.
 4. **Pluggable signing secrets (go-hookd#3).** `WithSecretResolver(r)` makes the
-   stored `secret` a reference resolved on every attempt (never cached); nothing
-   is sent if it fails. Default behaviour is unchanged.
+   stored `secret` a reference resolved on every attempt (never cached) from a
+   row-sourced `SecretRequest{Ref, TenantID, SubscriptionID, DeliveryID,
+   IdempotencyKey}`; nothing is sent if it fails. Default behaviour is unchanged.
 5. **Egress:** `WithAllowPrivateDestinations()` no longer waives the dial guard
    for a `WithHTTPClient` client hookd cannot wrap (an opaque RoundTripper, or a
    transport with `DialTLS`/`DialTLSContext`); such a client is now always a

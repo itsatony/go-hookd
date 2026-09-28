@@ -497,6 +497,9 @@ type DeliveryEvent struct {
 	TenantID       string         `json:"tenant_id"`
 	EventType      string         `json:"event_type"`
 	Status         string         `json:"status"`
+	// IdempotencyKey is the queuer's key (v0.11.0), so a consumer that queues
+	// from its own outbox can map an outcome back to its own row.
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
 }
 
 // AuditEvent is published to the event bus for audit trail.
