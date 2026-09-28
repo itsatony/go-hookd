@@ -243,6 +243,10 @@ func (r *PostgresRepositoryTx) DeleteSubscription(ctx context.Context, id string
 
 // ListSubscriptions retrieves subscriptions within the transaction.
 func (r *PostgresRepositoryTx) ListSubscriptions(ctx context.Context, filter *SubscriptionFilter) ([]*Subscription, error) {
+	// ⛔ Defence in depth: refuse a tenant-less scan unless AllTenants is set.
+	if err := filter.requireTenantScope(); err != nil {
+		return nil, err
+	}
 	query := `
 		SELECT id, tenant_id, url, secret, event_types, status,
 		       retry_policy, headers, metadata, created_at, updated_at
@@ -475,6 +479,10 @@ func (r *PostgresRepositoryTx) GetPendingDeliveries(ctx context.Context, limit i
 
 // ListDeliveries retrieves deliveries matching the given filter within the transaction.
 func (r *PostgresRepositoryTx) ListDeliveries(ctx context.Context, filter *DeliveryFilter) ([]*Delivery, error) {
+	// ⛔ Defence in depth: refuse a tenant-less scan unless AllTenants is set.
+	if err := filter.requireTenantScope(); err != nil {
+		return nil, err
+	}
 	query := `
 		SELECT id, subscription_id, tenant_id, event_type, payload,
 		       status, attempt_count, max_attempts, next_retry_at,

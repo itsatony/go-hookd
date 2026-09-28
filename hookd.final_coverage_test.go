@@ -623,15 +623,28 @@ func TestManager_ListSubscriptions_Coverage(t *testing.T) {
 	repo := NewMockRepository()
 	ctx := context.Background()
 
-	t.Run("list subscriptions with empty tenant ID in filter", func(t *testing.T) {
+	t.Run("list subscriptions with empty tenant ID in filter is refused", func(t *testing.T) {
+		// v0.10.0: an empty TenantID without AllTenants is fail-CLOSED. Before it,
+		// this returned (empty, nil) and a repository query dropped the WHERE
+		// clause — a tenant-less caller could enumerate every tenant.
 		filter := &SubscriptionFilter{
 			TenantID: "",
 			Limit:    10,
 		}
-		// Mock repo will return empty list for non-existent tenant
+		subs, err := repo.ListSubscriptions(ctx, filter)
+		assert.Error(t, err)
+		assert.True(t, IsValidationError(err))
+		assert.Nil(t, subs)
+	})
+
+	t.Run("list subscriptions across tenants requires explicit AllTenants opt-in", func(t *testing.T) {
+		filter := &SubscriptionFilter{
+			AllTenants: true,
+			Limit:      10,
+		}
 		subs, err := repo.ListSubscriptions(ctx, filter)
 		assert.NoError(t, err)
-		assert.Empty(t, subs)
+		assert.NotNil(t, subs)
 	})
 
 	t.Run("list subscriptions with zero limit", func(t *testing.T) {

@@ -303,6 +303,12 @@ const (
 	// ErrMsgMissingTenantID is the error message for missing tenant ID.
 	ErrMsgMissingTenantID = "tenant_id is required"
 
+	// ErrMsgTenantScopeRequired is returned by a listing whose filter names no
+	// tenant and has not explicitly opted into a cross-tenant scan via
+	// AllTenants. An empty TenantID is fail-CLOSED: it means "refuse", never
+	// "every tenant". See DeliveryFilter.AllTenants / SubscriptionFilter.AllTenants.
+	ErrMsgTenantScopeRequired = "tenant_id is required unless AllTenants is set"
+
 	// ErrMsgMissingEventType is the error message for missing event type.
 	ErrMsgMissingEventType = "event_type is required"
 
@@ -569,7 +575,7 @@ const (
 
 	// UserAgentVersion is the current version for user agent.
 	// This should match versions.yaml project.version.
-	UserAgentVersion = "0.9.0"
+	UserAgentVersion = "0.10.0"
 )
 
 // UserAgent is the complete user agent string used for webhook deliveries.

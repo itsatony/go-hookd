@@ -6,7 +6,7 @@ A webhook delivery management library for Go applications. Handles webhook subsc
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Test Coverage](https://img.shields.io/badge/coverage-60%25-yellow.svg)](https://github.com/itsatony/go-hookd)
 
-> **Status**: Production Ready (v0.9.0)
+> **Status**: Production Ready (v0.10.0)
 > Core functionality is implemented, tested, and production-ready. The API is stable with comprehensive test coverage.
 >
 > ⚠ **v0.8.0 BREAKING BEHAVIOUR — default-deny egress guard.** Deliveries and
@@ -1077,6 +1077,22 @@ Essential metrics to track via event bus:
 5. Worker utilization
 6. Dead letter queue size
 
+## Upgrading to v0.10.0
+
+Security fix with a behaviour change for **cross-tenant** listers only.
+
+`ListDeliveries` and `ListSubscriptions` (manager, postgres, tx) now **refuse** a
+filter with an empty `TenantID` unless you set the new `AllTenants: true` opt-in.
+Previously an empty `TenantID` silently returned every tenant's rows (payloads
+included) — the security hole this release closes.
+
+1. Per-tenant callers: **no change** — you already pass a `TenantID`.
+2. If you deliberately list across tenants (a global dispatch bridge, a
+   cross-tenant dead-letter sweeper), set `AllTenants: true` on that filter.
+3. An empty `TenantID` with `AllTenants` unset now returns a validation error
+   (`ErrMsgTenantScopeRequired`), so a missed call site fails loudly rather than
+   leaking.
+
 ## Upgrading to v0.9.0
 
 v0.9.0 is additive; no consumer change is required.
@@ -1152,7 +1168,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for full guidelines.
 
 ## Project Status
 
-**Current Version**: v0.9.0 (Production Ready)
+**Current Version**: v0.10.0 (Production Ready)
 
 **What's Implemented:**
 - ✓ Core subscription and delivery management
