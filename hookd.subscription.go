@@ -533,12 +533,16 @@ func (m *Manager) TestSubscription(ctx context.Context, subscriptionID string) (
 				fmt.Sprintf(ErrMsgRateLimited, TestSubscriptionCooldownSeconds))
 		}
 	}
-	m.testRateLimiter.Store(subscriptionID, time.Now())
 
 	// Get subscription
 	sub, err := m.GetSubscription(ctx, subscriptionID)
 	if err != nil {
 		return nil, err
+	}
+	// Only an EXISTING subscription takes a cooldown slot: storing before the
+	// lookup let arbitrary ids grow the map without bound (v0.11.0).
+	if _, loaded := m.testRateLimiter.LoadOrStore(subscriptionID, time.Now()); loaded {
+		m.testRateLimiter.Store(subscriptionID, time.Now())
 	}
 
 	// Create test payload
@@ -553,7 +557,7 @@ func (m *Manager) TestSubscription(ctx context.Context, subscriptionID string) (
 	if err != nil {
 		return &TestResult{
 			Success: false,
-			Error:   ErrMsgMarshalTestPayload + ": " + err.Error(),
+			Error:   ErrMsgMarshalTestPayload,
 		}, nil
 	}
 
@@ -562,7 +566,7 @@ func (m *Manager) TestSubscription(ctx context.Context, subscriptionID string) (
 	if err != nil {
 		return &TestResult{
 			Success: false,
-			Error:   ErrMsgCreateRequest + ": " + err.Error(),
+			Error:   ErrMsgCreateRequest,
 		}, nil
 	}
 
@@ -598,6 +602,7 @@ func (m *Manager) TestSubscription(ctx context.Context, subscriptionID string) (
 	req.Header.Set(HeaderSubscriptionID, sub.ID)
 	req.Header.Set(HeaderEventType, EventTypeTestPing)
 	req.Header.Set(HeaderAttemptNumber, "1")
+	req.Header.Del(HeaderIdempotencyKey) // a ping never carries one
 
 	// Execute request with timing
 	startTime := time.Now()

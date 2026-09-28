@@ -59,7 +59,9 @@ type Delivery struct {
 	Secret string `json:"-" db:"secret"`
 	// IdempotencyKey is the key the queuer supplied (QueueDeliveryRequest /
 	// QueueInlineDeliveryRequest), empty if none. Since v0.11.0 it is stored and
-	// sent on every attempt as X-Webhook-Idempotency-Key.
+	// sent on every attempt as X-Webhook-Idempotency-Key, and carried on
+	// delivery events. ⚠ It is visible to the receiver and to every EventBus
+	// subscriber: never put sensitive data in it.
 	IdempotencyKey string `json:"idempotency_key,omitempty" db:"idempotency_key"`
 }
 
@@ -327,7 +329,7 @@ func (r *QueueDeliveryRequest) Validate() error {
 		return cuserr.NewValidationError("payload", ErrMsgPayloadTooLarge)
 	}
 
-	return nil
+	return validateIdempotencyKey(r.IdempotencyKey)
 }
 
 // QueueInlineDeliveryRequest is the request to queue an inline delivery.
@@ -407,7 +409,7 @@ func (r *QueueInlineDeliveryRequest) validate(policy egressPolicy) error {
 		return cuserr.NewValidationError("max_retries", "max_retries cannot be negative")
 	}
 
-	return nil
+	return validateIdempotencyKey(r.IdempotencyKey)
 }
 
 // SubscriptionFilter defines filtering criteria for listing subscriptions.
@@ -498,7 +500,9 @@ type DeliveryEvent struct {
 	EventType      string         `json:"event_type"`
 	Status         string         `json:"status"`
 	// IdempotencyKey is the queuer's key (v0.11.0), so a consumer that queues
-	// from its own outbox can map an outcome back to its own row.
+	// from its own outbox can map an outcome back to its own row. ⚠ It reaches
+	// every EventBus subscriber (and the receiver, as a header): never put
+	// sensitive data in it.
 	IdempotencyKey string `json:"idempotency_key,omitempty"`
 }
 
@@ -740,5 +744,20 @@ func validateEventTypes(eventTypes []string) error {
 		}
 	}
 
+	return nil
+}
+
+// validateIdempotencyKey refuses a key that cannot be sent as the
+// X-Webhook-Idempotency-Key header (every attempt would fail) or stored
+// (VARCHAR(255)): at most MaxIdempotencyKeyLength bytes of visible ASCII.
+func validateIdempotencyKey(key string) error {
+	if len(key) > MaxIdempotencyKeyLength {
+		return cuserr.NewValidationError("idempotency_key", ErrMsgInvalidIdempotencyKey)
+	}
+	for i := 0; i < len(key); i++ {
+		if key[i] < 0x21 || key[i] > 0x7e {
+			return cuserr.NewValidationError("idempotency_key", ErrMsgInvalidIdempotencyKey)
+		}
+	}
 	return nil
 }

@@ -776,8 +776,10 @@ func (r *MockRepository) Close() error {
 // CountDeliveriesByFilter counts deliveries matching the cleanup filter.
 func (r *MockRepository) CountDeliveriesByFilter(ctx context.Context, filter *CleanupFilter) (int64, error) {
 	// ⛔ Fail closed (v0.11.0): an empty TenantID drops the tenant clause below,
-	// so it is only allowed on the explicit AllTenants opt-in.
-	if err := filter.requireTenantScope(); err != nil {
+	// so it is only allowed on the explicit AllTenants opt-in — and, as in
+	// Manager.CleanupDeliveries, at least one real constraint is required, so
+	// AllTenants alone can never mean "the whole table".
+	if err := filter.Validate(); err != nil {
 		return 0, err
 	}
 	r.mu.RLock()
@@ -795,8 +797,10 @@ func (r *MockRepository) CountDeliveriesByFilter(ctx context.Context, filter *Cl
 // DeleteDeliveriesByFilter deletes deliveries matching the cleanup filter.
 func (r *MockRepository) DeleteDeliveriesByFilter(ctx context.Context, filter *CleanupFilter) (int64, error) {
 	// ⛔ Fail closed (v0.11.0): an empty TenantID drops the tenant clause below,
-	// so it is only allowed on the explicit AllTenants opt-in.
-	if err := filter.requireTenantScope(); err != nil {
+	// so it is only allowed on the explicit AllTenants opt-in — and, as in
+	// Manager.CleanupDeliveries, at least one real constraint is required, so
+	// AllTenants alone can never mean "the whole table".
+	if err := filter.Validate(); err != nil {
 		return 0, err
 	}
 	r.mu.Lock()
@@ -1404,8 +1408,10 @@ func (tx *MockRepositoryTx) Close() error {
 // CountDeliveriesByFilter counts deliveries matching the cleanup filter within the transaction.
 func (tx *MockRepositoryTx) CountDeliveriesByFilter(ctx context.Context, filter *CleanupFilter) (int64, error) {
 	// ⛔ Fail closed (v0.11.0): an empty TenantID drops the tenant clause below,
-	// so it is only allowed on the explicit AllTenants opt-in.
-	if err := filter.requireTenantScope(); err != nil {
+	// so it is only allowed on the explicit AllTenants opt-in — and, as in
+	// Manager.CleanupDeliveries, at least one real constraint is required, so
+	// AllTenants alone can never mean "the whole table".
+	if err := filter.Validate(); err != nil {
 		return 0, err
 	}
 	tx.mu.RLock()
@@ -1423,8 +1429,10 @@ func (tx *MockRepositoryTx) CountDeliveriesByFilter(ctx context.Context, filter 
 // DeleteDeliveriesByFilter deletes deliveries matching the cleanup filter within the transaction.
 func (tx *MockRepositoryTx) DeleteDeliveriesByFilter(ctx context.Context, filter *CleanupFilter) (int64, error) {
 	// ⛔ Fail closed (v0.11.0): an empty TenantID drops the tenant clause below,
-	// so it is only allowed on the explicit AllTenants opt-in.
-	if err := filter.requireTenantScope(); err != nil {
+	// so it is only allowed on the explicit AllTenants opt-in — and, as in
+	// Manager.CleanupDeliveries, at least one real constraint is required, so
+	// AllTenants alone can never mean "the whole table".
+	if err := filter.Validate(); err != nil {
 		return 0, err
 	}
 	tx.mu.Lock()

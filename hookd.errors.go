@@ -32,6 +32,10 @@ var (
 	// errors.Is.
 	ErrDeliveryClaimLost = cuserr.NewNotFoundError("delivery_claim", "")
 
+	// ErrDeliveryNotDeadLetter is returned by RequeueDeadLetter for a delivery
+	// that exists but is not (or no longer) dead-lettered.
+	ErrDeliveryNotDeadLetter = cuserr.NewValidationError("delivery", ErrMsgDeliveryNotDeadLetter)
+
 	// ErrCircuitBreakerNotFound indicates circuit breaker state was not found.
 	ErrCircuitBreakerNotFound = cuserr.NewNotFoundError("circuit_breaker", "")
 

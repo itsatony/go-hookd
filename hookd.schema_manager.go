@@ -301,7 +301,7 @@ func (m *SchemaManager) getSchemaVersion(ctx context.Context, q querier) (exists
 		FROM pg_class c
 		JOIN pg_namespace n ON n.oid = c.relnamespace
 		WHERE c.relname = $1
-		  AND n.nspname = 'public'
+		  AND n.nspname = current_schema()
 		  AND c.relkind = 'r'
 	`
 
@@ -450,10 +450,12 @@ var schemaAdditiveColumns = []additiveColumn{
 	{tableSuffix: TableSuffixDeliveries, column: "idempotency_key", sqlType: "VARCHAR(255)"},
 }
 
-// Operation names for additive schema errors.
+// Operation names and statements for additive schema changes.
 const (
-	opCheckAdditiveColumns = "check_additive_columns"
-	opAddAdditiveColumn    = "add_additive_column"
+	sqlSetAdditiveLockTimeout = "SET lock_timeout = '5s'"
+	sqlResetLockTimeout       = "RESET lock_timeout"
+	opCheckAdditiveColumns    = "check_additive_columns"
+	opAddAdditiveColumn       = "add_additive_column"
 )
 
 // missingAdditiveColumns lists the additive columns the schema lacks.
@@ -464,7 +466,7 @@ func (m *SchemaManager) missingAdditiveColumns(ctx context.Context, q querier) (
 		err := q.QueryRowContext(ctx, `
 			SELECT EXISTS (
 				SELECT 1 FROM information_schema.columns
-				WHERE table_schema = 'public' AND table_name = $1 AND column_name = $2
+				WHERE table_schema = current_schema() AND table_name = $1 AND column_name = $2
 			)`, m.schemaConfig.tableName(col.tableSuffix), col.column).Scan(&present)
 		if err != nil {
 			return nil, cuserr.NewExternalError("database", "postgres", err,
@@ -491,6 +493,15 @@ func (m *SchemaManager) ensureAdditiveColumns(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		// ADD COLUMN takes ACCESS EXCLUSIVE; bounded so a boot behind a long
+		// transaction fails fast (and retries next boot) instead of queueing
+		// every other query on the table behind it.
+		if _, err := conn.ExecContext(ctx, sqlSetAdditiveLockTimeout); err != nil {
+			return cuserr.NewExternalError("database", "postgres", err,
+				cuserr.WithMetadata("operation", opAddAdditiveColumn),
+			)
+		}
+		defer func() { _, _ = conn.ExecContext(context.WithoutCancel(ctx), sqlResetLockTimeout) }()
 		for _, col := range missing {
 			stmt := fmt.Sprintf(`ALTER TABLE %s ADD COLUMN IF NOT EXISTS %s %s`,
 				m.schemaConfig.tableName(col.tableSuffix), col.column, col.sqlType)

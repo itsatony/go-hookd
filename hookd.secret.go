@@ -32,9 +32,22 @@ import (
 )
 
 // SecretRequest is what a resolver is asked. Every field comes from the stored
-// ROW (subscription or inline delivery), never from a request a subscriber
-// shaped in flight — so a resolver that scopes its lookup by tenant (agora
-// checks the vault scope against the row's org and owner) can rely on them.
+// ROW that supplies the secret, never from anything shaped in flight:
+//
+//   - Subscription delivery / TestSubscription: Ref, TenantID and
+//     SubscriptionID come from the SUBSCRIPTION row (a delivery whose tenant
+//     disagrees with its subscription's is refused before Resolve is called).
+//   - ⚠ Inline delivery: the row was written by QueueInlineDelivery, so Ref,
+//     TenantID and IdempotencyKey are exactly what the QUEUER asserted. They
+//     are as trustworthy as the code that queues — a consumer must not let an
+//     end user choose them.
+//
+// ⛔ IdempotencyKey is a LOOKUP HINT (e.g. "my outbox row id"), never an input
+// to an authorization decision: a resolver that uses it must re-derive tenancy
+// from the row it finds and compare it with TenantID.
+//
+// A resolver should log its own failure cause where it is safe to; hookd logs
+// only the error's type (see resolveSigningSecret).
 type SecretRequest struct {
 	// Ref is the stored secret column: the secret itself for the default
 	// resolver, a reference (e.g. a vault name) for any other.
@@ -103,13 +116,46 @@ func WithSecretResolver(r SecretResolver) ManagerOption {
 // is logged only by its TYPE: its text may name a vault path or embed the ref,
 // and a log line is not where a credential's address belongs.
 func (m *Manager) resolveSigningSecret(ctx context.Context, req SecretRequest) (string, error) {
-	secret, err := m.secretResolver.Resolve(ctx, req)
+	secret, err := m.callResolver(ctx, req)
+	if err == nil && secret == "" && !m.defaultSecretResolver() {
+		// A custom resolver that returns nothing would have us sign with the
+		// empty key — a signature anyone can forge. Treat it as a failure.
+		err = errEmptyResolvedSecret
+	}
 	if err != nil {
 		m.logger.Warn(LogMsgSigningSecretUnavailable,
 			zap.String(LogFieldDeliveryID, req.DeliveryID),
+			zap.String(LogFieldTenantID, req.TenantID),
+			zap.String(LogFieldSubscriptionID, req.SubscriptionID),
 			zap.String(LogFieldErrorType, fmt.Sprintf("%T", err)),
+			zap.Bool(LogFieldResolverPanicked, errors.Is(err, errResolverPanicked)),
+			zap.Bool(LogFieldResolverEmpty, errors.Is(err, errEmptyResolvedSecret)),
 		)
 		return "", ErrSigningSecretUnavailable
 	}
 	return secret, nil
+}
+
+// errEmptyResolvedSecret is the cause logged when a custom resolver returns "".
+var errEmptyResolvedSecret = errors.New(ErrMsgEmptyResolvedSecret)
+
+// callResolver runs the consumer's resolver, turning a panic into an error: a
+// resolver bug must fail one attempt, not kill the worker and the process.
+func (m *Manager) callResolver(ctx context.Context, req SecretRequest) (secret string, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			secret, err = "", errResolverPanicked
+		}
+	}()
+	return m.secretResolver.Resolve(ctx, req)
+}
+
+// errResolverPanicked is the cause logged when a resolver panicked.
+var errResolverPanicked = errors.New(ErrMsgResolverPanicked)
+
+// defaultSecretResolver reports whether the stored-secret default is in use
+// (for which an empty secret is the pre-v0.11.0 behaviour, kept unchanged).
+func (m *Manager) defaultSecretResolver() bool {
+	_, ok := m.secretResolver.(StoredSecretResolver)
+	return ok
 }

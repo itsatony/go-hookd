@@ -5,6 +5,7 @@ package integration_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -143,7 +144,9 @@ func TestClaim_BarrierReleasedClaimersNeverOverlap(t *testing.T) {
 		go func(repo *hookd.PostgresRepository) {
 			defer wg.Done()
 			<-barrier
-			for {
+			// Bounded: a regression to a non-holding claim never drains the
+			// queue, and must FAIL (too many claims) rather than hang.
+			for iter := 0; iter < claimSeedCount; iter++ {
 				batch, err := repo.ClaimPendingDeliveries(context.Background(), claimBatch, claimLease)
 				if err != nil {
 					mu.Lock()
@@ -167,6 +170,11 @@ func TestClaim_BarrierReleasedClaimersNeverOverlap(t *testing.T) {
 
 	require.Empty(t, errs)
 	require.Len(t, claimed, len(ids), "every seeded row claimed")
+	total := 0
+	for _, n := range claimed {
+		total += n
+	}
+	require.Equal(t, len(ids), total, "no row handed out twice")
 	for id, n := range claimed {
 		assert.Equal(t, 1, n, "row %s claimed %d times", id, n)
 	}
@@ -358,4 +366,92 @@ func countAll(t *testing.T, dsn string) int {
 	var n int
 	require.NoError(t, db.QueryRow(fmt.Sprintf(`SELECT COUNT(*) FROM %s_hookd_deliveries`, claimPrefix)).Scan(&n))
 	return n
+}
+
+// TestManager_StaleClaimNeverSends drives the WORKER path with a lapsed claim:
+// another worker re-claimed the row, so the stale holder must not send.
+// (Removing the pre-send RenewDeliveryClaim fence makes this fail.)
+func TestManager_StaleClaimNeverSends(t *testing.T) {
+	dsn := setupClaimSchema(t)
+	var hits atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+
+	staleRepo, freshRepo := newRepo(t, dsn), newRepo(t, dsn)
+	seedInline(t, staleRepo, 1, server.URL, e2eTenant)
+	ctx := context.Background()
+	stale, err := staleRepo.ClaimPendingDeliveries(ctx, 1, shortLease)
+	require.NoError(t, err)
+	require.Len(t, stale, 1)
+	time.Sleep(shortLeaseExpired)
+	fresh, err := freshRepo.ClaimPendingDeliveries(ctx, 1, claimLease)
+	require.NoError(t, err)
+	require.Len(t, fresh, 1)
+
+	// The worker receives the stale row exactly as a batch member whose lease
+	// lapsed while it waited; renewal and everything else hit real PostgreSQL.
+	wrapped := &staleClaimRepo{PostgresRepository: staleRepo, stale: stale[0]}
+	cfg := hookd.NewConfig(dsn)
+	cfg.QueuePollInterval = 10
+	cfg.QueueIdleMaxInterval = 50
+	m, err := hookd.NewManager(cfg, wrapped, hookd.WithAllowPrivateDestinations())
+	require.NoError(t, err)
+	require.NoError(t, m.Start(ctx))
+	require.Eventually(t, func() bool { return wrapped.handedOut.Load() }, 5*time.Second, 10*time.Millisecond)
+	time.Sleep(500 * time.Millisecond)
+	require.NoError(t, m.Stop())
+	assert.Equal(t, int64(0), hits.Load(), "a lapsed claim must never send")
+
+	still, err := freshRepo.GetDelivery(ctx, fresh[0].ID)
+	require.NoError(t, err)
+	assert.True(t, still.NextRetryAt.Equal(*fresh[0].NextRetryAt), "the new holder's claim is untouched")
+}
+
+// staleClaimRepo hands out one stale claim, then claims nothing.
+type staleClaimRepo struct {
+	*hookd.PostgresRepository
+	stale     *hookd.Delivery
+	handedOut atomic.Bool
+}
+
+func (r *staleClaimRepo) ClaimPendingDeliveries(_ context.Context, _ int, _ time.Duration) ([]*hookd.Delivery, error) {
+	if r.handedOut.CompareAndSwap(false, true) {
+		return []*hookd.Delivery{r.stale}, nil
+	}
+	return nil, nil
+}
+
+// TestRetryDeadLetter_ConcurrentRedrivesRequeueOnce: barrier-released redrives
+// of one dead letter — exactly one succeeds.
+func TestRetryDeadLetter_ConcurrentRedrivesRequeueOnce(t *testing.T) {
+	dsn := setupClaimSchema(t)
+	repo := newRepo(t, dsn)
+	ids := seedInline(t, repo, 1, "https://example.invalid/hook", e2eTenant)
+	ctx := context.Background()
+	require.NoError(t, repo.MoveToDeadLetter(ctx, ids[0], "test"))
+
+	m, err := hookd.NewManager(hookd.NewConfig(dsn), repo)
+	require.NoError(t, err)
+	var ok, refused atomic.Int32
+	barrier := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < claimers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-barrier
+			if _, err := m.RetryDeadLetter(ctx, ids[0]); err == nil {
+				ok.Add(1)
+			} else if errors.Is(err, hookd.ErrDeliveryNotDeadLetter) {
+				refused.Add(1)
+			}
+		}()
+	}
+	close(barrier)
+	wg.Wait()
+	assert.Equal(t, int32(1), ok.Load())
+	assert.Equal(t, int32(claimers-1), refused.Load())
 }

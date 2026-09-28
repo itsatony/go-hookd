@@ -1384,8 +1384,10 @@ func (r *PostgresRepository) Close() error {
 // This is used for dry-run operations before actual deletion.
 func (r *PostgresRepository) CountDeliveriesByFilter(ctx context.Context, filter *CleanupFilter) (int64, error) {
 	// ⛔ Fail closed (v0.11.0): an empty TenantID drops the tenant clause below,
-	// so it is only allowed on the explicit AllTenants opt-in.
-	if err := filter.requireTenantScope(); err != nil {
+	// so it is only allowed on the explicit AllTenants opt-in — and, as in
+	// Manager.CleanupDeliveries, at least one real constraint is required, so
+	// AllTenants alone can never mean "the whole table".
+	if err := filter.Validate(); err != nil {
 		return 0, err
 	}
 	query := fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE 1=1`, r.schemaConfig.TableDeliveries())
@@ -1444,8 +1446,10 @@ func (r *PostgresRepository) CountDeliveriesByFilter(ctx context.Context, filter
 // Note: Related delivery attempts are automatically deleted via CASCADE.
 func (r *PostgresRepository) DeleteDeliveriesByFilter(ctx context.Context, filter *CleanupFilter) (int64, error) {
 	// ⛔ Fail closed (v0.11.0): an empty TenantID drops the tenant clause below,
-	// so it is only allowed on the explicit AllTenants opt-in.
-	if err := filter.requireTenantScope(); err != nil {
+	// so it is only allowed on the explicit AllTenants opt-in — and, as in
+	// Manager.CleanupDeliveries, at least one real constraint is required, so
+	// AllTenants alone can never mean "the whole table".
+	if err := filter.Validate(); err != nil {
 		return 0, err
 	}
 	query := fmt.Sprintf(`DELETE FROM %s WHERE 1=1`, r.schemaConfig.TableDeliveries())

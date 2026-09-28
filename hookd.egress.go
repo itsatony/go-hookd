@@ -42,6 +42,7 @@ import (
 	"net/netip"
 	"net/url"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/itsatony/go-cuserr"
@@ -66,6 +67,12 @@ const (
 	// EgressTLSHandshakeTimeout bounds a TLS handshake (http.DefaultTransport's
 	// value; the default hookd transport previously had none).
 	EgressTLSHandshakeTimeout = 10 * time.Second
+	// EgressMaxResponseHeaderBytes caps a delivery response's header block.
+	EgressMaxResponseHeaderBytes = 16 << 10
+	// MaxStoredResponseHeaders caps how many response headers an attempt stores.
+	MaxStoredResponseHeaders = 32
+	// MaxStoredResponseHeaderValueLength caps each stored header value.
+	MaxStoredResponseHeaderValueLength = 512
 )
 
 // egressReservedPrefixes are special-purpose ranges that IsGlobalUnicast and
@@ -89,6 +96,12 @@ var egressReservedPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("203.0.113.0/24"),  // RFC 5737 TEST-NET-3
 	netip.MustParsePrefix("2001:db8::/32"),   // RFC 3849 documentation
 	netip.MustParsePrefix("100::/64"),        // RFC 6666 discard-only
+	// v0.11.0 (security review): ranges that embed or translate to an IPv4
+	// address, or are not globally routable, and that IsGlobalUnicast admits.
+	netip.MustParsePrefix("2001::/32"),       // RFC 4380 Teredo (embeds an obfuscated IPv4)
+	netip.MustParsePrefix("::ffff:0:0:0/96"), // RFC 6145 / 7915 IPv4-translated (SIIT)
+	netip.MustParsePrefix("5f00::/16"),       // RFC 9602 SRv6 SIDs
+	netip.MustParsePrefix("3fff::/20"),       // RFC 9637 documentation
 }
 
 // egressCGNATPrefix is the one reserved range WithAllowPrivateDestinations
@@ -269,6 +282,11 @@ func guardTransport(
 	base.Dial = nil //nolint:staticcheck // cleared so it cannot bypass DialContext
 	base.DialContext = guardedDialContext(policy, dial, resolver, onRefusal)
 	base.Proxy = nil
+	// Bounded: a subscriber endpoint must not be able to hand the worker (and
+	// the attempt row) megabytes of headers.
+	if base.MaxResponseHeaderBytes <= 0 || base.MaxResponseHeaderBytes > EgressMaxResponseHeaderBytes {
+		base.MaxResponseHeaderBytes = EgressMaxResponseHeaderBytes
+	}
 	base.ForceAttemptHTTP2 = false
 	base.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
 	if base.TLSClientConfig != nil {
@@ -322,6 +340,8 @@ func (m *Manager) buildHTTPClient(resolver egressHostResolver) error {
 
 	derived := *m.customHTTPClient
 	derived.CheckRedirect = noFollowRedirect
+	// A cookie jar would carry one subscriber's cookies to another's endpoint.
+	derived.Jar = nil
 
 	var base *http.Transport
 	switch t := derived.Transport.(type) {
@@ -403,4 +423,32 @@ func WithEgressRefusalHook(hook func(cause string)) ManagerOption {
 		m.egressRefusalHook = hook
 		return nil
 	}
+}
+
+// storableResponseHeaders keeps what an attempt row stores of a subscriber's
+// response headers bounded: at most MaxStoredResponseHeaders keys (sorted, so the
+// choice is deterministic), the first value of each, each cut to
+// MaxStoredResponseHeaderValueLength. The transport already refuses a header
+// block above EgressMaxResponseHeaderBytes.
+func storableResponseHeaders(h http.Header) map[string]string {
+	keys := make([]string, 0, len(h))
+	for k := range h {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	if len(keys) > MaxStoredResponseHeaders {
+		keys = keys[:MaxStoredResponseHeaders]
+	}
+	out := make(map[string]string, len(keys))
+	for _, k := range keys {
+		out[k] = storableText(truncateString(h.Get(k), MaxStoredResponseHeaderValueLength))
+	}
+	return out
+}
+
+// storableText makes subscriber-supplied text safe for a TEXT/JSONB column:
+// invalid UTF-8 (a binary body, or a cut inside a rune) would fail the insert
+// and lose the attempt row.
+func storableText(s string) string {
+	return strings.ToValidUTF8(s, "\uFFFD")
 }

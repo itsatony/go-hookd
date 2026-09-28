@@ -479,6 +479,25 @@ func (r *TransactionalRepository) RenewDeliveryClaim(ctx context.Context, id str
 	return renewed, err
 }
 
+// RequeueDeadLetter re-queues a dead letter only if it is still dead-lettered.
+func (r *TransactionalRepository) RequeueDeadLetter(ctx context.Context, id string) (*hookd.Delivery, error) {
+	res, err := r.tx.ExecContext(ctx, fmt.Sprintf(`UPDATE %s
+		SET status = $2, attempt_count = 0, next_retry_at = NOW(), completed_at = NULL
+		WHERE id = $1 AND status = $3`, r.schemaConfig.TableDeliveries()),
+		id, hookd.DeliveryStatusPending, hookd.DeliveryStatusDeadLetter)
+	if err != nil {
+		return nil, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if n == 0 {
+		return nil, hookd.ErrDeliveryNotDeadLetter
+	}
+	return r.GetDelivery(ctx, id)
+}
+
 // ReleaseDeliveryClaim returns a held, unsent delivery within the transaction.
 func (r *TransactionalRepository) ReleaseDeliveryClaim(ctx context.Context, id string, claimedUntil time.Time, retryAt *time.Time) error {
 	query := fmt.Sprintf(`UPDATE %s SET next_retry_at = $4

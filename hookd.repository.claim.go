@@ -18,9 +18,12 @@
 //     until the lease expires. No new column, no schema version bump (a bump
 //     would DROP every consumer's tables, see SchemaManager.EnsureSchema), and no
 //     reaper: a crashed worker's row simply becomes due again.
-//   - The claimed next_retry_at is a FENCING TOKEN. For one row the tokens only
-//     increase: a re-claim requires now >= the old token and writes now+lease;
-//     a renewal writes GREATEST(now+lease, token+1µs).
+//   - The claimed next_retry_at is a FENCING TOKEN. What correctness needs is
+//     that no two live claims on a row share a token: a re-claim requires
+//     now >= the previous value and writes now+lease (so it exceeds every token
+//     issued before it), and a renewal writes GREATEST(now+lease, token+1µs).
+//     Other writers (the retry schedule, a circuit-open release, a redrive) may
+//     set lower, app-clock values — those end the claim, they never forge one.
 //   - RenewDeliveryClaim is called immediately before the HTTP send and only
 //     succeeds if the row still carries the caller's token. So a row whose lease
 //     lapsed while it waited behind others in a batch, and was re-claimed, is
@@ -59,6 +62,7 @@ const (
 	opScanClaimedDelivery    = "scan_claimed_delivery"
 	opRenewDeliveryClaim     = "renew_delivery_claim"
 	opReleaseDeliveryClaim   = "release_delivery_claim"
+	opRequeueDeadLetter      = "requeue_dead_letter"
 	opRowsAffected           = "rows_affected"
 	metaKeyOperation         = "operation"
 	errSourceDatabase        = "database"
@@ -203,6 +207,76 @@ func pgReleaseDeliveryClaim(ctx context.Context, q claimExecer, table, id string
 		return ErrDeliveryClaimLost
 	}
 	return nil
+}
+
+// pgRequeueDeadLetter is RequeueDeadLetter for both Postgres repositories.
+func pgRequeueDeadLetter(ctx context.Context, q claimExecer, table, id string) (*Delivery, error) {
+	query := fmt.Sprintf(`
+		UPDATE %s
+		SET status = $2, attempt_count = 0, next_retry_at = NOW(), completed_at = NULL
+		WHERE id = $1 AND status = $3
+		RETURNING id, subscription_id, tenant_id, event_type, payload,
+		          url, secret, status, attempt_count, max_attempts,
+		          next_retry_at, completed_at, created_at, idempotency_key`, table)
+	delivery, err := scanDelivery(q.QueryRowContext(ctx, query, id, DeliveryStatusPending, DeliveryStatusDeadLetter))
+	if err == nil {
+		return delivery, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, claimDB(err, opRequeueDeadLetter)
+	}
+	var exists bool
+	if err := q.QueryRowContext(ctx, fmt.Sprintf(`SELECT EXISTS (SELECT 1 FROM %s WHERE id = $1)`, table), id).Scan(&exists); err != nil {
+		return nil, claimDB(err, opRequeueDeadLetter)
+	}
+	if !exists {
+		return nil, ErrDeliveryNotFound
+	}
+	return nil, ErrDeliveryNotDeadLetter
+}
+
+// RequeueDeadLetter re-queues a dead letter atomically (see Repository).
+func (r *PostgresRepository) RequeueDeadLetter(ctx context.Context, id string) (*Delivery, error) {
+	return pgRequeueDeadLetter(ctx, r.db, r.schemaConfig.TableDeliveries(), id)
+}
+
+// RequeueDeadLetter re-queues a dead letter atomically within the transaction.
+func (r *PostgresRepositoryTx) RequeueDeadLetter(ctx context.Context, id string) (*Delivery, error) {
+	return pgRequeueDeadLetter(ctx, r.tx, r.schemaConfig.TableDeliveries(), id)
+}
+
+// mockRequeue is RequeueDeadLetter over a mock's map; the caller holds the lock.
+func mockRequeue(deliveries map[string]*Delivery, id string) (*Delivery, error) {
+	d, ok := deliveries[id]
+	if !ok {
+		return nil, ErrDeliveryNotFound
+	}
+	if d.Status != DeliveryStatusDeadLetter {
+		return nil, ErrDeliveryNotDeadLetter
+	}
+	now := mockClaimTime()
+	d.Status = DeliveryStatusPending
+	d.AttemptCount = 0
+	d.NextRetryAt = &now
+	d.CompletedAt = nil
+	return copyDelivery(d), nil
+}
+
+// RequeueDeadLetter re-queues a dead letter in the mock.
+func (r *MockRepository) RequeueDeadLetter(ctx context.Context, id string) (*Delivery, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.injectError != nil {
+		return nil, r.injectError
+	}
+	return mockRequeue(r.deliveries, id)
+}
+
+// RequeueDeadLetter re-queues a dead letter within the mock transaction.
+func (tx *MockRepositoryTx) RequeueDeadLetter(ctx context.Context, id string) (*Delivery, error) {
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
+	return mockRequeue(tx.deliveries, id)
 }
 
 // ClaimPendingDeliveries claims up to limit due deliveries (see Repository).

@@ -83,6 +83,15 @@ type Repository interface {
 	// for a given row (a re-claim needs now >= the old token), so they are unique.
 	RenewDeliveryClaim(ctx context.Context, id string, claimedUntil time.Time, lease time.Duration) (time.Time, error)
 
+	// RequeueDeadLetter atomically moves a dead-lettered delivery back to the
+	// queue (status pending, attempt_count 0, due now, completed_at cleared) ONLY
+	// IF it is still dead_letter, and returns the updated row (v0.11.0). A
+	// read-modify-write redrive let two concurrent redrives re-queue a row a
+	// worker had already claimed — a duplicate send. ErrDeliveryNotFound if
+	// there is no such delivery; ErrDeliveryNotDeadLetter if it is not
+	// dead-lettered (anymore).
+	RequeueDeadLetter(ctx context.Context, id string) (*Delivery, error)
+
 	// ReleaseDeliveryClaim gives a claimed, still-pending delivery back to the
 	// queue without attempting it, fenced like RenewDeliveryClaim: next_retry_at
 	// becomes retryAt, or NULL (due now, at its original queue position) when

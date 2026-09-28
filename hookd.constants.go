@@ -220,6 +220,11 @@ const (
 	// ClaimQueryTimeout bounds one claim query (ClaimPendingDeliveries).
 	ClaimQueryTimeout = 10 * time.Second
 
+	// ClaimRenewTimeout bounds the pre-send RenewDeliveryClaim. It is below
+	// MinClaimLeaseMarginMs, so a slow renewal can never push the attempt past
+	// its lease (the attempt deadline is measured from before the renewal).
+	ClaimRenewTimeout = 2 * time.Second
+
 	// MinClaimLeaseMarginMs is the least a claim lease must exceed
 	// DeliveryTimeoutMs + DeliveryBookkeepingTimeout by (Config.ClaimLeaseMs).
 	MinClaimLeaseMarginMs = 5000
@@ -442,8 +447,18 @@ const (
 	// vault path). See hookd.secret.go.
 	ErrMsgSigningSecretUnavailable = "webhook signing secret unavailable"
 
+	// ErrMsgEmptyResolvedSecret is the (logged) cause when a custom resolver
+	// returns an empty secret without an error.
+	ErrMsgEmptyResolvedSecret = "secret resolver returned an empty secret"
+
+	// ErrMsgResolverPanicked is the (logged) cause when a resolver panicked.
+	ErrMsgResolverPanicked = "secret resolver panicked"
+
 	// ErrMsgSecretResolverNil is returned by WithSecretResolver(nil).
 	ErrMsgSecretResolverNil = "secret resolver must not be nil"
+
+	// ErrMsgDeliveryNotDeadLetter: a redrive of a delivery not in dead_letter.
+	ErrMsgDeliveryNotDeadLetter = "delivery must be in dead_letter status to retry"
 
 	// ErrMsgInvalidClaimLimit is returned by ClaimPendingDeliveries for limit < 1.
 	ErrMsgInvalidClaimLimit = "claim limit must be at least 1"
@@ -487,6 +502,13 @@ const (
 
 	// ErrMsgInvalidCircuitBreakerHalfOpen is the error message for invalid half-open requests.
 	ErrMsgInvalidCircuitBreakerHalfOpen = "circuit_breaker_half_open_requests must be at least 1"
+
+	// ErrMsgInvalidIdempotencyKey is returned for an idempotency key that is not
+	// 1-255 bytes of visible ASCII (it is sent as a header).
+	ErrMsgInvalidIdempotencyKey = "idempotency_key must be at most 255 visible ASCII characters"
+
+	// MaxIdempotencyKeyLength is the longest accepted idempotency key.
+	MaxIdempotencyKeyLength = 255
 
 	// ErrMsgInvalidIdempotencyTTL is the error message for invalid idempotency TTL.
 	ErrMsgInvalidIdempotencyTTL = "idempotency_ttl must be at least 1 hour"
@@ -732,6 +754,28 @@ const (
 
 	// LogFieldDeliveryID is the log field naming a delivery.
 	LogFieldDeliveryID = "delivery_id"
+
+	// LogMsgBatchSizeClamped is the WARN logged when MaxBatchSize exceeds what
+	// one lease can cover (see Config.EffectiveBatchSize).
+	LogMsgBatchSizeClamped = "max_batch_size exceeds what one claim lease covers; clamped"
+
+	// LogFieldConfiguredBatchSize / LogFieldEffectiveBatchSize accompany it.
+	LogFieldConfiguredBatchSize = "configured_batch_size"
+	LogFieldEffectiveBatchSize  = "effective_batch_size"
+
+	// LogFieldTenantID is the log field naming a tenant.
+	LogFieldTenantID = "tenant_id"
+
+	// LogFieldSubscriptionID is the log field naming a subscription.
+	LogFieldSubscriptionID = "subscription_id"
+
+	// LogMsgSigningSecretTenantMismatch is the WARN logged when a delivery's
+	// tenant differs from its subscription's; the attempt is not sent.
+	LogMsgSigningSecretTenantMismatch = "delivery tenant does not match its subscription; signing refused"
+
+	// LogFieldResolverPanicked / LogFieldResolverEmpty flag hookd's own causes.
+	LogFieldResolverPanicked = "resolver_panicked"
+	LogFieldResolverEmpty    = "resolver_empty_secret"
 
 	// LogFieldErrorType is the log field carrying an error's Go type only.
 	LogFieldErrorType = "error_type"

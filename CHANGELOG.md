@@ -68,18 +68,51 @@ Correctness and security. **Consumer action is required only as listed under
   `SchemaVersion` — a bump DROPs every table, and an older binary booting during
   a rolling deploy would drop the upgraded schema.
 
+### Hardened after independent code + security review
+- The attempt deadline is measured from BEFORE the pre-send renewal (renewal
+  bounded by `ClaimRenewTimeout` = 2s < the 5s margin), so a slow renewal cannot
+  push an attempt past its lease.
+- `RetryDeadLetter` → one conditional `RequeueDeadLetter` statement (new
+  Repository method); concurrent redrives re-queue once (`ErrDeliveryNotDeadLetter`).
+- Rows whose pre-send reads/renewal are cut by `Stop` are released, not left leased.
+- `Config.EffectiveBatchSize()` caps a poll to what one lease covers (WARN when
+  it clamps `MaxBatchSize`).
+- `IdempotencyKey` is validated at queue time (≤255 visible ASCII): it is now a
+  header, and an invalid one would have failed every attempt.
+- Resolver: a panic or an empty secret from a custom resolver fails the attempt
+  (nothing sent); a subscription delivery whose tenant differs from its
+  subscription's is refused before `Resolve`; `SecretRequest` tenancy comes from
+  the secret-bearing row.
+- Repository `Count/DeleteDeliveriesByFilter` run the full `CleanupFilter.Validate`
+  (so `AllTenants` alone can never mean "the whole table").
+- Egress: response header block capped (16 KiB) and stored headers bounded
+  (32 keys, 512 B each, first value); stored body/headers forced to valid UTF-8;
+  a consumer client's cookie jar is dropped; Teredo, SIIT, SRv6 SID and RFC 9637
+  ranges refused; a subscriber custom header can't spoof
+  `X-Webhook-Idempotency-Key`; TestSubscription errors are fixed strings and an
+  unknown id takes no rate-limit slot.
+- Schema checks use `current_schema()` instead of `'public'` (with a non-public
+  search_path the version check never matched, so EnsureSchema re-ran the
+  destructive create path every boot); the additive ALTER runs with a 5s
+  `lock_timeout`.
+- The delivery record is written before the circuit-breaker update.
+
 ### Changed
 - `Config.MaxBatchSize` is honoured (it was ignored); default changed 100 → 1,
   preserving the old effective behaviour.
 
 ### ⚠ Consumer action required
 - **Custom `Repository` implementations:** replace `GetPendingDeliveries` with
-  `ClaimPendingDeliveries`, `RenewDeliveryClaim`, `ReleaseDeliveryClaim`.
+  `ClaimPendingDeliveries`, `RenewDeliveryClaim`, `ReleaseDeliveryClaim`; add
+  `RequeueDeadLetter`.
+- **Rollout:** run `EnsureSchema` first; roll webhook workers over together (a
+  v0.10 worker's unfenced poll can double-send alongside a v0.11 one).
 - **Fleet-wide `CleanupDeliveries` callers:** set `CleanupFilter.AllTenants`.
   (No known fleet caller: deepr calls only `GetMaintenanceStats`.)
 - **`WithHTTPClient` with an opaque RoundTripper (+ `WithAllowPrivateDestinations`):**
   pass an `*http.Transport` instead. (No known fleet caller.)
-- **deepr** sets `MaxBatchSize: 200`, which now takes effect: consider a small value.
+- **deepr** sets `MaxBatchSize: 200`; it is clamped to 2 at the default lease
+  (WARN at boot). Set a small value explicitly to silence it.
 
 ### Notes
 - `PostgresRepositoryTx`'s CRUD methods still use the pre-v0.6.0 unprefixed

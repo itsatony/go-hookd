@@ -6,6 +6,7 @@ package hookd
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"go.uber.org/zap"
@@ -161,37 +162,21 @@ func (m *Manager) ListDeadLetters(ctx context.Context, filter *DeadLetterFilter)
 //
 //	delivery, err := manager.RetryDeadLetter(ctx, "dlv_abc123")
 func (m *Manager) RetryDeadLetter(ctx context.Context, deliveryID string) (*Delivery, error) {
-	// Get the delivery
-	delivery, err := m.repo.GetDelivery(ctx, deliveryID)
+	// One conditional statement (v0.11.0): only a row that is STILL
+	// dead-lettered is re-queued. The former read-modify-write let two
+	// concurrent redrives both reset a row — the second after a worker had
+	// already claimed it — and deliver it twice.
+	delivery, err := m.repo.RequeueDeadLetter(ctx, deliveryID)
 	if err != nil {
-		m.logger.Error("failed to get delivery for retry",
-			zap.Error(err),
-			zap.String("delivery_id", deliveryID),
-		)
+		if !errors.Is(err, ErrDeliveryNotDeadLetter) && !errors.Is(err, ErrDeliveryNotFound) {
+			m.logger.Error("failed to requeue dead letter",
+				zap.Error(err),
+				zap.String("delivery_id", deliveryID),
+			)
+		}
 		return nil, err
 	}
-
-	// Verify it's in dead_letter status
-	if delivery.Status != DeliveryStatusDeadLetter {
-		return nil, NewValidationError("delivery",
-			"delivery must be in dead_letter status to retry (current: "+delivery.Status+")")
-	}
-
-	// Reset for retry
-	delivery.Status = DeliveryStatusPending
-	delivery.AttemptCount = 0
 	now := time.Now()
-	delivery.NextRetryAt = &now
-	delivery.CompletedAt = nil
-
-	// Update the delivery
-	if err := m.repo.UpdateDelivery(ctx, delivery); err != nil {
-		m.logger.Error("failed to update delivery for retry",
-			zap.Error(err),
-			zap.String("delivery_id", deliveryID),
-		)
-		return nil, err
-	}
 
 	m.logger.Info("dead letter delivery reset for retry",
 		zap.String("delivery_id", deliveryID),

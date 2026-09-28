@@ -33,7 +33,9 @@ type Config struct {
 	// lease must outlast one attempt: it must be >= DeliveryTimeoutMs +
 	// DeliveryBookkeepingTimeout + MinClaimLeaseMarginMs. 0 (the default) means
 	// DeliveryTimeoutMs + DefaultClaimLeaseMarginMs. It is also the delay before a
-	// delivery held by a crashed worker is picked up again.
+	// delivery held by a crashed worker is picked up again. Leases are measured
+	// on the DATABASE clock (NOW()); a failover to a primary whose clock runs
+	// ahead shortens in-flight leases by that skew.
 	ClaimLeaseMs int
 
 	// QueueIdleMaxInterval is the ceiling, in milliseconds, that a worker's poll
@@ -204,6 +206,22 @@ func (c *Config) validateWorkerPool() error {
 // minClaimLeaseMs is the shortest lease that outlasts one delivery attempt.
 func (c *Config) minClaimLeaseMs() int {
 	return c.DeliveryTimeoutMs + int(DeliveryBookkeepingTimeout/time.Millisecond) + MinClaimLeaseMarginMs
+}
+
+// EffectiveBatchSize is how many deliveries one poll actually claims:
+// MaxBatchSize, capped so a worker can finish its whole batch within one lease
+// (ClaimLease / (DeliveryTimeout + DeliveryBookkeepingTimeout), at least 1).
+// Rows beyond that would sit hidden from idle workers until the lease lapsed.
+func (c *Config) EffectiveBatchSize() int {
+	perAttempt := c.DeliveryTimeout() + DeliveryBookkeepingTimeout
+	limit := int(c.ClaimLease() / perAttempt)
+	if limit < 1 {
+		limit = 1
+	}
+	if c.MaxBatchSize < limit {
+		return c.MaxBatchSize
+	}
+	return limit
 }
 
 // ClaimLease returns the claim lease as a time.Duration: ClaimLeaseMs, or when it

@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/itsatony/go-cuserr"
 	"go.uber.org/zap"
@@ -126,6 +127,12 @@ func NewManager(config *Config, repo Repository, opts ...ManagerOption) (*Manage
 	}
 	if m.egressPolicy.allowPrivate {
 		m.logger.Warn(LogMsgEgressPrivateAllowed)
+	}
+	if eff := config.EffectiveBatchSize(); eff < config.MaxBatchSize {
+		m.logger.Warn(LogMsgBatchSizeClamped,
+			zap.Int(LogFieldConfiguredBatchSize, config.MaxBatchSize),
+			zap.Int(LogFieldEffectiveBatchSize, eff),
+		)
 	}
 
 	return m, nil
@@ -405,7 +412,7 @@ func (m *Manager) Notify() {
 // the rows not yet started are released so a restart need not wait out a lease.
 func (m *Manager) processDeliveries(workerID int) int {
 	claimCtx, cancel := context.WithTimeout(m.ctx, ClaimQueryTimeout)
-	deliveries, err := m.repo.ClaimPendingDeliveries(claimCtx, m.config.MaxBatchSize, m.config.ClaimLease())
+	deliveries, err := m.repo.ClaimPendingDeliveries(claimCtx, m.config.EffectiveBatchSize(), m.config.ClaimLease())
 	cancel()
 	if err != nil {
 		m.logger.Error("failed to claim pending deliveries",
@@ -416,7 +423,7 @@ func (m *Manager) processDeliveries(workerID int) int {
 	}
 
 	for i, delivery := range deliveries {
-		if m.ctx.Err() != nil {
+		if m.stopping() {
 			m.releaseClaims(deliveries[i:])
 			break
 		}
@@ -426,11 +433,16 @@ func (m *Manager) processDeliveries(workerID int) int {
 	return len(deliveries)
 }
 
+// stopping reports whether Stop has been called (false before Start).
+func (m *Manager) stopping() bool {
+	return m.ctx != nil && m.ctx.Err() != nil
+}
+
 // releaseClaims hands claimed-but-unstarted deliveries back to the queue (due
 // now). It runs during shutdown, so it uses a context detached from m.ctx. A
 // failure only means the row waits for its lease to expire.
 func (m *Manager) releaseClaims(deliveries []*Delivery) {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(m.ctx), DeliveryBookkeepingTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), DeliveryBookkeepingTimeout)
 	defer cancel()
 	for _, delivery := range deliveries {
 		if delivery.NextRetryAt == nil {
@@ -473,6 +485,10 @@ func (m *Manager) processDelivery(parent context.Context, delivery *Delivery) {
 		var err error
 		sub, err = m.repo.GetSubscription(ctx, delivery.SubscriptionID)
 		if err != nil {
+			if m.stopping() {
+				m.releaseClaims([]*Delivery{delivery})
+				return
+			}
 			m.logger.Error("failed to get subscription",
 				zap.String("delivery_id", delivery.ID),
 				zap.String("subscription_id", delivery.SubscriptionID),
@@ -556,13 +572,26 @@ func (m *Manager) attemptDelivery(preCtx context.Context, delivery *Delivery, su
 		)
 		return
 	}
-	renewed, err := m.repo.RenewDeliveryClaim(preCtx, delivery.ID, *delivery.NextRetryAt, m.config.ClaimLease())
+	// t0 is taken BEFORE the renewal, so it precedes the renewal statement's
+	// NOW() in real time: a deadline measured from t0 ends inside the new lease
+	// however long the renewal takes, and whatever the app/DB clock offset.
+	t0 := time.Now()
+	renewCtx, renewCancel := context.WithTimeout(preCtx, ClaimRenewTimeout)
+	renewed, err := m.repo.RenewDeliveryClaim(renewCtx, delivery.ID, *delivery.NextRetryAt, m.config.ClaimLease())
+	renewCancel()
 	if err != nil {
-		if errors.Is(err, ErrDeliveryClaimLost) {
+		switch {
+		case errors.Is(err, ErrDeliveryClaimLost):
 			m.logger.Info("delivery claim lost before send, skipping",
 				zap.String("delivery_id", delivery.ID),
 			)
-		} else {
+		case m.stopping():
+			// Shutting down: hand the row back instead of leaving it leased.
+			m.logger.Debug("shutdown before send, releasing delivery claim",
+				zap.String("delivery_id", delivery.ID),
+			)
+			m.releaseClaims([]*Delivery{delivery})
+		default:
 			m.logger.Error("failed to renew delivery claim, not sending",
 				zap.String("delivery_id", delivery.ID),
 				zap.Error(err),
@@ -572,11 +601,11 @@ func (m *Manager) attemptDelivery(preCtx context.Context, delivery *Delivery, su
 	}
 	delivery.NextRetryAt = &renewed
 
-	// One deadline for the rest of the attempt — send AND record — so the whole
-	// attempt ends inside the lease just renewed: Config.Validate guarantees
-	// ClaimLease >= DeliveryTimeout + DeliveryBookkeepingTimeout + margin, and the
-	// margin covers the renewal's own round trip.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(preCtx), DeliveryBookkeepingTimeout+m.config.DeliveryTimeout())
+	// One deadline for the rest of the attempt — send AND record — ending
+	// MinClaimLeaseMarginMs before the lease just renewed can lapse. Validate
+	// guarantees that leaves at least DeliveryTimeout + DeliveryBookkeepingTimeout.
+	attemptDeadline := t0.Add(m.config.ClaimLease() - time.Duration(MinClaimLeaseMarginMs)*time.Millisecond)
+	ctx, cancel := context.WithDeadline(context.WithoutCancel(preCtx), attemptDeadline)
 	defer cancel()
 
 	delivery.AttemptCount++
@@ -704,13 +733,28 @@ func (m *Manager) executeWebhookRequest(ctx context.Context, delivery *Delivery,
 
 	// Resolve the signing secret for THIS attempt (never cached): the stored
 	// value is a reference; see hookd.secret.go. Nothing is sent on failure.
-	secret, err = m.resolveSigningSecret(ctx, SecretRequest{
+	// Tenancy comes from the row that SUPPLIES the secret: the subscription
+	// for a subscription delivery, the delivery row for an inline one. A
+	// delivery whose tenant disagrees with its subscription's is refused (fail
+	// closed) rather than resolved under either.
+	secretReq := SecretRequest{
 		Ref:            secret,
 		TenantID:       delivery.TenantID,
-		SubscriptionID: delivery.SubscriptionID,
 		DeliveryID:     delivery.ID,
 		IdempotencyKey: delivery.IdempotencyKey,
-	})
+	}
+	if sub != nil {
+		if sub.TenantID != delivery.TenantID {
+			m.logger.Warn(LogMsgSigningSecretTenantMismatch,
+				zap.String(LogFieldDeliveryID, delivery.ID),
+				zap.String(LogFieldSubscriptionID, sub.ID),
+			)
+			return 0, "", nil, ErrSigningSecretUnavailable
+		}
+		secretReq.TenantID = sub.TenantID
+		secretReq.SubscriptionID = sub.ID
+	}
+	secret, err = m.resolveSigningSecret(ctx, secretReq)
 	if err != nil {
 		return 0, "", nil, err
 	}
@@ -727,6 +771,9 @@ func (m *Manager) executeWebhookRequest(ctx context.Context, delivery *Delivery,
 	// Sent only when the queuer supplied a key (go-hookd#2): a receiver that
 	// wants exactly-once on the CALLER's key reads this; X-Webhook-Delivery-ID
 	// is always present and is the library's own id.
+	// A subscriber's custom header of that name never survives: the header
+	// means "the queuer's key" or is absent.
+	req.Header.Del(HeaderIdempotencyKey)
 	if delivery.IdempotencyKey != "" {
 		req.Header.Set(HeaderIdempotencyKey, delivery.IdempotencyKey)
 	}
@@ -749,13 +796,7 @@ func (m *Manager) executeWebhookRequest(ctx context.Context, delivery *Delivery,
 		)
 	}
 
-	// Extract response headers
-	responseHeaders := make(map[string]string)
-	for key := range resp.Header {
-		responseHeaders[key] = resp.Header.Get(key)
-	}
-
-	return resp.StatusCode, string(body), responseHeaders, nil
+	return resp.StatusCode, storableText(string(body)), storableResponseHeaders(resp.Header), nil
 }
 
 // handleDeliverySuccess handles a successful delivery.
@@ -804,14 +845,15 @@ func (m *Manager) handleDeliveryFailure(ctx context.Context, delivery *Delivery,
 		zap.Error(err),
 	)
 
-	// Update circuit breaker (record failure) - use sub.URL or delivery.URL for inline
+	// The circuit breaker is updated LAST (deferred): the delivery's own record
+	// — retry schedule or dead letter — gets the bookkeeping budget first.
 	var endpoint string
 	if sub != nil {
 		endpoint = sub.URL
 	} else {
 		endpoint = delivery.URL
 	}
-	m.updateCircuitBreakerFailure(ctx, endpoint)
+	defer m.updateCircuitBreakerFailure(ctx, endpoint)
 
 	// Check if status code is non-retryable (4xx except 408, 429)
 	isNonRetryable := attempt.StatusCode >= 400 && attempt.StatusCode < 500 &&
@@ -1034,7 +1076,12 @@ func truncateString(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen] + "..."
+	// Cut on a rune boundary so the kept prefix stays valid UTF-8.
+	cut := maxLen
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "..."
 }
 
 // =============================================================================
