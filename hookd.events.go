@@ -146,6 +146,7 @@ func (m *Manager) QueueDelivery(ctx context.Context, req *QueueDeliveryRequest) 
 		MaxAttempts:    sub.RetryPolicy.MaxAttempts,
 		NextRetryAt:    &now, // Available immediately
 		CreatedAt:      now,
+		IdempotencyKey: req.IdempotencyKey,
 	}
 
 	// Persist delivery
@@ -265,8 +266,9 @@ func (m *Manager) QueueInlineDelivery(ctx context.Context, req *QueueInlineDeliv
 		NextRetryAt:  &now,
 		CreatedAt:    now,
 		// Inline delivery fields
-		URL:    normalizeURL(req.URL),
-		Secret: req.Secret,
+		URL:            normalizeURL(req.URL),
+		Secret:         req.Secret,
+		IdempotencyKey: req.IdempotencyKey,
 		// SubscriptionID is empty for inline deliveries
 	}
 

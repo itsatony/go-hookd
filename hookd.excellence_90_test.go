@@ -194,7 +194,7 @@ func TestProcessDeliveries_ErrorHandling(t *testing.T) {
 		manager.Start(ctx)
 		defer manager.Stop()
 
-		// Inject error for GetPendingDeliveries
+		// Inject error for ClaimPendingDeliveries
 		repo.injectError = errors.New("database connection lost")
 
 		// Should not panic

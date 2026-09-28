@@ -158,7 +158,9 @@ const (
 	// HeaderSubscriptionID is the subscription identifier.
 	HeaderSubscriptionID = "X-Webhook-Subscription-ID"
 
-	// HeaderIdempotencyKey is the idempotency key (if provided during queueing).
+	// HeaderIdempotencyKey carries the queuer's IdempotencyKey on every delivery
+	// attempt, and is absent when none was given (v0.11.0; before it the constant
+	// was declared but never sent). TestSubscription never sends it.
 	HeaderIdempotencyKey = "X-Webhook-Idempotency-Key"
 )
 
@@ -198,6 +200,35 @@ const (
 
 	// DefaultDeliveryTimeoutMs is the default HTTP delivery timeout in milliseconds.
 	DefaultDeliveryTimeoutMs = 30000 // 30 seconds
+
+	// DefaultMaxBatchSize is how many deliveries one worker claims per poll
+	// (Config.MaxBatchSize). Until v0.11.0 the field was ignored and every poll
+	// took exactly one row; 1 keeps that behaviour as the default. A larger value
+	// trades per-poll fairness between workers for fewer queries. It is safe at
+	// any size since v0.11.0: each claimed row is re-fenced (RenewDeliveryClaim)
+	// right before it is sent, so a row whose claim lapsed while it waited in a
+	// batch is skipped rather than delivered twice.
+	DefaultMaxBatchSize = 1
+
+	// DeliveryBookkeepingTimeout bounds the database work a worker does around one
+	// delivery attempt: the pre-send reads (subscription, circuit breaker) and the
+	// post-send writes (attempt record, delivery status, dead letter). The post-send
+	// half runs on a context detached from Manager shutdown, so a webhook that WAS
+	// sent is always recorded instead of being re-sent after a restart.
+	DeliveryBookkeepingTimeout = 10 * time.Second
+
+	// ClaimQueryTimeout bounds one claim query (ClaimPendingDeliveries).
+	ClaimQueryTimeout = 10 * time.Second
+
+	// MinClaimLeaseMarginMs is the least a claim lease must exceed
+	// DeliveryTimeoutMs + DeliveryBookkeepingTimeout by (Config.ClaimLeaseMs).
+	MinClaimLeaseMarginMs = 5000
+
+	// DefaultClaimLeaseMarginMs is what the default lease adds on top of
+	// DeliveryTimeoutMs: lease = DeliveryTimeoutMs + 60s (90s at the default
+	// 30s timeout). It is also how long a delivery claimed by a worker that
+	// crashed waits before another worker may take it.
+	DefaultClaimLeaseMarginMs = 60000
 
 	// DefaultQueueIdleMaxIntervalMs is the default upper bound, in milliseconds, for
 	// the adaptive poll interval a worker backs off to while the queue stays empty.
@@ -309,6 +340,9 @@ const (
 	// "every tenant". See DeliveryFilter.AllTenants / SubscriptionFilter.AllTenants.
 	ErrMsgTenantScopeRequired = "tenant_id is required unless AllTenants is set"
 
+	// ErrMsgCleanupFilterRequired is returned when a cleanup is given a nil filter.
+	ErrMsgCleanupFilterRequired = "cleanup filter is required"
+
 	// ErrMsgMissingEventType is the error message for missing event type.
 	ErrMsgMissingEventType = "event_type is required"
 
@@ -398,6 +432,25 @@ const (
 
 	// ErrMsgInvalidIdleBackoffFactor is the error message for an invalid idle backoff factor.
 	ErrMsgInvalidIdleBackoffFactor = "queue_idle_backoff_factor must be >= 1.0"
+
+	// ErrMsgInvalidClaimLease is the error for a claim lease that cannot outlast
+	// one delivery attempt (see Config.ClaimLeaseMs).
+	ErrMsgInvalidClaimLease = "claim_lease_ms must be >= delivery_timeout_ms + 10s bookkeeping + 5s margin"
+
+	// ErrMsgSigningSecretUnavailable is the ONE text an attempt records when the
+	// SecretResolver failed (the cause is logged, never stored: it may name a
+	// vault path). See hookd.secret.go.
+	ErrMsgSigningSecretUnavailable = "webhook signing secret unavailable"
+
+	// ErrMsgSecretResolverNil is returned by WithSecretResolver(nil).
+	ErrMsgSecretResolverNil = "secret resolver must not be nil"
+
+	// ErrMsgInvalidClaimLimit is returned by ClaimPendingDeliveries for limit < 1.
+	ErrMsgInvalidClaimLimit = "claim limit must be at least 1"
+
+	// ErrMsgInvalidClaimLeaseDuration is returned by the claim methods for a
+	// lease <= 0.
+	ErrMsgInvalidClaimLeaseDuration = "claim lease must be positive"
 
 	// ErrMsgInvalidDeliveryTimeout is the error message for invalid delivery timeout.
 	ErrMsgInvalidDeliveryTimeout = "delivery_timeout must be at least 1s"
@@ -573,13 +626,21 @@ const (
 	// UserAgentPrefix is the prefix for the user agent string.
 	UserAgentPrefix = "go-hookd"
 
-	// UserAgentVersion is the current version for user agent.
-	// This should match versions.yaml project.version.
-	UserAgentVersion = "0.10.0"
+	// UserAgentVersion is the FALLBACK version for the User-Agent, used only when
+	// the build carries no module version for go-hookd (tests, a replace
+	// directive, a local checkout). It must equal versions.yaml project.version;
+	// TestUserAgentVersionMatchesManifest fails the release otherwise.
+	UserAgentVersion = "0.11.0"
+
+	// ModulePath is this module's import path, looked up in the build info.
+	ModulePath = "github.com/itsatony/go-hookd"
 )
 
-// UserAgent is the complete user agent string used for webhook deliveries.
-var UserAgent = UserAgentPrefix + "/" + UserAgentVersion
+// UserAgent is the complete user agent string used for webhook deliveries:
+// "go-hookd/<version>", where version is the go-hookd module version the
+// consuming binary was actually built with (v0.11.0; before it a hand-kept copy
+// that drifted — v0.7.2 announced itself as 0.5.0).
+var UserAgent = UserAgentPrefix + "/" + moduleVersion()
 
 // Test Subscription Constants.
 const (
@@ -666,9 +727,11 @@ const (
 	// LogFieldEgressCause is the log field carrying the refusal cause.
 	LogFieldEgressCause = "cause"
 
-	// LogMsgEgressGuardWaived is logged (WARN) at construction when the guard is
-	// not applied to a consumer-supplied client (opaque RoundTripper + opt-in).
-	LogMsgEgressGuardWaived = "webhook egress guard NOT applied to custom HTTP client (WithAllowPrivateDestinations)"
+	// LogMsgSigningSecretUnavailable is the WARN logged when the SecretResolver fails.
+	LogMsgSigningSecretUnavailable = "webhook signing secret could not be resolved; attempt not sent"
+
+	// LogFieldDeliveryID is the log field naming a delivery.
+	LogFieldDeliveryID = "delivery_id"
 
 	// LogMsgEgressPrivateAllowed is logged (WARN) at construction when the
 	// private-destination opt-in is active.

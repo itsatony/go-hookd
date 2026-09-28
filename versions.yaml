@@ -4,7 +4,7 @@ manifest_version: "1.0"
 # Project version (semantic versioning)
 project:
   name: "go-hookd"
-  version: "0.10.0"
+  version: "0.11.0"
   description: "Enterprise webhook management package"
 
 # Database schema versions (migration numbers)
@@ -13,16 +13,16 @@ schemas:
 
 # Component versions (internal modules)
 components:
-  manager: "0.9.0"  # v0.10.0 fail-closed tenant scope on List paths (AllTenants opt-in)
-  delivery_engine: "0.6.0"
-  egress_guard: "0.1.0"  # v0.8.0 default-deny SSRF guard (hookd.egress.go)
+  manager: "0.10.0"  # v0.11.0 fail-closed cleanup tenant scope, SecretResolver, idempotency header
+  delivery_engine: "0.7.0"  # v0.11.0 leased claims + fenced renewal (go-hookd#1)
+  egress_guard: "0.2.0"  # v0.11.0 no guard waiver for unwrappable clients; bounded body read
   circuit_breaker: "0.3.0"
   idempotency_store: "0.3.0"
   prometheus_collector: "0.1.0"
   signature_verifier: "0.1.0"
   dead_letter_queue: "0.2.0"
   maintenance_api: "0.2.0"
-  schema_manager: "0.2.0"  # v0.9.0 per-prefix advisory lock + bounded FromURL pool
+  schema_manager: "0.3.0"  # v0.11.0 additive in-place columns (schemaAdditiveColumns)
   postgres_pool: "0.1.0"  # v0.9.0 WithMaxOpenConns/WithMaxIdleConns/WithConnMaxLifetime/WithConnMaxIdleTime
 
 # External dependencies (mandatory)

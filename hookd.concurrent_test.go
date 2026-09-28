@@ -103,7 +103,7 @@ func TestConcurrentWorkerPool_NoDoubleProcessing(t *testing.T) {
 
 			for {
 				// Fetch pending deliveries using SKIP LOCKED
-				deliveries, err := repo.GetPendingDeliveries(ctx, 10)
+				deliveries, err := repo.ClaimPendingDeliveries(ctx, 10, testClaimLease)
 				if err != nil {
 					t.Logf("Worker %d: Error fetching deliveries: %v", workerID, err)
 					return
@@ -262,7 +262,7 @@ func TestConcurrentWorkerPool_SkipLocked(t *testing.T) {
 		defer tx.(*PostgresRepositoryTx).Rollback()
 
 		// Worker 1 gets pending deliveries (locks them in transaction)
-		deliveries, err := tx.GetPendingDeliveries(ctx, 25)
+		deliveries, err := tx.ClaimPendingDeliveries(ctx, 25, testClaimLease)
 		if err != nil {
 			t.Logf("Worker 1: Error fetching deliveries: %v", err)
 			return
@@ -296,7 +296,7 @@ func TestConcurrentWorkerPool_SkipLocked(t *testing.T) {
 		defer tx.(*PostgresRepositoryTx).Rollback()
 
 		// Worker 2 gets pending deliveries (should skip locked ones)
-		deliveries, err := tx.GetPendingDeliveries(ctx, 25)
+		deliveries, err := tx.ClaimPendingDeliveries(ctx, 25, testClaimLease)
 		if err != nil {
 			t.Logf("Worker 2: Error fetching deliveries: %v", err)
 			return

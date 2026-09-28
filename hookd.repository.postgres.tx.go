@@ -433,50 +433,6 @@ func (r *PostgresRepositoryTx) UpdateDelivery(ctx context.Context, delivery *Del
 	return nil
 }
 
-// GetPendingDeliveries retrieves pending deliveries within the transaction.
-// Uses SKIP LOCKED to prevent concurrent workers from processing the same delivery.
-func (r *PostgresRepositoryTx) GetPendingDeliveries(ctx context.Context, limit int) ([]*Delivery, error) {
-	query := `
-		SELECT id, subscription_id, tenant_id, event_type, payload,
-		       status, attempt_count, max_attempts, next_retry_at,
-		       completed_at, created_at
-		FROM deliveries
-		WHERE status = $1
-		  AND (next_retry_at IS NULL OR next_retry_at <= NOW())
-		ORDER BY
-		  COALESCE(next_retry_at, created_at),
-		  created_at
-		LIMIT $2
-		FOR UPDATE SKIP LOCKED`
-
-	rows, err := r.tx.QueryContext(ctx, query, DeliveryStatusPending, limit)
-	if err != nil {
-		return nil, cuserr.NewExternalError("database", "postgres", err,
-			cuserr.WithMetadata("operation", "get_pending_deliveries_tx"),
-		)
-	}
-	defer rows.Close()
-
-	deliveries := []*Delivery{}
-	for rows.Next() {
-		delivery, err := scanDelivery(rows)
-		if err != nil {
-			return nil, cuserr.NewExternalError("database", "postgres", err,
-				cuserr.WithMetadata("operation", "scan_delivery_tx"),
-			)
-		}
-		deliveries = append(deliveries, delivery)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, cuserr.NewExternalError("database", "postgres", err,
-			cuserr.WithMetadata("operation", "get_pending_deliveries_rows_tx"),
-		)
-	}
-
-	return deliveries, nil
-}
-
 // ListDeliveries retrieves deliveries matching the given filter within the transaction.
 func (r *PostgresRepositoryTx) ListDeliveries(ctx context.Context, filter *DeliveryFilter) ([]*Delivery, error) {
 	// ⛔ Defence in depth: refuse a tenant-less scan unless AllTenants is set.
@@ -872,6 +828,11 @@ func (r *PostgresRepositoryTx) Close() error {
 
 // CountDeliveriesByFilter counts deliveries matching the cleanup filter within the transaction.
 func (r *PostgresRepositoryTx) CountDeliveriesByFilter(ctx context.Context, filter *CleanupFilter) (int64, error) {
+	// ⛔ Fail closed (v0.11.0): an empty TenantID drops the tenant clause below,
+	// so it is only allowed on the explicit AllTenants opt-in.
+	if err := filter.requireTenantScope(); err != nil {
+		return 0, err
+	}
 	query := fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE 1=1`, r.schemaConfig.TableDeliveries())
 	args := []any{}
 	argCount := 1
@@ -924,6 +885,11 @@ func (r *PostgresRepositoryTx) CountDeliveriesByFilter(ctx context.Context, filt
 
 // DeleteDeliveriesByFilter deletes deliveries matching the cleanup filter within the transaction.
 func (r *PostgresRepositoryTx) DeleteDeliveriesByFilter(ctx context.Context, filter *CleanupFilter) (int64, error) {
+	// ⛔ Fail closed (v0.11.0): an empty TenantID drops the tenant clause below,
+	// so it is only allowed on the explicit AllTenants opt-in.
+	if err := filter.requireTenantScope(); err != nil {
+		return 0, err
+	}
 	query := fmt.Sprintf(`DELETE FROM %s WHERE 1=1`, r.schemaConfig.TableDeliveries())
 	args := []any{}
 	argCount := 1

@@ -58,10 +58,38 @@ type Repository interface {
 	// Returns ErrDeliveryNotFound if the delivery does not exist.
 	UpdateDelivery(ctx context.Context, delivery *Delivery) error
 
-	// GetPendingDeliveries retrieves pending deliveries ready for processing.
-	// Uses SKIP LOCKED to prevent concurrent workers from processing the same delivery.
-	// Returns up to 'limit' deliveries ordered by created_at.
-	GetPendingDeliveries(ctx context.Context, limit int) ([]*Delivery, error)
+	// ClaimPendingDeliveries atomically CLAIMS up to limit due pending deliveries
+	// for the caller and returns them (v0.11.0; replaces GetPendingDeliveries).
+	//
+	// A claim is a lease, not a lock: in ONE statement the rows' next_retry_at is
+	// pushed to now+lease (selected with FOR UPDATE SKIP LOCKED, so concurrent
+	// claimers never pick the same row), which makes them invisible to every other
+	// claimer until the lease expires. The claim therefore survives the statement
+	// — unlike v0.10.0's autocommit SELECT ... FOR UPDATE, whose lock was released
+	// before the caller saw the row — and needs no reaper: a delivery claimed by
+	// a worker that crashed simply becomes due again when its lease runs out.
+	//
+	// Each returned Delivery's NextRetryAt is its claim token (the lease expiry);
+	// pass it unchanged to RenewDeliveryClaim / ReleaseDeliveryClaim. Rows are
+	// returned oldest-due first. limit < 1 or lease <= 0 is a validation error.
+	ClaimPendingDeliveries(ctx context.Context, limit int, lease time.Duration) ([]*Delivery, error)
+
+	// RenewDeliveryClaim re-arms a claim immediately before the delivery is sent:
+	// it sets next_retry_at to now+lease ONLY IF the row is still pending and
+	// still carries claimedUntil (the fencing token), and returns the new token.
+	// Otherwise it returns ErrDeliveryClaimLost and the caller MUST NOT send —
+	// another worker re-claimed the row after this claim lapsed, or it was
+	// completed, dead-lettered or rewritten meanwhile. Tokens only ever increase
+	// for a given row (a re-claim needs now >= the old token), so they are unique.
+	RenewDeliveryClaim(ctx context.Context, id string, claimedUntil time.Time, lease time.Duration) (time.Time, error)
+
+	// ReleaseDeliveryClaim gives a claimed, still-pending delivery back to the
+	// queue without attempting it, fenced like RenewDeliveryClaim: next_retry_at
+	// becomes retryAt, or NULL (due now, at its original queue position) when
+	// retryAt is nil. Used on shutdown for claimed-but-unsent rows and when an
+	// open circuit breaker defers a delivery. ErrDeliveryClaimLost if the claim
+	// is no longer held (nothing is changed then).
+	ReleaseDeliveryClaim(ctx context.Context, id string, claimedUntil time.Time, retryAt *time.Time) error
 
 	// ListDeliveries retrieves deliveries matching the given filter.
 	// Returns an empty slice if no deliveries match.

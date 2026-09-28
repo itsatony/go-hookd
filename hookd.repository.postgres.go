@@ -345,6 +345,7 @@ func scanDelivery(scanner interface {
 	var subscriptionID sql.NullString
 	var url sql.NullString
 	var secret sql.NullString
+	var idempotencyKey sql.NullString
 
 	err := scanner.Scan(
 		&dlv.ID,
@@ -360,10 +361,12 @@ func scanDelivery(scanner interface {
 		&nextRetryAt,
 		&completedAt,
 		&dlv.CreatedAt,
+		&idempotencyKey,
 	)
 	if err != nil {
 		return nil, err
 	}
+	dlv.IdempotencyKey = idempotencyKey.String
 
 	// Handle nullable subscription ID (for inline deliveries)
 	if subscriptionID.Valid {
@@ -801,9 +804,9 @@ func (r *PostgresRepository) CreateDelivery(ctx context.Context, delivery *Deliv
 		INSERT INTO %s (
 			id, subscription_id, tenant_id, event_type, payload,
 			url, secret, status, attempt_count, max_attempts,
-			next_retry_at, completed_at, created_at
+			next_retry_at, completed_at, created_at, idempotency_key
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
 		)`, r.schemaConfig.TableDeliveries())
 
 	_, err = r.db.ExecContext(ctx, query,
@@ -820,6 +823,7 @@ func (r *PostgresRepository) CreateDelivery(ctx context.Context, delivery *Deliv
 		delivery.NextRetryAt,
 		delivery.CompletedAt,
 		delivery.CreatedAt,
+		nullableString(delivery.IdempotencyKey),
 	)
 
 	if err != nil {
@@ -837,7 +841,7 @@ func (r *PostgresRepository) GetDelivery(ctx context.Context, id string) (*Deliv
 	query := fmt.Sprintf(`
 		SELECT id, subscription_id, tenant_id, event_type, payload,
 		       url, secret, status, attempt_count, max_attempts,
-		       next_retry_at, completed_at, created_at
+		       next_retry_at, completed_at, created_at, idempotency_key
 		FROM %s
 		WHERE id = $1`, r.schemaConfig.TableDeliveries())
 
@@ -930,51 +934,6 @@ func (r *PostgresRepository) UpdateDelivery(ctx context.Context, delivery *Deliv
 	return nil
 }
 
-// GetPendingDeliveries retrieves pending deliveries ready for processing.
-// Uses SKIP LOCKED to prevent concurrent workers from processing the same delivery.
-// Returns up to 'limit' deliveries ordered by next_retry_at, then created_at.
-func (r *PostgresRepository) GetPendingDeliveries(ctx context.Context, limit int) ([]*Delivery, error) {
-	query := fmt.Sprintf(`
-		SELECT id, subscription_id, tenant_id, event_type, payload,
-		       url, secret, status, attempt_count, max_attempts,
-		       next_retry_at, completed_at, created_at
-		FROM %s
-		WHERE status = $1
-		  AND (next_retry_at IS NULL OR next_retry_at <= NOW())
-		ORDER BY
-		  COALESCE(next_retry_at, created_at),
-		  created_at
-		LIMIT $2
-		FOR UPDATE SKIP LOCKED`, r.schemaConfig.TableDeliveries())
-
-	rows, err := r.db.QueryContext(ctx, query, DeliveryStatusPending, limit)
-	if err != nil {
-		return nil, cuserr.NewExternalError("database", "postgres", err,
-			cuserr.WithMetadata("operation", "get_pending_deliveries"),
-		)
-	}
-	defer rows.Close()
-
-	deliveries := []*Delivery{}
-	for rows.Next() {
-		delivery, err := scanDelivery(rows)
-		if err != nil {
-			return nil, cuserr.NewExternalError("database", "postgres", err,
-				cuserr.WithMetadata("operation", "scan_delivery"),
-			)
-		}
-		deliveries = append(deliveries, delivery)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, cuserr.NewExternalError("database", "postgres", err,
-			cuserr.WithMetadata("operation", "get_pending_deliveries_rows"),
-		)
-	}
-
-	return deliveries, nil
-}
-
 // ListDeliveries retrieves deliveries matching the given filter.
 // Returns an empty slice if no deliveries match.
 func (r *PostgresRepository) ListDeliveries(ctx context.Context, filter *DeliveryFilter) ([]*Delivery, error) {
@@ -987,7 +946,7 @@ func (r *PostgresRepository) ListDeliveries(ctx context.Context, filter *Deliver
 	query := fmt.Sprintf(`
 		SELECT id, subscription_id, tenant_id, event_type, payload,
 		       url, secret, status, attempt_count, max_attempts,
-		       next_retry_at, completed_at, created_at
+		       next_retry_at, completed_at, created_at, idempotency_key
 		FROM %s
 		WHERE 1=1`, r.schemaConfig.TableDeliveries())
 
@@ -1424,6 +1383,11 @@ func (r *PostgresRepository) Close() error {
 // CountDeliveriesByFilter counts deliveries matching the cleanup filter.
 // This is used for dry-run operations before actual deletion.
 func (r *PostgresRepository) CountDeliveriesByFilter(ctx context.Context, filter *CleanupFilter) (int64, error) {
+	// ⛔ Fail closed (v0.11.0): an empty TenantID drops the tenant clause below,
+	// so it is only allowed on the explicit AllTenants opt-in.
+	if err := filter.requireTenantScope(); err != nil {
+		return 0, err
+	}
 	query := fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE 1=1`, r.schemaConfig.TableDeliveries())
 	args := []any{}
 	argCount := 1
@@ -1479,6 +1443,11 @@ func (r *PostgresRepository) CountDeliveriesByFilter(ctx context.Context, filter
 // Returns the number of deliveries deleted.
 // Note: Related delivery attempts are automatically deleted via CASCADE.
 func (r *PostgresRepository) DeleteDeliveriesByFilter(ctx context.Context, filter *CleanupFilter) (int64, error) {
+	// ⛔ Fail closed (v0.11.0): an empty TenantID drops the tenant clause below,
+	// so it is only allowed on the explicit AllTenants opt-in.
+	if err := filter.requireTenantScope(); err != nil {
+		return 0, err
+	}
 	query := fmt.Sprintf(`DELETE FROM %s WHERE 1=1`, r.schemaConfig.TableDeliveries())
 	args := []any{}
 	argCount := 1
@@ -1662,4 +1631,12 @@ func (r *PostgresRepository) CleanupExpiredIdempotencyKeys(ctx context.Context) 
 	}
 
 	return rowsAffected, nil
+}
+
+// nullableString maps "" to SQL NULL.
+func nullableString(v string) any {
+	if v == "" {
+		return nil
+	}
+	return v
 }

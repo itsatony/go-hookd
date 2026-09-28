@@ -177,7 +177,7 @@ func (m *SchemaManager) EnsureSchema(ctx context.Context) error {
 		return err
 	}
 	if exists && currentVersion == SchemaVersion {
-		return nil
+		return m.ensureAdditiveColumns(ctx)
 	}
 
 	// Process the template before taking the lock (pure, no I/O).
@@ -429,4 +429,78 @@ func (m *SchemaManager) GetSchemaInfo(ctx context.Context) (*SchemaInfo, error) 
 		LatestVersion: SchemaVersion,
 		NeedsUpgrade:  exists && version != SchemaVersion,
 	}, nil
+}
+
+// additiveColumn is a NULLABLE column added to the baseline schema after its
+// SchemaVersion was fixed. It is applied in place — never by bumping
+// SchemaVersion, because a version change makes EnsureSchema DROP and recreate
+// every table, and an OLDER binary booting during a rolling deploy would read a
+// newer version comment as "different" and drop the upgraded schema. A nullable
+// column is invisible to older binaries (every query names its columns).
+type additiveColumn struct {
+	tableSuffix string
+	column      string
+	sqlType     string
+}
+
+// schemaAdditiveColumns are applied by EnsureSchema to an existing
+// SchemaVersion schema that lacks them. Fresh schemas get them from schema.sql.
+var schemaAdditiveColumns = []additiveColumn{
+	// v0.11.0 (go-hookd#2): the queuer's key, sent as X-Webhook-Idempotency-Key.
+	{tableSuffix: TableSuffixDeliveries, column: "idempotency_key", sqlType: "VARCHAR(255)"},
+}
+
+// Operation names for additive schema errors.
+const (
+	opCheckAdditiveColumns = "check_additive_columns"
+	opAddAdditiveColumn    = "add_additive_column"
+)
+
+// missingAdditiveColumns lists the additive columns the schema lacks.
+func (m *SchemaManager) missingAdditiveColumns(ctx context.Context, q querier) ([]additiveColumn, error) {
+	var missing []additiveColumn
+	for _, col := range schemaAdditiveColumns {
+		var present bool
+		err := q.QueryRowContext(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM information_schema.columns
+				WHERE table_schema = 'public' AND table_name = $1 AND column_name = $2
+			)`, m.schemaConfig.tableName(col.tableSuffix), col.column).Scan(&present)
+		if err != nil {
+			return nil, cuserr.NewExternalError("database", "postgres", err,
+				cuserr.WithMetadata("operation", opCheckAdditiveColumns),
+			)
+		}
+		if !present {
+			missing = append(missing, col)
+		}
+	}
+	return missing, nil
+}
+
+// ensureAdditiveColumns adds any missing additive column. The check is lock
+// free (the common case: nothing to do); the ALTER runs under the per-prefix
+// schema lock and re-checks, so concurrent boots add each column once.
+func (m *SchemaManager) ensureAdditiveColumns(ctx context.Context) error {
+	missing, err := m.missingAdditiveColumns(ctx, m.db)
+	if err != nil || len(missing) == 0 {
+		return err
+	}
+	return m.withSchemaLock(ctx, func(conn *sql.Conn) error {
+		missing, err := m.missingAdditiveColumns(ctx, conn)
+		if err != nil {
+			return err
+		}
+		for _, col := range missing {
+			stmt := fmt.Sprintf(`ALTER TABLE %s ADD COLUMN IF NOT EXISTS %s %s`,
+				m.schemaConfig.tableName(col.tableSuffix), col.column, col.sqlType)
+			if _, err := conn.ExecContext(ctx, stmt); err != nil {
+				return cuserr.NewExternalError("database", "postgres", err,
+					cuserr.WithMetadata("operation", opAddAdditiveColumn),
+					cuserr.WithMetadata("column", col.column),
+				)
+			}
+		}
+		return nil
+	})
 }

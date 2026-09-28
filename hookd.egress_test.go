@@ -125,7 +125,7 @@ func deliverOnce(t *testing.T, m *Manager, repo *MockRepository, targetURL strin
 		NextRetryAt:    &now,
 	}
 	require.NoError(t, repo.CreateDelivery(ctx, delivery))
-	m.processDelivery(ctx, delivery)
+	m.processDelivery(ctx, claimForTest(t, m, delivery))
 	attempts, err := repo.GetDeliveryAttempts(ctx, delivery.ID)
 	require.NoError(t, err)
 	require.Len(t, attempts, 1)
@@ -628,20 +628,24 @@ func TestWithHTTPClient_EgressSemantics(t *testing.T) {
 		assert.Contains(t, err.Error(), ErrMsgHTTPClientUnguardable)
 	})
 
-	t.Run("opaque RoundTripper is used under the opt-in (explicit waiver)", func(t *testing.T) {
-		rt := &opaqueRoundTripper{}
-		m, err := NewManager(cfg, NewMockRepository(), WithAllowPrivateDestinations(),
-			WithHTTPClient(&http.Client{Transport: rt}))
-		require.NoError(t, err)
-		assert.Same(t, rt, m.httpClient.Transport)
-		assert.NotNil(t, m.httpClient.CheckRedirect, "the redirect rule still applies")
+	// v0.11.0: the private-ranges opt-in no longer waives the whole guard for a
+	// client it cannot wrap (before, it did — link-local metadata included).
+	t.Run("opaque RoundTripper is refused even under the opt-in, in either order", func(t *testing.T) {
+		for _, opts := range [][]ManagerOption{
+			{WithAllowPrivateDestinations(), WithHTTPClient(&http.Client{Transport: &opaqueRoundTripper{}})},
+			{WithHTTPClient(&http.Client{Transport: &opaqueRoundTripper{}}), WithAllowPrivateDestinations()},
+		} {
+			_, err := NewManager(cfg, NewMockRepository(), opts...)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), ErrMsgHTTPClientUnguardable)
+		}
 	})
 
-	t.Run("option order is irrelevant", func(t *testing.T) {
-		rt := &opaqueRoundTripper{}
-		_, err := NewManager(cfg, NewMockRepository(),
-			WithHTTPClient(&http.Client{Transport: rt}), WithAllowPrivateDestinations())
-		require.NoError(t, err)
+	t.Run("DialTLSContext is refused even under the opt-in", func(t *testing.T) {
+		tr := &http.Transport{DialTLSContext: func(context.Context, string, string) (net.Conn, error) { return nil, nil }}
+		_, err := NewManager(cfg, NewMockRepository(), WithAllowPrivateDestinations(), WithHTTPClient(&http.Client{Transport: tr}))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), ErrMsgHTTPClientUnguardable)
 	})
 }
 

@@ -501,7 +501,7 @@ pubbing.PublishTyped(broker, EventTopicDeliverySuccess, DeliveryEvent{
 
 ## Key Architectural Decisions
 
-1. **PostgreSQL-native queue** - Use `FOR UPDATE SKIP LOCKED`, no external broker
+1. **PostgreSQL-native queue** - Claims are LEASES (`hookd.repository.claim.go`): `UPDATE ... next_retry_at = now+lease` over a `FOR UPDATE SKIP LOCKED` subselect, fenced renewal before send. ⛔ Never rely on a row lock outside an explicit transaction; never bump `SchemaVersion` for an additive column (it DROPs every table) — use `schemaAdditiveColumns`
 2. **Interface-first design** - Repository interface, not concrete implementations
 3. **EventBus abstraction** - Flexible interface, NOT hardcoded to go-pubbing
 4. **Per-endpoint circuit breakers** - Prevent cascading failures

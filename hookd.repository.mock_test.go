@@ -363,42 +363,63 @@ func TestMockRepository_GetPendingDeliveries(t *testing.T) {
 	require.NoError(t, repo.CreateDelivery(ctx, dlv4))
 
 	t.Run("Get pending deliveries", func(t *testing.T) {
-		deliveries, err := repo.GetPendingDeliveries(ctx, 10)
+		deliveries, err := repo.ClaimPendingDeliveries(ctx, 10, testClaimLease)
 		require.NoError(t, err)
 		assert.Len(t, deliveries, 2) // dlv1 and dlv2 (dlv3 is success, dlv4 is scheduled for future)
 		assert.Equal(t, "dlv_test1", deliveries[0].ID)
 		assert.Equal(t, "dlv_test2", deliveries[1].ID)
 	})
 
-	t.Run("SKIP LOCKED simulation", func(t *testing.T) {
-		// Unlock all deliveries from previous test
-		repo.UnlockAllDeliveries()
-
-		// Get pending deliveries (should lock dlv1)
-		deliveries, err := repo.GetPendingDeliveries(ctx, 1)
+	t.Run("a claim hides the row until its lease expires", func(t *testing.T) {
+		// dlv1 and dlv2 were claimed above with testClaimLease: nothing is due.
+		deliveries, err := repo.ClaimPendingDeliveries(ctx, 10, testClaimLease)
 		require.NoError(t, err)
-		assert.Len(t, deliveries, 1)
-		assert.Equal(t, "dlv_test1", deliveries[0].ID)
-
-		// Try to get again (should skip locked dlv1 and return dlv2)
-		deliveries, err = repo.GetPendingDeliveries(ctx, 1)
-		require.NoError(t, err)
-		assert.Len(t, deliveries, 1)
-		assert.Equal(t, "dlv_test2", deliveries[0].ID)
-
-		// Unlock all and try again (should return dlv1 since it's oldest)
-		repo.UnlockAllDeliveries()
-		deliveries, err = repo.GetPendingDeliveries(ctx, 1)
-		require.NoError(t, err)
-		assert.Len(t, deliveries, 1)
-		assert.Equal(t, "dlv_test1", deliveries[0].ID)
+		assert.Empty(t, deliveries, "claimed rows must stay invisible to other claimers")
 	})
 
-	t.Run("Limit", func(t *testing.T) {
-		repo.UnlockAllDeliveries()
-		deliveries, err := repo.GetPendingDeliveries(ctx, 1)
+	t.Run("an expired lease makes the row claimable again, with a larger token", func(t *testing.T) {
+		repo2 := NewMockRepository()
+		d := createTestDelivery(t, "dlv_lease", sub.ID, sub.TenantID)
+		require.NoError(t, repo2.CreateDelivery(ctx, d))
+
+		first, err := repo2.ClaimPendingDeliveries(ctx, 1, time.Millisecond)
+		require.NoError(t, err)
+		require.Len(t, first, 1)
+		time.Sleep(5 * time.Millisecond)
+
+		second, err := repo2.ClaimPendingDeliveries(ctx, 1, testClaimLease)
+		require.NoError(t, err)
+		require.Len(t, second, 1)
+		assert.True(t, second[0].NextRetryAt.After(*first[0].NextRetryAt))
+
+		// The stale holder is fenced out; the current one renews.
+		_, err = repo2.RenewDeliveryClaim(ctx, d.ID, *first[0].NextRetryAt, testClaimLease)
+		assert.ErrorIs(t, err, ErrDeliveryClaimLost)
+		renewed, err := repo2.RenewDeliveryClaim(ctx, d.ID, *second[0].NextRetryAt, testClaimLease)
+		require.NoError(t, err)
+		assert.True(t, renewed.After(*second[0].NextRetryAt))
+
+		// Release makes it due now; releasing with a stale token changes nothing.
+		assert.ErrorIs(t, repo2.ReleaseDeliveryClaim(ctx, d.ID, *second[0].NextRetryAt, nil), ErrDeliveryClaimLost)
+		require.NoError(t, repo2.ReleaseDeliveryClaim(ctx, d.ID, renewed, nil))
+		again, err := repo2.ClaimPendingDeliveries(ctx, 1, testClaimLease)
+		require.NoError(t, err)
+		require.Len(t, again, 1)
+	})
+
+	t.Run("Limit and argument validation", func(t *testing.T) {
+		repo3 := NewMockRepository()
+		for _, id := range []string{"dlv_l1", "dlv_l2"} {
+			require.NoError(t, repo3.CreateDelivery(ctx, createTestDelivery(t, id, sub.ID, sub.TenantID)))
+		}
+		deliveries, err := repo3.ClaimPendingDeliveries(ctx, 1, testClaimLease)
 		require.NoError(t, err)
 		assert.Len(t, deliveries, 1)
+
+		_, err = repo3.ClaimPendingDeliveries(ctx, 0, testClaimLease)
+		assert.True(t, IsValidationError(err))
+		_, err = repo3.ClaimPendingDeliveries(ctx, 1, 0)
+		assert.True(t, IsValidationError(err))
 	})
 }
 
@@ -1088,7 +1109,7 @@ func TestMockRepositoryTx_GetPendingDeliveries(t *testing.T) {
 
 	t.Run("Get pending deliveries", func(t *testing.T) {
 		// Get pending deliveries
-		deliveries, err := tx.GetPendingDeliveries(ctx, 10)
+		deliveries, err := tx.ClaimPendingDeliveries(ctx, 10, testClaimLease)
 		require.NoError(t, err)
 		assert.Len(t, deliveries, 2) // Only dlv1 and dlv2 (dlv3 is success)
 
@@ -1104,7 +1125,7 @@ func TestMockRepositoryTx_GetPendingDeliveries(t *testing.T) {
 		require.NoError(t, err)
 
 		// Should see more deliveries now
-		deliveries, err := tx.GetPendingDeliveries(ctx, 10)
+		deliveries, err := tx.ClaimPendingDeliveries(ctx, 10, testClaimLease)
 		require.NoError(t, err)
 		assert.GreaterOrEqual(t, len(deliveries), 1)
 	})
@@ -1129,7 +1150,7 @@ func TestMockRepositoryTx_GetPendingDeliveries_Locking(t *testing.T) {
 		require.NoError(t, err)
 		defer tx.Rollback()
 
-		deliveries, err := tx.GetPendingDeliveries(ctx, 1)
+		deliveries, err := tx.ClaimPendingDeliveries(ctx, 1, testClaimLease)
 		require.NoError(t, err)
 		assert.Len(t, deliveries, 1)
 	})
@@ -1140,13 +1161,13 @@ func TestMockRepositoryTx_GetPendingDeliveries_Locking(t *testing.T) {
 		defer tx.Rollback()
 
 		// Get first delivery (locks it in transaction)
-		deliveries, err := tx.GetPendingDeliveries(ctx, 1)
+		deliveries, err := tx.ClaimPendingDeliveries(ctx, 1, testClaimLease)
 		require.NoError(t, err)
 		assert.Len(t, deliveries, 1)
 		firstID := deliveries[0].ID
 
 		// Get again (should skip locked one)
-		deliveries, err = tx.GetPendingDeliveries(ctx, 1)
+		deliveries, err = tx.ClaimPendingDeliveries(ctx, 1, testClaimLease)
 		require.NoError(t, err)
 		assert.Len(t, deliveries, 1)
 		assert.NotEqual(t, firstID, deliveries[0].ID)
@@ -1162,7 +1183,7 @@ func TestMockRepositoryTx_GetPendingDeliveries_Locking(t *testing.T) {
 		require.NoError(t, err)
 
 		// Should see 3 deliveries now (dlv1, dlv2, dlv3)
-		deliveries, err := tx.GetPendingDeliveries(ctx, 10)
+		deliveries, err := tx.ClaimPendingDeliveries(ctx, 10, testClaimLease)
 		require.NoError(t, err)
 		assert.Len(t, deliveries, 3)
 	})

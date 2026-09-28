@@ -494,6 +494,13 @@ func (m *Manager) DisableSubscription(ctx context.Context, id string) (*Subscrip
 // - Does NOT retry on failure
 // - Returns the result immediately
 //
+// ⚠ The ping is NOT shaped like a delivery. Its body is hookd's own
+// {"type", "timestamp" (unix int), "message"} rather than the caller's payload,
+// its X-Webhook-Delivery-ID is the literal "test_ping", and it carries no
+// X-Webhook-Idempotency-Key. A receiver that validates bodies strictly will
+// reject it; the signature and every other header ARE computed exactly as for a
+// delivery, so it does prove connectivity and signature verification.
+//
 // This is useful for validating endpoint connectivity before enabling a subscription
 // or for debugging delivery failures.
 //
@@ -568,9 +575,18 @@ func (m *Manager) TestSubscription(ctx context.Context, subscriptionID string) (
 		req.Header.Set(key, value)
 	}
 
+	// Resolve the signing secret for this ping (per call, never cached).
+	secret, err := m.resolveSigningSecret(ctx, sub.Secret, TestPingDeliveryID)
+	if err != nil {
+		return &TestResult{
+			Success: false,
+			Error:   subscriberVisibleError(err),
+		}, nil
+	}
+
 	// Calculate and add signature
 	timestamp := fmt.Sprintf("%d", time.Now().Unix())
-	signature := calculateSignature(sub.Secret, timestamp, payloadJSON)
+	signature := calculateSignature(secret, timestamp, payloadJSON)
 	req.Header.Set(HeaderSignature, signature)
 	req.Header.Set(HeaderTimestamp, timestamp)
 	req.Header.Set(HeaderDeliveryID, TestPingDeliveryID)

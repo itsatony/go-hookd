@@ -347,7 +347,8 @@ config := hookd.NewConfig(databaseURL)
 // Worker Configuration
 config.WorkerCount = 10                    // Number of concurrent delivery workers
 config.QueuePollInterval = 1000            // How often to check for pending deliveries (ms)
-config.MaxBatchSize = 100                  // Max deliveries to fetch per poll
+config.MaxBatchSize = 1                    // Deliveries one worker claims per poll (default 1)
+config.ClaimLeaseMs = 0                    // Claim lease; 0 = DeliveryTimeoutMs + 60s
 
 // Idle Polling (see "Idle polling and Notify")
 config.QueueIdleMaxInterval = 30000        // Poll interval ceiling while the queue is empty (ms)
@@ -1076,6 +1077,42 @@ Essential metrics to track via event bus:
 4. Circuit breaker state changes
 5. Worker utilization
 6. Dead letter queue size
+
+## Upgrading to v0.11.0
+
+Correctness + security release. **Consumer action is required only in the cases
+listed; everything else is a drop-in upgrade** (`EnsureSchema` must run at boot,
+as it does in every known consumer).
+
+1. **Delivery claims are leases now (go-hookd#1).** The poll no longer relies on
+   an autocommit `FOR UPDATE SKIP LOCKED` (whose lock was gone before the worker
+   saw the row, so two workers could send the same delivery). A worker claims a
+   row by moving its `next_retry_at` to now + `ClaimLease`, and re-fences the
+   claim right before sending. A worker that crashes leaves its rows due again
+   after the lease (default `DeliveryTimeoutMs` + 60s = 90s).
+   - `MaxBatchSize` is now honoured (it was ignored; every poll took 1). The
+     default is now **1**. If you set it (deepr sets 200), each worker will claim
+     that many rows per poll; values in the single digits are recommended.
+   - Custom `Repository` implementations: `GetPendingDeliveries` is replaced by
+     `ClaimPendingDeliveries`, `RenewDeliveryClaim`, `ReleaseDeliveryClaim`.
+2. **Cleanup is fail-closed on tenant scope (go-hookd#7).** `CleanupDeliveries`
+   and every `Count/DeleteDeliveriesByFilter` refuse an empty `TenantID` unless
+   `CleanupFilter.AllTenants` is set (as `ListDeliveries` has since v0.10.0).
+   The `Cleanup{Successful,Failed,DeadLetter,AllCompleted}Deliveries` helpers
+   are documented fleet-wide sweeps and set it themselves.
+3. **`X-Webhook-Idempotency-Key` is sent (go-hookd#2)** whenever the queuer gave
+   an `IdempotencyKey`. `EnsureSchema` adds the nullable
+   `deliveries.idempotency_key` column **in place** (no data loss, schema version
+   unchanged, safe with older binaries during a rolling deploy). The
+   `User-Agent` now carries the real module version.
+4. **Pluggable signing secrets (go-hookd#3).** `WithSecretResolver(r)` makes the
+   stored `secret` a reference resolved on every attempt (never cached); nothing
+   is sent if it fails. Default behaviour is unchanged.
+5. **Egress:** `WithAllowPrivateDestinations()` no longer waives the dial guard
+   for a `WithHTTPClient` client hookd cannot wrap (an opaque RoundTripper, or a
+   transport with `DialTLS`/`DialTLSContext`); such a client is now always a
+   configuration error. Response bodies are read at most
+   `MaxResponseBodyLength` + 1 bytes.
 
 ## Upgrading to v0.10.0
 

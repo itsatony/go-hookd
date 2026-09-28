@@ -223,7 +223,7 @@ func TestPostgresRepository_DeliverySKIPLOCKED(t *testing.T) {
 				}
 				defer tx.Rollback()
 
-				deliveries, err := tx.GetPendingDeliveries(ctx, 1)
+				deliveries, err := tx.ClaimPendingDeliveries(ctx, 1, testClaimLease)
 				if err != nil {
 					t.Errorf("Worker %d: failed to get deliveries: %v", workerID, err)
 					return
@@ -260,7 +260,7 @@ func TestPostgresRepository_DeliverySKIPLOCKED(t *testing.T) {
 		require.NoError(t, repo.CreateDelivery(ctx, dlv4))
 
 		// Should not be returned
-		deliveries, err := repo.GetPendingDeliveries(ctx, 10)
+		deliveries, err := repo.ClaimPendingDeliveries(ctx, 10, testClaimLease)
 		require.NoError(t, err)
 
 		for _, d := range deliveries {
@@ -969,13 +969,13 @@ func TestPostgresRepository_EdgeCases(t *testing.T) {
 	})
 
 	t.Run("GetPendingDeliveries with limit 0", func(t *testing.T) {
-		deliveries, err := repo.GetPendingDeliveries(ctx, 0)
+		deliveries, err := repo.ClaimPendingDeliveries(ctx, 0, testClaimLease)
 		require.NoError(t, err)
 		assert.Empty(t, deliveries)
 	})
 
 	t.Run("GetPendingDeliveries with very large limit", func(t *testing.T) {
-		deliveries, err := repo.GetPendingDeliveries(ctx, 999999)
+		deliveries, err := repo.ClaimPendingDeliveries(ctx, 999999, testClaimLease)
 		require.NoError(t, err)
 		assert.NotNil(t, deliveries)
 	})

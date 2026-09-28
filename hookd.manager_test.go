@@ -335,7 +335,7 @@ func TestDeliveryProcessing(t *testing.T) {
 		}
 		repo.CreateDelivery(ctx, delivery)
 
-		manager.processDelivery(ctx, delivery)
+		manager.processDelivery(ctx, claimForTest(t, manager, delivery))
 
 		// Verify delivery status
 		updatedDelivery, _ := repo.GetDelivery(ctx, delivery.ID)
@@ -380,7 +380,7 @@ func TestDeliveryProcessing(t *testing.T) {
 		}
 		repo.CreateDelivery(ctx, delivery)
 
-		manager.processDelivery(ctx, delivery)
+		manager.processDelivery(ctx, claimForTest(t, manager, delivery))
 
 		// Verify delivery status - should be pending for retry, not failed
 		updatedDelivery, _ := repo.GetDelivery(ctx, delivery.ID)
@@ -419,14 +419,14 @@ func TestDeliveryProcessing(t *testing.T) {
 			TenantID:       sub.TenantID,
 			EventType:      "test.event",
 			Payload:        map[string]any{"test": "data"},
-			Status:         DeliveryStatusFailed,
+			Status:         DeliveryStatusPending, // only a pending row is ever claimed
 			AttemptCount:   3,
 			MaxAttempts:    3,
 			NextRetryAt:    &now,
 		}
 		repo.CreateDelivery(ctx, delivery)
 
-		manager.processDelivery(ctx, delivery)
+		manager.processDelivery(ctx, claimForTest(t, manager, delivery))
 
 		// Verify delivery moved to DLQ
 		updatedDelivery, _ := repo.GetDelivery(ctx, delivery.ID)
@@ -471,7 +471,7 @@ func TestDeliveryProcessing(t *testing.T) {
 		}
 		repo.CreateDelivery(ctx, delivery)
 
-		manager.processDelivery(ctx, delivery)
+		manager.processDelivery(ctx, claimForTest(t, manager, delivery))
 
 		// Verify delivery moved to DLQ immediately
 		updatedDelivery, _ := repo.GetDelivery(ctx, delivery.ID)
@@ -583,7 +583,7 @@ func TestCircuitBreaker(t *testing.T) {
 		}
 		repo.CreateDelivery(ctx, delivery)
 
-		manager.processDelivery(ctx, delivery)
+		manager.processDelivery(ctx, claimForTest(t, manager, delivery))
 
 		// Verify delivery was not successful (circuit breaker blocked it)
 		updatedDelivery, _ := repo.GetDelivery(ctx, delivery.ID)
@@ -664,7 +664,7 @@ func TestErrorHandling(t *testing.T) {
 		repo.CreateDelivery(ctx, delivery)
 
 		// Should not panic
-		manager.processDelivery(ctx, delivery)
+		manager.processDelivery(ctx, claimForTest(t, manager, delivery))
 
 		// Since subscription doesn't exist, processDelivery returns early
 		// Delivery should remain in pending status (not processed)
@@ -707,7 +707,7 @@ func TestErrorHandling(t *testing.T) {
 		repo.CreateDelivery(ctx, delivery)
 
 		// Should not panic
-		manager.processDelivery(ctx, delivery)
+		manager.processDelivery(ctx, claimForTest(t, manager, delivery))
 
 		// Delivery should be pending for retry (network errors are retryable)
 		updatedDelivery, _ := repo.GetDelivery(ctx, delivery.ID)
@@ -767,7 +767,7 @@ func TestManager_HTTPClientErrors(t *testing.T) {
 		require.NoError(t, repo.CreateDelivery(ctx, delivery))
 
 		// Process delivery - should timeout
-		manager.processDelivery(ctx, delivery)
+		manager.processDelivery(ctx, claimForTest(t, manager, delivery))
 
 		// Verify delivery failed
 		updatedDelivery, err := repo.GetDelivery(ctx, delivery.ID)
@@ -810,7 +810,7 @@ func TestManager_HTTPClientErrors(t *testing.T) {
 		require.NoError(t, repo.CreateDelivery(ctx, delivery))
 
 		// Process delivery - should fail with connection refused
-		manager.processDelivery(ctx, delivery)
+		manager.processDelivery(ctx, claimForTest(t, manager, delivery))
 
 		// Verify delivery failed
 		updatedDelivery, err := repo.GetDelivery(ctx, delivery.ID)
@@ -860,7 +860,7 @@ func TestManager_HTTPClientErrors(t *testing.T) {
 		require.NoError(t, repo.CreateDelivery(ctx, delivery))
 
 		// Process delivery - should fail with 500 error
-		manager.processDelivery(ctx, delivery)
+		manager.processDelivery(ctx, claimForTest(t, manager, delivery))
 
 		// Verify delivery failed and will be retried
 		updatedDelivery, err := repo.GetDelivery(ctx, delivery.ID)
@@ -916,7 +916,7 @@ func TestManager_HTTPClientErrors(t *testing.T) {
 		require.NoError(t, repo.CreateDelivery(ctx, delivery))
 
 		// Process delivery - should fail with 404 (non-retryable)
-		manager.processDelivery(ctx, delivery)
+		manager.processDelivery(ctx, claimForTest(t, manager, delivery))
 
 		// Verify delivery moved to dead letter (404 is not retryable)
 		updatedDelivery, err := repo.GetDelivery(ctx, delivery.ID)
@@ -973,7 +973,7 @@ func TestManager_CircuitBreakerStateTransitions(t *testing.T) {
 				NextRetryAt:    &now,
 			}
 			require.NoError(t, repo.CreateDelivery(ctx, delivery))
-			manager.processDelivery(ctx, delivery)
+			manager.processDelivery(ctx, claimForTest(t, manager, delivery))
 		}
 
 		// Circuit breaker should be open now
@@ -1036,7 +1036,7 @@ func TestManager_CircuitBreakerStateTransitions(t *testing.T) {
 		require.NoError(t, repo.CreateDelivery(ctx, delivery))
 
 		// Process delivery - circuit breaker should transition to half-open then succeed
-		manager.processDelivery(ctx, delivery)
+		manager.processDelivery(ctx, claimForTest(t, manager, delivery))
 
 		// Circuit breaker should have transitioned through half-open to closed on success
 		retrieved, err := repo.GetCircuitBreakerState(ctx, server.URL)
@@ -1095,7 +1095,7 @@ func TestManager_CircuitBreakerStateTransitions(t *testing.T) {
 		require.NoError(t, repo.CreateDelivery(ctx, delivery))
 
 		// Process delivery - should succeed
-		manager.processDelivery(ctx, delivery)
+		manager.processDelivery(ctx, claimForTest(t, manager, delivery))
 
 		// Circuit breaker should close after reaching success threshold
 		updatedState, err := repo.GetCircuitBreakerState(ctx, server.URL)
@@ -1155,7 +1155,7 @@ func TestManager_MaxRetriesExceeded(t *testing.T) {
 
 		// Process delivery until max retries exceeded
 		for i := 0; i < 3; i++ {
-			manager.processDelivery(ctx, delivery)
+			manager.processDelivery(ctx, claimForTest(t, manager, delivery))
 			delivery, _ = repo.GetDelivery(ctx, delivery.ID)
 		}
 
@@ -1207,7 +1207,7 @@ func TestManager_EdgeCases(t *testing.T) {
 		require.NoError(t, repo.CreateDelivery(ctx, delivery))
 
 		// Should not panic with nil payload
-		manager.processDelivery(ctx, delivery)
+		manager.processDelivery(ctx, claimForTest(t, manager, delivery))
 
 		// Verify delivery succeeded
 		updatedDelivery, err := repo.GetDelivery(ctx, delivery.ID)
@@ -1260,7 +1260,7 @@ func TestManager_EdgeCases(t *testing.T) {
 		require.NoError(t, repo.CreateDelivery(ctx, delivery))
 
 		// Should handle large payload
-		manager.processDelivery(ctx, delivery)
+		manager.processDelivery(ctx, claimForTest(t, manager, delivery))
 
 		updatedDelivery, err := repo.GetDelivery(ctx, delivery.ID)
 		require.NoError(t, err)
@@ -1301,7 +1301,7 @@ func TestManager_EdgeCases(t *testing.T) {
 		require.NoError(t, repo.CreateDelivery(ctx, delivery))
 
 		// Process delivery - should skip because subscription is paused
-		manager.processDelivery(ctx, delivery)
+		manager.processDelivery(ctx, claimForTest(t, manager, delivery))
 
 		// Delivery should remain pending
 		updatedDelivery, err := repo.GetDelivery(ctx, delivery.ID)

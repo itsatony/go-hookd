@@ -26,9 +26,25 @@ func TestCleanupFilter_Validate(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name:    "nil filter should fail",
+			filter:  nil,
+			wantErr: true,
+		},
+		{
+			name:    "status without tenant or AllTenants should fail (v0.11.0 fail-closed)",
+			filter:  &CleanupFilter{Status: ptr(DeliveryStatusSuccess)},
+			wantErr: true,
+		},
+		{
+			name:    "AllTenants alone is not a constraint and should fail",
+			filter:  &CleanupFilter{AllTenants: true},
+			wantErr: true,
+		},
+		{
 			name: "filter with only status should succeed",
 			filter: &CleanupFilter{
-				Status: ptr(DeliveryStatusSuccess),
+				Status:     ptr(DeliveryStatusSuccess),
+				AllTenants: true,
 			},
 			wantErr: false,
 		},
@@ -43,6 +59,7 @@ func TestCleanupFilter_Validate(t *testing.T) {
 			name: "filter with only created_before should succeed",
 			filter: &CleanupFilter{
 				CreatedBefore: ptr(time.Now()),
+				AllTenants:    true,
 			},
 			wantErr: false,
 		},
@@ -51,6 +68,7 @@ func TestCleanupFilter_Validate(t *testing.T) {
 			filter: &CleanupFilter{
 				CreatedBefore: ptr(time.Now().Add(-24 * time.Hour)),
 				CreatedAfter:  ptr(time.Now()),
+				AllTenants:    true,
 			},
 			wantErr: true,
 		},
@@ -59,6 +77,7 @@ func TestCleanupFilter_Validate(t *testing.T) {
 			filter: &CleanupFilter{
 				CreatedBefore: ptr(time.Now()),
 				CreatedAfter:  ptr(time.Now().Add(-24 * time.Hour)),
+				TenantID:      "tenant-123",
 			},
 			wantErr: false,
 		},
@@ -199,6 +218,7 @@ func TestManager_CleanupDeliveries_DryRun(t *testing.T) {
 	filter := &CleanupFilter{
 		Status:        &status,
 		CreatedBefore: &cutoff,
+		TenantID:      "tenant-1",
 	}
 
 	result, err := manager.CleanupDeliveries(ctx, filter, true)
@@ -248,6 +268,7 @@ func TestManager_CleanupDeliveries_Actual(t *testing.T) {
 	filter := &CleanupFilter{
 		Status:        &status,
 		CreatedBefore: &cutoff,
+		AllTenants:    true,
 	}
 
 	result, err := manager.CleanupDeliveries(ctx, filter, false)

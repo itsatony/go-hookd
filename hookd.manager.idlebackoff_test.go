@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-// pollRecorder wraps a Repository and counts GetPendingDeliveries calls, optionally
+// pollRecorder wraps a Repository and counts ClaimPendingDeliveries calls, optionally
 // answering with one delivery so the "queue has work" path can be driven.
 type pollRecorder struct {
 	Repository
@@ -27,7 +27,7 @@ type pollRecorder struct {
 	hasWork bool
 }
 
-func (p *pollRecorder) GetPendingDeliveries(_ context.Context, _ int) ([]*Delivery, error) {
+func (p *pollRecorder) ClaimPendingDeliveries(_ context.Context, _ int, _ time.Duration) ([]*Delivery, error) {
 	p.polls.Add(1)
 	p.mu.Lock()
 	defer p.mu.Unlock()
