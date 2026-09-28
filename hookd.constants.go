@@ -505,7 +505,7 @@ const (
 
 	// ErrMsgInvalidIdempotencyKey is returned for an idempotency key that is not
 	// 1-255 bytes of visible ASCII (it is sent as a header).
-	ErrMsgInvalidIdempotencyKey = "idempotency_key must be at most 255 visible ASCII characters"
+	ErrMsgInvalidIdempotencyKey = "idempotency_key must be at most 255 printable ASCII characters"
 
 	// MaxIdempotencyKeyLength is the longest accepted idempotency key.
 	MaxIdempotencyKeyLength = 255

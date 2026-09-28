@@ -541,9 +541,7 @@ func (m *Manager) TestSubscription(ctx context.Context, subscriptionID string) (
 	}
 	// Only an EXISTING subscription takes a cooldown slot: storing before the
 	// lookup let arbitrary ids grow the map without bound (v0.11.0).
-	if _, loaded := m.testRateLimiter.LoadOrStore(subscriptionID, time.Now()); loaded {
-		m.testRateLimiter.Store(subscriptionID, time.Now())
-	}
+	m.testRateLimiter.Store(subscriptionID, time.Now())
 
 	// Create test payload
 	testPayload := map[string]any{

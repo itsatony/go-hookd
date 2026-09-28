@@ -91,10 +91,11 @@ Correctness and security. **Consumer action is required only as listed under
   ranges refused; a subscriber custom header can't spoof
   `X-Webhook-Idempotency-Key`; TestSubscription errors are fixed strings and an
   unknown id takes no rate-limit slot.
-- Schema checks use `current_schema()` instead of `'public'` (with a non-public
-  search_path the version check never matched, so EnsureSchema re-ran the
-  destructive create path every boot); the additive ALTER runs with a 5s
-  `lock_timeout`.
+- Schema existence checks resolve the table with `to_regclass` — through
+  `search_path`, exactly like the unqualified DDL — instead of hardcoding
+  `'public'` (with tables outside public, the check never matched and EnsureSchema
+  re-ran the destructive create path every boot); the additive ALTER runs with
+  a 5s `lock_timeout`.
 - The delivery record is written before the circuit-breaker update.
 
 ### Changed
@@ -105,6 +106,10 @@ Correctness and security. **Consumer action is required only as listed under
 - **Custom `Repository` implementations:** replace `GetPendingDeliveries` with
   `ClaimPendingDeliveries`, `RenewDeliveryClaim`, `ReleaseDeliveryClaim`; add
   `RequeueDeadLetter`.
+- **Idempotency keys are validated at queue time:** a key with a control
+  character (CR, LF, TAB, …) or non-ASCII byte, or longer than 255 bytes, is now
+  refused by `QueueDelivery` / `QueueInlineDelivery` (it is sent as a header,
+  where it would have failed every attempt). Spaces are allowed.
 - **Rollout:** run `EnsureSchema` first; roll webhook workers over together (a
   v0.10 worker's unfenced poll can double-send alongside a v0.11 one).
 - **Fleet-wide `CleanupDeliveries` callers:** set `CleanupFilter.AllTenants`.

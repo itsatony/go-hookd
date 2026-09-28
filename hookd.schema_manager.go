@@ -295,19 +295,20 @@ func (m *SchemaManager) getSchemaVersion(ctx context.Context, q querier) (exists
 	// Check if the subscriptions table exists (primary table)
 	tableName := m.schemaConfig.TableSubscriptions()
 
-	// Query to check if table exists and get its comment
+	// ⛔ The table is looked up with to_regclass, i.e. through search_path —
+	// EXACTLY how schema.sql's unqualified DROP/CREATE resolve it. Any other
+	// lookup ('public', current_schema()) can disagree with the DDL, and then
+	// "not found" here is followed by a DROP that finds (and empties) a table
+	// elsewhere on the search_path.
 	query := `
-		SELECT obj_description(c.oid) AS comment
-		FROM pg_class c
-		JOIN pg_namespace n ON n.oid = c.relnamespace
-		WHERE c.relname = $1
-		  AND n.nspname = current_schema()
-		  AND c.relkind = 'r'
+		SELECT c.oid IS NOT NULL, obj_description(c.oid, 'pg_class')
+		FROM (SELECT to_regclass($1)::oid AS oid) c
 	`
 
+	var found bool
 	var comment sql.NullString
-	err = q.QueryRowContext(ctx, query, tableName).Scan(&comment)
-	if err == sql.ErrNoRows {
+	err = q.QueryRowContext(ctx, query, tableName).Scan(&found, &comment)
+	if err == nil && !found {
 		return false, "", nil
 	}
 	if err != nil {
@@ -463,10 +464,12 @@ func (m *SchemaManager) missingAdditiveColumns(ctx context.Context, q querier) (
 	var missing []additiveColumn
 	for _, col := range schemaAdditiveColumns {
 		var present bool
+		// Resolved through search_path, like the ALTER that follows (see
+		// getSchemaVersion).
 		err := q.QueryRowContext(ctx, `
 			SELECT EXISTS (
-				SELECT 1 FROM information_schema.columns
-				WHERE table_schema = current_schema() AND table_name = $1 AND column_name = $2
+				SELECT 1 FROM pg_attribute
+				WHERE attrelid = to_regclass($1) AND attname = $2 AND NOT attisdropped
 			)`, m.schemaConfig.tableName(col.tableSuffix), col.column).Scan(&present)
 		if err != nil {
 			return nil, cuserr.NewExternalError("database", "postgres", err,

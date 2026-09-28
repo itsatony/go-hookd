@@ -531,7 +531,10 @@ func (m *Manager) processDelivery(parent context.Context, delivery *Delivery) {
 			// it for a whole lease or re-polling it every interval.
 			if delivery.NextRetryAt != nil {
 				retryAt := cbState.NextRetryAt
-				if relErr := m.repo.ReleaseDeliveryClaim(ctx, delivery.ID, *delivery.NextRetryAt, &retryAt); relErr != nil {
+				relCtx, relCancel := context.WithTimeout(context.WithoutCancel(ctx), DeliveryBookkeepingTimeout)
+				relErr := m.repo.ReleaseDeliveryClaim(relCtx, delivery.ID, *delivery.NextRetryAt, &retryAt)
+				relCancel()
+				if relErr != nil {
 					m.logger.Debug("could not defer delivery to circuit retry time",
 						zap.String("delivery_id", delivery.ID),
 						zap.Error(relErr),

@@ -749,13 +749,14 @@ func validateEventTypes(eventTypes []string) error {
 
 // validateIdempotencyKey refuses a key that cannot be sent as the
 // X-Webhook-Idempotency-Key header (every attempt would fail) or stored
-// (VARCHAR(255)): at most MaxIdempotencyKeyLength bytes of visible ASCII.
+// (VARCHAR(255)): at most MaxIdempotencyKeyLength bytes of printable ASCII
+// (space allowed, control characters and non-ASCII refused).
 func validateIdempotencyKey(key string) error {
 	if len(key) > MaxIdempotencyKeyLength {
 		return cuserr.NewValidationError("idempotency_key", ErrMsgInvalidIdempotencyKey)
 	}
 	for i := 0; i < len(key); i++ {
-		if key[i] < 0x21 || key[i] > 0x7e {
+		if key[i] < 0x20 || key[i] > 0x7e {
 			return cuserr.NewValidationError("idempotency_key", ErrMsgInvalidIdempotencyKey)
 		}
 	}

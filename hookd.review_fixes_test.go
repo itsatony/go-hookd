@@ -90,7 +90,8 @@ func TestValidateIdempotencyKey(t *testing.T) {
 	for key, ok := range map[string]bool{
 		"":                            true,
 		"evt_123:abc-DEF.ok":          true,
-		"has space":                   false,
+		"has space":                   true,
+		"tab\there":                   false,
 		"crlf\r\nX-Injected: 1":       false,
 		"ünïcode":                     false,
 		string(make([]byte, 256)):     false,
