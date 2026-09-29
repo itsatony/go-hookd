@@ -3,7 +3,12 @@
 All notable changes to go-hookd. Earlier releases are described in their tag
 commit messages (`git log --tags`) and in README "Upgrading to vX" sections.
 
-## v0.11.3 — 2026-09-29
+## v0.11.4 — 2026-09-29
+
+The release below. **v0.11.3 is retracted:** its tag was created in error on
+the v0.11.2 commit (f782aaa), so `go get …@v0.11.3` resolves to v0.11.2's
+code. `go.mod` retracts it; use v0.11.4.
+
 
 ### Fixed
 - **`BeginTx` was unusable on PostgreSQL (go-hookd#8).** Every CRUD method of

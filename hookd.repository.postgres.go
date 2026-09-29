@@ -28,7 +28,7 @@ type PostgresRepository struct {
 // pgStore holds every data operation of the PostgreSQL repository, written
 // ONCE against claimExecer (what both *sql.DB and *sql.Tx provide).
 // PostgresRepository embeds it over its pool and PostgresRepositoryTx over its
-// transaction, so the two can never drift apart again: before v0.11.3 the tx
+// transaction, so the two can never drift apart again: before v0.11.4 the tx
 // type carried its own copies of these queries, and they still named the
 // pre-v0.6.0 unprefixed tables and a stale column list (go-hookd#8).
 type pgStore struct {

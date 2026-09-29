@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// These tests pin go-hookd#8 against a REAL PostgreSQL: before v0.11.3 every
+// These tests pin go-hookd#8 against a REAL PostgreSQL: before v0.11.4 every
 // CRUD method of PostgresRepositoryTx named the pre-v0.6.0 unprefixed tables
 // (and an 11-column delivery list), so any call through BeginTx failed. Each
 // RepositoryTx method is exercised INSIDE a transaction and its effect is
@@ -327,7 +327,7 @@ func TestTxRepository_EveryMethodRunsInsideTheTransaction(t *testing.T) {
 		require.NoError(t, err)
 		assert.Len(t, restored, 1, "and its committed attempt")
 
-		// The pool DeleteDelivery (one statement since v0.11.3) removes both.
+		// The pool DeleteDelivery (one statement since v0.11.4) removes both.
 		require.NoError(t, f.repo.DeleteDelivery(ctx, d.ID))
 		_, err = f.repo.GetDelivery(ctx, d.ID)
 		assert.ErrorIs(t, err, hookd.ErrDeliveryNotFound)

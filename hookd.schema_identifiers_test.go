@@ -14,14 +14,14 @@ import (
 // go-hookd#9: every identifier schema.sql derives from the prefix must fit
 // PostgreSQL's 63-byte limit and stay distinct, for EVERY accepted prefix
 // length — and for the prefixes in use today it must be byte-identical to the
-// pre-v0.11.3 naming, so existing schemas never drift.
+// pre-v0.11.4 naming, so existing schemas never drift.
 
 var (
 	tmplObjectCall = regexp.MustCompile(`\{\{obj "(\w+)"\}\}`)
 	tmplIdentCall  = regexp.MustCompile(`\{\{ident "(\w+)" "(\w+)"\}\}`)
 )
 
-// naiveExpansion renders schema.sql the pre-v0.11.3 way: plain concatenation,
+// naiveExpansion renders schema.sql the pre-v0.11.4 way: plain concatenation,
 // no shortening. It also returns every identifier it produced.
 func naiveExpansion(prefix string) (string, []string) {
 	var names []string
@@ -73,7 +73,7 @@ func TestSchemaTemplate_SpellsEveryIdentifierThroughTheHelpers(t *testing.T) {
 
 func TestSchemaIdentifiers_TodaysPrefixesAreUnchanged(t *testing.T) {
 	// Every prefix whose longest naive name fits renders byte-identically to
-	// the naive (pre-v0.11.3) expansion — including the fleet's own.
+	// the naive (pre-v0.11.4) expansion — including the fleet's own.
 	fits := 0
 	for n := 1; n <= MaxPrefixLength; n++ {
 		if longestNaiveIdentifier(n) <= PostgresMaxIdentifierLength {
@@ -181,7 +181,7 @@ func TestSchemaIdentifiers_DDLMatchesTheV0112Golden(t *testing.T) {
 
 func TestBuildDropSQL_AlsoDropsLegacyTruncatedFunctionNames(t *testing.T) {
 	// 30 chars: the cleanup function's full name (64 bytes) was stored
-	// server-truncated before v0.11.3 and is shortened-with-hash now.
+	// server-truncated before v0.11.4 and is shortened-with-hash now.
 	prefix := strings.Repeat("m", 30)
 	cfg, err := NewSchemaConfig(prefix)
 	require.NoError(t, err)

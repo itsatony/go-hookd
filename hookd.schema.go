@@ -360,7 +360,7 @@ func (s *SchemaConfig) AllFunctionNames() []string {
 
 // allFunctionNamesWithLegacy is AllFunctionNames plus, for any function whose
 // full name exceeds PostgresMaxIdentifierLength, the name PostgreSQL itself
-// stored for it before v0.11.3 (the first 63 bytes).
+// stored for it before v0.11.4 (the first 63 bytes).
 func (s *SchemaConfig) allFunctionNamesWithLegacy() []string {
 	names := s.AllFunctionNames()
 	for _, suffix := range []string{FuncSuffixUpdateUpdatedAt, FuncSuffixCleanupIdempotency} {

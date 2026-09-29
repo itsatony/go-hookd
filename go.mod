@@ -77,3 +77,6 @@ require (
 	google.golang.org/protobuf v1.36.10 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+// v0.11.3 was tagged in error on the v0.11.2 commit (f782aaa); v0.11.4 is that release.
+retract v0.11.3
