@@ -885,9 +885,18 @@ func (m *Manager) handleDeliveryFailure(ctx context.Context, delivery *Delivery,
 			)
 		}
 
-		if err := m.repo.MoveToDeadLetter(ctx, delivery.ID, reason); err != nil {
+		// One write that also PERSISTS the attempt just made (v0.11.2):
+		// MoveToDeadLetter sets only status and completed_at, so the
+		// incremented attempt_count was lost and a redrive (which keeps
+		// counting since v0.11.1) re-used attempt numbers.
+		deadAt := time.Now()
+		delivery.Status = DeliveryStatusDeadLetter
+		delivery.CompletedAt = &deadAt
+		delivery.NextRetryAt = nil
+		if err := m.repo.UpdateDelivery(ctx, delivery); err != nil {
 			m.logger.Error("failed to move delivery to dead letter",
 				zap.String("delivery_id", delivery.ID),
+				zap.String("reason", reason),
 				zap.Error(err),
 			)
 		}

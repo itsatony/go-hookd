@@ -1043,7 +1043,7 @@ func (r *PostgresRepository) ListDeliveries(ctx context.Context, filter *Deliver
 }
 
 // MoveToDeadLetter moves a delivery to the dead letter queue.
-// This is called when a delivery exhausts all retry attempts.
+// The Manager no longer calls it (it dead-letters via UpdateDelivery to keep attempt_count, v0.11.2).
 func (r *PostgresRepository) MoveToDeadLetter(ctx context.Context, deliveryID string, reason string) error {
 	query := fmt.Sprintf(`
 		UPDATE %s

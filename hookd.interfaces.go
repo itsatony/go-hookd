@@ -106,8 +106,11 @@ type Repository interface {
 	// Returns an empty slice if no deliveries match.
 	ListDeliveries(ctx context.Context, filter *DeliveryFilter) ([]*Delivery, error)
 
-	// MoveToDeadLetter moves a delivery to the dead letter queue.
-	// This is called when a delivery exhausts all retry attempts.
+	// MoveToDeadLetter marks a delivery dead-lettered (status + completed_at
+	// only; reason is not stored). ⚠ It does NOT persist attempt_count: since
+	// v0.11.2 the Manager dead-letters through UpdateDelivery so the attempt
+	// that exhausted the budget is kept (a redrive continues numbering from
+	// it). A direct caller that also needs the count must use UpdateDelivery.
 	MoveToDeadLetter(ctx context.Context, deliveryID string, reason string) error
 
 	// DeleteDelivery permanently deletes a delivery and its attempts.

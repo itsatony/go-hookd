@@ -3,6 +3,7 @@ package hookd
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -172,4 +173,38 @@ func TestRequeueDeadLetter_AttemptNumbersKeepRising(t *testing.T) {
 
 	m.processDelivery(ctx, claimForTest(t, m, again))
 	assert.Equal(t, []string{"4"}, got)
+}
+
+// The dead-letter path persists the attempt that exhausted the budget, so a
+// redrive continues numbering (v0.11.2).
+func TestDeadLetter_PersistsAttemptCountForRedrive(t *testing.T) {
+	var got []string
+	m, repo := newEgressTestManager(t, WithAllowPrivateDestinations())
+	status := http.StatusInternalServerError
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, r.Header.Get(HeaderAttemptNumber))
+		w.WriteHeader(status)
+	}))
+	defer srv.Close()
+	d := seedSubscriptionDelivery(t, m, repo, srv.URL, "stored-secret-value-123")
+	ctx := context.Background()
+	cur, err := repo.GetDelivery(ctx, d.ID)
+	require.NoError(t, err)
+	cur.MaxAttempts = 1
+	require.NoError(t, repo.UpdateDelivery(ctx, cur))
+
+	m.processDelivery(ctx, claimForTest(t, m, cur))
+	dead, err := repo.GetDelivery(ctx, d.ID)
+	require.NoError(t, err)
+	require.Equal(t, DeliveryStatusDeadLetter, dead.Status)
+	assert.Equal(t, 1, dead.AttemptCount, "the exhausting attempt is persisted")
+
+	again, err := repo.RequeueDeadLetter(ctx, d.ID)
+	require.NoError(t, err)
+	status = http.StatusOK
+	m.processDelivery(ctx, claimForTest(t, m, again))
+	assert.Equal(t, []string{"1", "2"}, got)
+	attempts, err := repo.GetDeliveryAttempts(ctx, d.ID)
+	require.NoError(t, err)
+	assert.Len(t, attempts, 2)
 }
