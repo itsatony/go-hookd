@@ -4,7 +4,7 @@ manifest_version: "1.0"
 # Project version (semantic versioning)
 project:
   name: "go-hookd"
-  version: "0.11.2"
+  version: "0.11.3"
   description: "Enterprise webhook management package"
 
 # Database schema versions (migration numbers)
