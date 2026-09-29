@@ -778,6 +778,10 @@ const (
 	// removed and will be delivered after IdempotencyHold.
 	LogMsgIdempotencyHeldRowNotDeleted = "idempotent duplicate: held delivery could not be deleted"
 
+	// LogMsgIdempotencyStoreAmbiguous: storing the key failed ambiguously; the
+	// held row is kept (delivered after IdempotencyHold).
+	LogMsgIdempotencyStoreAmbiguous = "idempotency key store failed ambiguously; held delivery kept"
+
 	// LogMsgIdempotencyHoldNotReleased: the hold could not be lifted; the
 	// delivery is late by IdempotencyHold.
 	LogMsgIdempotencyHoldNotReleased = "idempotency hold not released; delivery delayed"

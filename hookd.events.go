@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"net/url"
 	"strings"
 	"time"
@@ -487,8 +488,9 @@ func inlineIdempotencyScope(tenantID, rawURL string) string {
 //     retry is not mistaken for a duplicate (until v0.11.1 the key was stored
 //     first, and a failed insert left it live: the retry was refused and the
 //     delivery silently lost).
-//   - The key is then stored; a live duplicate (conflict) or any error deletes
-//     the held row before returning.
+//   - The key is then stored; a live duplicate (conflict) deletes the held
+//     row. Any OTHER error is ambiguous (the key may have committed), so the
+//     held row is kept and delivered after the hold.
 //   - Success releases the hold (the row becomes due at its original time). If
 //     the release write fails the delivery is merely late by IdempotencyHold.
 //
@@ -511,19 +513,31 @@ func (m *Manager) createWithIdempotency(ctx context.Context, delivery *Delivery,
 
 	expiresAt := time.Now().Add(time.Duration(m.config.IdempotencyTTLHours) * time.Hour)
 	if err := m.repo.StoreIdempotencyKey(ctx, key, scope, expiresAt); err != nil {
-		if delErr := m.repo.DeleteDelivery(context.WithoutCancel(ctx), delivery.ID); delErr != nil {
+		if !IsConflictError(err) {
+			// AMBIGUOUS (e.g. the connection dropped after the INSERT
+			// committed): the key may be live. Deleting the row could lose the
+			// delivery, so the held row is KEPT and becomes due after the hold —
+			// at worst a retry queues it twice (at-least-once), never lost.
+			m.logger.Warn(LogMsgIdempotencyStoreAmbiguous,
+				zap.String(LogFieldDeliveryID, delivery.ID),
+				zap.String(LogFieldErrorType, fmt.Sprintf("%T", err)),
+			)
+			return err
+		}
+		// A definite live duplicate: our held row must never be sent.
+		delCtx, delCancel := context.WithTimeout(context.WithoutCancel(ctx), DeliveryBookkeepingTimeout)
+		delErr := m.repo.DeleteDelivery(delCtx, delivery.ID)
+		delCancel()
+		if delErr != nil {
 			m.logger.Error(LogMsgIdempotencyHeldRowNotDeleted,
 				zap.String(LogFieldDeliveryID, delivery.ID),
 				zap.Error(delErr),
 			)
 		}
-		if IsConflictError(err) {
-			m.logger.Info("idempotent delivery request detected",
-				zap.String("idempotency_key", key),
-			)
-			return NewIdempotencyError(key)
-		}
-		return err
+		m.logger.Info("idempotent delivery request detected",
+			zap.String("idempotency_key", key),
+		)
+		return NewIdempotencyError(key)
 	}
 
 	delivery.NextRetryAt = &due
