@@ -2,6 +2,7 @@ package hookd
 
 import (
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -155,4 +156,42 @@ func TestValidatePrefix_TooLongNamesTheLength(t *testing.T) {
 	assert.Contains(t, err.Error(), fmt.Sprintf("%d characters long", MaxPrefixLength+1))
 	assert.Contains(t, err.Error(), "exceeds maximum length")
 	require.NoError(t, ValidatePrefix(strings.Repeat("a", MaxPrefixLength)))
+}
+
+// stripSQLComments drops whole-line "--" comments, which carry no DDL.
+func stripSQLComments(sql string) string {
+	var out []string
+	for _, l := range strings.Split(sql, "\n") {
+		if !strings.HasPrefix(strings.TrimSpace(l), "--") {
+			out = append(out, l)
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+// TestSchemaIdentifiers_DDLMatchesTheV0112Golden is the non-circular half of
+// the no-drift pin: the golden is v0.11.2's schema.sql rendered for "ago"
+// (comment lines stripped), taken from the released file, not derived from
+// the current template. Any byte of DDL that changes for a short prefix fails.
+func TestSchemaIdentifiers_DDLMatchesTheV0112Golden(t *testing.T) {
+	golden, err := os.ReadFile("testdata/schema_v0.11.2_ago.golden.sql")
+	require.NoError(t, err)
+	assert.Equal(t, string(golden), stripSQLComments(renderSchema(t, "ago")))
+}
+
+func TestBuildDropSQL_AlsoDropsLegacyTruncatedFunctionNames(t *testing.T) {
+	// 30 chars: the cleanup function's full name (64 bytes) was stored
+	// server-truncated before v0.11.3 and is shortened-with-hash now.
+	prefix := strings.Repeat("m", 30)
+	cfg, err := NewSchemaConfig(prefix)
+	require.NoError(t, err)
+	drop := (&SchemaManager{schemaConfig: cfg}).buildDropSQL()
+	full := prefix + "_hookd_" + FuncSuffixCleanupIdempotency
+	require.Greater(t, len(full), PostgresMaxIdentifierLength)
+	assert.Contains(t, drop, "DROP FUNCTION IF EXISTS "+full[:PostgresMaxIdentifierLength]+"()")
+	assert.Contains(t, drop, "DROP FUNCTION IF EXISTS "+cfg.FuncCleanupIdempotency()+"()")
+
+	short, err := NewSchemaConfig("ago")
+	require.NoError(t, err)
+	assert.Equal(t, short.AllFunctionNames(), short.allFunctionNamesWithLegacy(), "nothing extra for a short prefix")
 }

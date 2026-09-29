@@ -283,7 +283,7 @@ repoB, _ := hookd.NewPostgresRepository(dbURL, hookd.WithTablePrefix("payments")
 **Key Points:**
 - **Prefix Required**: `NewPostgresRepository()` requires `WithTablePrefix()` - there's no default
 - **Validation**: Prefix must be lowercase alphanumeric + underscore, max 32 characters
-- **Long prefixes** (v0.11.3): a derived name (index, constraint, trigger, function) that would exceed PostgreSQL's 63-byte identifier limit is shortened to its first 54 bytes + `_` + 8 hex digits of sha256(full name). Names that fit are unchanged, so for prefixes up to 25 characters every identifier is exactly as before; `SchemaConfig` returns the real names.
+- **Long prefixes** (v0.11.3): a derived name (index, constraint, trigger, function) that would exceed PostgreSQL's 63-byte identifier limit is shortened to its first 54 bytes + `_` + 8 hex digits of sha256(full name). Names that fit are unchanged, so for prefixes up to 25 characters every identifier is exactly as before. Prefixes of 26-30 characters previously applied with some names silently truncated by PostgreSQL; an existing schema is not touched, but a recreate uses the hashed names. `SchemaConfig` returns the real names.
 - **Idempotent**: `EnsureSchema()` is safe to call multiple times (creates only if missing)
 - **Schema Version**: On version mismatch, schema is dropped and recreated (no data migration)
 - **Concurrent boot (v0.9.0+)**: `EnsureSchema()`/`DropSchema()` serialize on a per-prefix PostgreSQL advisory lock, so several pods booting together create the schema exactly once (see [Connection budget and concurrent boot](#connection-budget-and-concurrent-boot))

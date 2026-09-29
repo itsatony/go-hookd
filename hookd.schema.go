@@ -68,10 +68,14 @@ const (
 
 // Kinds of derived identifier (the leading segment of DerivedName).
 const (
-	identKindIndex      = "idx"
-	identKindCheck      = "chk"
-	identKindForeignKey = "fk"
-	identKindTrigger    = "trg"
+	// IdentKindIndex prefixes index names.
+	IdentKindIndex = "idx"
+	// IdentKindCheck prefixes CHECK constraint names.
+	IdentKindCheck = "chk"
+	// IdentKindForeignKey prefixes foreign key constraint names.
+	IdentKindForeignKey = "fk"
+	// IdentKindTrigger prefixes trigger names.
+	IdentKindTrigger = "trg"
 )
 
 // Function and trigger name suffixes.
@@ -232,7 +236,7 @@ func ShortenIdentifier(name string) string {
 }
 
 // DerivedName builds a derived schema identifier: {kind}_{prefix}_hookd_{rest}
-// (kind is "idx", "chk", "fk" or "trg"), shortened by ShortenIdentifier.
+// (kind is one of the IdentKind* constants), shortened by ShortenIdentifier.
 // schema.sql spells every index, constraint and trigger through it.
 func (s *SchemaConfig) DerivedName(kind, rest string) string {
 	return ShortenIdentifier(fmt.Sprintf("%s_%s_%s_%s", kind, s.prefix, HookdTableInfix, rest))
@@ -250,10 +254,13 @@ func (s *SchemaConfig) DerivedName(kind, rest string) string {
 //	schema.IndexName("subscriptions", "tenant_id")
 //	// Returns: idx_myservice_hookd_subscriptions_tenant_id
 func (s *SchemaConfig) IndexName(table, columns string) string {
-	return s.DerivedName(identKindIndex, table+"_"+columns)
+	return s.DerivedName(IdentKindIndex, table+"_"+columns)
 }
 
 // UniqueIndexName generates a unique index name for a table and column(s).
+// Note: schema.sql's own unique indexes do NOT carry the "_unique" suffix
+// (e.g. the subscriptions tenant/url index is IndexName("subscriptions",
+// "tenant_url")); this helper is for names a consumer derives itself.
 // Format: idx_{prefix}_hookd_{table}_{columns}_unique
 //
 // Example:
@@ -261,7 +268,7 @@ func (s *SchemaConfig) IndexName(table, columns string) string {
 //	schema.UniqueIndexName("subscriptions", "tenant_url")
 //	// Returns: idx_myservice_hookd_subscriptions_tenant_url_unique
 func (s *SchemaConfig) UniqueIndexName(table, columns string) string {
-	return s.DerivedName(identKindIndex, table+"_"+columns+"_unique")
+	return s.DerivedName(IdentKindIndex, table+"_"+columns+"_unique")
 }
 
 // =============================================================================
@@ -276,7 +283,7 @@ func (s *SchemaConfig) UniqueIndexName(table, columns string) string {
 //	schema.CheckConstraintName("subscriptions", "status")
 //	// Returns: chk_myservice_hookd_subscriptions_status
 func (s *SchemaConfig) CheckConstraintName(table, rule string) string {
-	return s.DerivedName(identKindCheck, table+"_"+rule)
+	return s.DerivedName(IdentKindCheck, table+"_"+rule)
 }
 
 // ForeignKeyName generates a foreign key constraint name.
@@ -287,7 +294,7 @@ func (s *SchemaConfig) CheckConstraintName(table, rule string) string {
 //	schema.ForeignKeyName("deliveries", "subscription")
 //	// Returns: fk_myservice_hookd_deliveries_subscription
 func (s *SchemaConfig) ForeignKeyName(table, reference string) string {
-	return s.DerivedName(identKindForeignKey, table+"_"+reference)
+	return s.DerivedName(IdentKindForeignKey, table+"_"+reference)
 }
 
 // =============================================================================
@@ -324,7 +331,7 @@ func (s *SchemaConfig) functionName(suffix string) string {
 //	schema.TriggerName("subscriptions", "updated_at")
 //	// Returns: trg_myservice_hookd_subscriptions_updated_at
 func (s *SchemaConfig) TriggerName(table, event string) string {
-	return s.DerivedName(identKindTrigger, table+"_"+event)
+	return s.DerivedName(IdentKindTrigger, table+"_"+event)
 }
 
 // =============================================================================
@@ -349,6 +356,20 @@ func (s *SchemaConfig) AllFunctionNames() []string {
 		s.FuncUpdateUpdatedAt(),
 		s.FuncCleanupIdempotency(),
 	}
+}
+
+// allFunctionNamesWithLegacy is AllFunctionNames plus, for any function whose
+// full name exceeds PostgresMaxIdentifierLength, the name PostgreSQL itself
+// stored for it before v0.11.3 (the first 63 bytes).
+func (s *SchemaConfig) allFunctionNamesWithLegacy() []string {
+	names := s.AllFunctionNames()
+	for _, suffix := range []string{FuncSuffixUpdateUpdatedAt, FuncSuffixCleanupIdempotency} {
+		full := fmt.Sprintf("%s_%s_%s", s.prefix, HookdTableInfix, suffix)
+		if len(full) > PostgresMaxIdentifierLength {
+			names = append(names, full[:PostgresMaxIdentifierLength])
+		}
+	}
+	return names
 }
 
 // SchemaVersionComment returns the comment to be added to the main table

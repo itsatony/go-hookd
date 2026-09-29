@@ -292,31 +292,49 @@ func TestTxRepository_EveryMethodRunsInsideTheTransaction(t *testing.T) {
 	t.Run("CreateDeliveryAttempt, GetDeliveryAttempts, DeleteDelivery", func(t *testing.T) {
 		d := newDelivery(t, "", txTenant)
 		require.NoError(t, f.repo.CreateDelivery(ctx, d))
+		require.NoError(t, f.repo.CreateDeliveryAttempt(ctx, newAttempt(t, d.ID, 1)), "one committed attempt")
 		tx := f.begin(t)
 
-		a1 := newAttempt(t, d.ID, 1)
-		require.NoError(t, tx.CreateDeliveryAttempt(ctx, a1))
-		require.NoError(t, tx.CreateDeliveryAttempt(ctx, newAttempt(t, d.ID, 2)))
+		a2 := newAttempt(t, d.ID, 2)
+		require.NoError(t, tx.CreateDeliveryAttempt(ctx, a2))
 		require.NoError(t, tx.CreateDeliveryAttempt(ctx, newAttempt(t, d.ID, 3)))
 
 		atts, err := tx.GetDeliveryAttempts(ctx, d.ID)
 		require.NoError(t, err)
 		require.Len(t, atts, 3)
-		assert.Equal(t, int64(12), atts[0].DurationMs, "duration_ms must be written inside a transaction")
-		assert.Equal(t, a1.ResponseHeaders, atts[0].ResponseHeaders)
+		assert.Equal(t, int64(12), atts[1].DurationMs, "duration_ms must be written inside a transaction")
+		assert.Equal(t, a2.ResponseHeaders, atts[1].ResponseHeaders)
 
 		outside, err := f.repo.GetDeliveryAttempts(ctx, d.ID)
 		require.NoError(t, err)
-		assert.Empty(t, outside)
+		assert.Len(t, outside, 1, "only the committed attempt is visible outside")
 
 		require.NoError(t, tx.DeleteDelivery(ctx, d.ID))
 		_, err = tx.GetDelivery(ctx, d.ID)
 		assert.ErrorIs(t, err, hookd.ErrDeliveryNotFound)
+		inTx, err := tx.GetDeliveryAttempts(ctx, d.ID)
+		require.NoError(t, err)
+		assert.Empty(t, inTx, "the delivery's attempts go with it, inside the transaction")
 		assert.ErrorIs(t, tx.DeleteDelivery(ctx, d.ID), hookd.ErrDeliveryNotFound)
+		outside, err = f.repo.GetDeliveryAttempts(ctx, d.ID)
+		require.NoError(t, err)
+		assert.Len(t, outside, 1, "the uncommitted delete is invisible")
 
 		require.NoError(t, tx.Rollback())
 		_, err = f.repo.GetDelivery(ctx, d.ID)
 		require.NoError(t, err, "rollback restores the deleted delivery")
+		restored, err := f.repo.GetDeliveryAttempts(ctx, d.ID)
+		require.NoError(t, err)
+		assert.Len(t, restored, 1, "and its committed attempt")
+
+		// The pool DeleteDelivery (one statement since v0.11.3) removes both.
+		require.NoError(t, f.repo.DeleteDelivery(ctx, d.ID))
+		_, err = f.repo.GetDelivery(ctx, d.ID)
+		assert.ErrorIs(t, err, hookd.ErrDeliveryNotFound)
+		gone, err := f.repo.GetDeliveryAttempts(ctx, d.ID)
+		require.NoError(t, err)
+		assert.Empty(t, gone)
+		assert.ErrorIs(t, f.repo.DeleteDelivery(ctx, d.ID), hookd.ErrDeliveryNotFound)
 	})
 
 	t.Run("CreateDeliveryAttempt: duplicate attempt number is a conflict and poisons nothing after rollback", func(t *testing.T) {
@@ -410,10 +428,28 @@ func TestTxRepository_EveryMethodRunsInsideTheTransaction(t *testing.T) {
 		require.NotNil(t, mine, "the seeded due delivery is claimed")
 		require.NotNil(t, mine.NextRetryAt)
 
+		// The claim is the transaction's: another session skips the locked row
+		// (and, before Commit, cannot see the lease either).
+		others, err := f.repo.ClaimPendingDeliveries(ctx, 100, txLease)
+		require.NoError(t, err)
+		for _, o := range others {
+			assert.NotEqual(t, d.ID, o.ID, "a row claimed inside an open transaction is not handed to another session")
+		}
+
 		renewed, err := tx.RenewDeliveryClaim(ctx, d.ID, *mine.NextRetryAt, txLease)
 		require.NoError(t, err)
+		assert.True(t, renewed.After(*mine.NextRetryAt) || renewed.Equal(*mine.NextRetryAt))
 		require.NoError(t, tx.ReleaseDeliveryClaim(ctx, d.ID, renewed, nil))
 		require.NoError(t, tx.Commit())
+
+		// Released and committed: it is due again, and the pool claims it.
+		again, err := f.repo.ClaimPendingDeliveries(ctx, 100, txLease)
+		require.NoError(t, err)
+		found := false
+		for _, a := range again {
+			found = found || a.ID == d.ID
+		}
+		assert.True(t, found, "the released claim is back in the queue after Commit")
 	})
 
 	t.Run("CountDeliveriesByFilter, DeleteDeliveriesByFilter, GetMaintenanceStats", func(t *testing.T) {

@@ -338,7 +338,7 @@ COMMENT ON FUNCTION {{obj "cleanup_expired_idempotency"}}() IS 'Removes expired 
 -- =============================================================================
 -- SCHEMA COMPLETE
 -- =============================================================================
--- Tables created: 5 (all prefixed with {{.Prefix}}_hookd_)
+-- Tables created: 5 (all named {prefix}_hookd_*)
 -- Indexes created: 26
 -- Functions created: 2
 -- Triggers created: 2

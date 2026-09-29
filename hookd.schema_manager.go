@@ -382,11 +382,13 @@ func (m *SchemaManager) buildDropSQL() string {
 			m.schemaConfig.TableCircuitBreakerState()),
 	)
 
-	// Drop functions
-	statements = append(statements,
-		fmt.Sprintf("DROP FUNCTION IF EXISTS %s() CASCADE", m.schemaConfig.FuncUpdateUpdatedAt()),
-		fmt.Sprintf("DROP FUNCTION IF EXISTS %s() CASCADE", m.schemaConfig.FuncCleanupIdempotency()),
-	)
+	// Drop functions. A function name over 63 bytes is shortened since
+	// v0.11.3; a schema created before that holds the SERVER-truncated name
+	// instead (prefixes of 26-30 chars applied fine, silently truncated), so
+	// that legacy spelling is dropped too rather than left orphaned.
+	for _, fn := range m.schemaConfig.allFunctionNamesWithLegacy() {
+		statements = append(statements, fmt.Sprintf("DROP FUNCTION IF EXISTS %s() CASCADE", fn))
+	}
 
 	// Drop tables (in order respecting foreign keys)
 	for _, table := range []string{

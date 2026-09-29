@@ -17,14 +17,21 @@ commit messages (`git log --tags`) and in README "Upgrading to vX" sections.
   `RepositoryTx` method is tested inside a transaction on real PostgreSQL
   (visible in the tx, invisible to other sessions until Commit, undone by
   Rollback): `integration/hookd.tx_repository_integration_test.go`.
-- **Prefixes over 25 characters broke `EnsureSchema` (go-hookd#9).** Derived
-  names past PostgreSQL's 63-byte limit were truncated by the server, so
-  e.g. `idx_…_subscriptions_tenant_id` / `…_tenant_url` collided
-  (`relation … already exists`). Every derived identifier now goes through
-  the new `ShortenIdentifier` (first 54 bytes + `_` + 8 hex of sha256(full
-  name)); `SchemaConfig`'s name helpers return the real names. **Names that
-  already fit are unchanged** — prefixes of up to 25 characters (all current
-  consumers) render byte-identical DDL, so no existing schema drifts.
+- **Prefixes of 31-32 characters broke `EnsureSchema` (go-hookd#9).** Derived
+  names past PostgreSQL's 63-byte limit are truncated by the server, and from
+  31 characters two of them truncate to the same identifier
+  (`idx_…_subscriptions_tenant_id` / `…_tenant_url`: `relation … already
+  exists`). Every derived identifier now goes through the new
+  `ShortenIdentifier` (first 54 bytes + `_` + 8 hex of sha256(full name));
+  `SchemaConfig`'s name helpers return the real names.
+  - **≤25 characters (every current consumer): unchanged.** All names fit, and
+    the rendered DDL is byte-identical to v0.11.2 (pinned against a golden of
+    the released schema).
+  - **26-30 characters:** these applied before, with some names silently
+    server-truncated. An existing schema is left as it is (EnsureSchema does
+    not recreate a current schema), but the name helpers now return the
+    hashed spelling, and a recreate uses it. `DropSchema` also drops the
+    legacy truncated function name so it is not orphaned.
 - `DropSchema` dropped a misspelled circuit-breaker trigger name (harmless:
   the table drop cascaded it).
 
@@ -35,7 +42,7 @@ commit messages (`git log --tags`) and in README "Upgrading to vX" sections.
   since v0.6.0) is replaced by the `./integration/` suite.
 
 ### Added
-- `ShortenIdentifier`, `SchemaConfig.DerivedName`, `PostgresMaxIdentifierLength`.
+- `ShortenIdentifier`, `SchemaConfig.DerivedName` (+ `IdentKind*`), `PostgresMaxIdentifierLength`.
 
 ## v0.11.2 — 2026-09-29
 

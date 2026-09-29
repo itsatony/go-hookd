@@ -61,7 +61,7 @@ func TestSchemaManager_ProcessTemplate(t *testing.T) {
 
 		// Verify schema template is embedded
 		assert.NotEmpty(t, schemaTemplate, "schema template should be embedded")
-		assert.Contains(t, schemaTemplate, "{{.Prefix}}", "template should contain prefix placeholder")
+		assert.Contains(t, schemaTemplate, `{{obj "subscriptions"}}`, "template should name objects through the obj helper")
 
 		// Verify schema config works (used by processTemplate internally)
 		assert.Equal(t, "myservice", schemaConfig.Prefix())
