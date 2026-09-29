@@ -3,6 +3,62 @@
 All notable changes to go-hookd. Earlier releases are described in their tag
 commit messages (`git log --tags`) and in README "Upgrading to vX" sections.
 
+## v0.11.1 — 2026-09-29
+
+Fixes found while converging agora onto go-hookd (vAudience/agora#28).
+
+### Fixed
+- **Idempotency never deduplicated on PostgreSQL.** `StoreIdempotencyKey` was an
+  unconditional upsert, so `QueueDelivery`/`QueueInlineDelivery` with a repeated
+  key queued a second delivery (only the mock refused). It now refuses a key
+  that is still live (conflict → `NewIdempotencyError`) and takes over an
+  expired one.
+- **Every keyed `QueueInlineDelivery` failed on PostgreSQL.** The idempotency
+  scope had a foreign key to subscriptions, and an inline delivery's scope is
+  not a subscription. `EnsureSchema` drops that FK **in place** (no version
+  bump; `schemaObsoleteConstraints`), and the inline scope is now
+  `inline:` + sha256(tenant, URL) — fixed length (a URL could exceed the column)
+  and tenant-separated (one tenant's key no longer suppresses another's).
+- **A redrive re-used attempt numbers.** `RequeueDeadLetter` reset
+  `attempt_count` to 0, so the next attempt collided with the unique
+  (delivery, attempt_number) index (its record was lost) and
+  `X-Webhook-Attempt` repeated. The count now keeps rising and the budget is
+  renewed (`max_attempts += original`).
+
+- **A failed delivery insert stranded its idempotency key.** The key was stored
+  before the row; if the insert failed the key stayed live and the caller's
+  retry was refused as a duplicate — the delivery silently lost. Keyed
+  deliveries are now created first, HELD (not yet due), then the key is stored;
+  a duplicate or error deletes the held row, success releases it.
+- **Redrive budgets compounded.** `max_attempts` now renews by the ORIGINAL
+  budget, persisted in the new nullable `deliveries.attempt_budget` column
+  (added in place), and backoff restarts within each budget.
+- `DeleteSubscription` deletes the subscription's idempotency keys in the same
+  statement (the dropped FK used to cascade them). Inline scopes expire by TTL.
+- The obsolete FK is found by structure (foreign key idempotency → subscriptions),
+  not by name.
+
+### Added
+- `WithoutCircuitBreaker()`: no breaker state is read or written — for a
+  consumer with its own breaker; hookd's breaker rows are keyed by endpoint URL
+  and carry no tenant.
+
+### Security
+- Egress refuses ORCHID `2001:10::/28` and ORCHIDv2 `2001:20::/28`.
+
+### ⚠ Behaviour changes
+- A repeated live idempotency key is now refused on PostgreSQL (as documented
+  all along) — callers that relied on duplicates being accepted will see
+  `IsIdempotencyError`.
+- `RetryDeadLetter` no longer zeroes `AttemptCount`.
+- **Mixed v0.11.0/v0.11.1 fleets give no dedupe guarantee** during the rollout
+  (v0.11.0 still upserts, and uses the bare-URL inline scope). Schema changes
+  are safe both ways.
+
+### Known limits
+- Table prefixes above ~20 characters can make generated index names collide
+  after PostgreSQL's 63-byte truncation (pre-existing; tracked separately).
+
 ## v0.11.0 — 2026-09-28
 
 Correctness and security. **Consumer action is required only as listed under

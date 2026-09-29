@@ -6,6 +6,11 @@ package hookd
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/itsatony/go-cuserr"
@@ -99,30 +104,6 @@ func (m *Manager) QueueDelivery(ctx context.Context, req *QueueDeliveryRequest) 
 		return nil, NewValidationError("metadata", ErrMsgMetadataFilterMismatch)
 	}
 
-	// Store idempotency key FIRST to prevent race condition (TOCTOU)
-	// The database unique constraint will enforce atomicity
-	if req.IdempotencyKey != "" {
-		expiresAt := time.Now().Add(time.Duration(m.config.IdempotencyTTLHours) * time.Hour)
-		err := m.repo.StoreIdempotencyKey(ctx, req.IdempotencyKey, req.SubscriptionID, expiresAt)
-		if err != nil {
-			// Check if it's a conflict (duplicate key)
-			if IsConflictError(err) {
-				m.logger.Info("idempotent delivery request detected",
-					zap.String("idempotency_key", req.IdempotencyKey),
-					zap.String("subscription_id", req.SubscriptionID),
-				)
-				return nil, NewIdempotencyError(req.IdempotencyKey)
-			}
-
-			// Other database error
-			m.logger.Error("failed to store idempotency key",
-				zap.Error(err),
-				zap.String("idempotency_key", req.IdempotencyKey),
-			)
-			return nil, err
-		}
-	}
-
 	// Generate delivery ID
 	id, err := GenerateDeliveryID()
 	if err != nil {
@@ -149,8 +130,12 @@ func (m *Manager) QueueDelivery(ctx context.Context, req *QueueDeliveryRequest) 
 		IdempotencyKey: req.IdempotencyKey,
 	}
 
-	// Persist delivery
-	if err := m.repo.CreateDelivery(ctx, delivery); err != nil {
+	// Persist delivery (atomically with its idempotency key, see
+	// createWithIdempotency)
+	if err := m.createWithIdempotency(ctx, delivery, req.IdempotencyKey, req.SubscriptionID); err != nil {
+		if IsIdempotencyError(err) {
+			return nil, err
+		}
 		m.logger.Error("failed to create delivery",
 			zap.Error(err),
 			zap.String("subscription_id", req.SubscriptionID),
@@ -217,27 +202,6 @@ func (m *Manager) QueueInlineDelivery(ctx context.Context, req *QueueInlineDeliv
 		return nil, err
 	}
 
-	// Handle idempotency
-	if req.IdempotencyKey != "" {
-		expiresAt := time.Now().Add(time.Duration(m.config.IdempotencyTTLHours) * time.Hour)
-		// Use URL as "subscription_id" substitute for idempotency scope
-		err := m.repo.StoreIdempotencyKey(ctx, req.IdempotencyKey, req.URL, expiresAt)
-		if err != nil {
-			if IsConflictError(err) {
-				m.logger.Info("idempotent inline delivery request detected",
-					zap.String("idempotency_key", req.IdempotencyKey),
-					zap.String("url", req.URL),
-				)
-				return nil, NewIdempotencyError(req.IdempotencyKey)
-			}
-			m.logger.Error("failed to store idempotency key",
-				zap.Error(err),
-				zap.String("idempotency_key", req.IdempotencyKey),
-			)
-			return nil, err
-		}
-	}
-
 	// Generate delivery ID
 	id, err := GenerateDeliveryID()
 	if err != nil {
@@ -272,8 +236,12 @@ func (m *Manager) QueueInlineDelivery(ctx context.Context, req *QueueInlineDeliv
 		// SubscriptionID is empty for inline deliveries
 	}
 
-	// Persist delivery
-	if err := m.repo.CreateDelivery(ctx, delivery); err != nil {
+	// Persist delivery (atomically with its idempotency key)
+	if err := m.createWithIdempotency(ctx, delivery, req.IdempotencyKey,
+		inlineIdempotencyScope(req.TenantID, delivery.URL)); err != nil {
+		if IsIdempotencyError(err) {
+			return nil, err
+		}
 		m.logger.Error("failed to create inline delivery",
 			zap.Error(err),
 			zap.String("url", req.URL),
@@ -495,4 +463,89 @@ func (m *Manager) ListDeliveries(ctx context.Context, filter *DeliveryFilter) ([
 	}
 
 	return deliveries, nil
+}
+
+// inlineIdempotencyScope is the idempotency scope of an inline delivery:
+// "inline:" + hex(sha256(tenantID NUL url)) — fixed length, tenant-separated.
+// The host is compared case-insensitively (RFC 3986 §3.2.2), which normalizeURL
+// does not do.
+func inlineIdempotencyScope(tenantID, rawURL string) string {
+	if u, err := url.Parse(rawURL); err == nil {
+		u.Scheme = strings.ToLower(u.Scheme)
+		u.Host = strings.ToLower(u.Host)
+		rawURL = u.String()
+	}
+	sum := sha256.Sum256([]byte(tenantID + "\x00" + rawURL))
+	return InlineIdempotencyScopePrefix + hex.EncodeToString(sum[:])
+}
+
+// createWithIdempotency persists delivery and, when key is set, its idempotency
+// key — so that neither can survive without the other in a way that loses or
+// duplicates a delivery:
+//
+//   - The row is created first, HELD (next_retry_at = now + IdempotencyHold), so
+//     no worker can claim it yet. A failed insert stores no key, so the caller's
+//     retry is not mistaken for a duplicate (until v0.11.1 the key was stored
+//     first, and a failed insert left it live: the retry was refused and the
+//     delivery silently lost).
+//   - The key is then stored; a live duplicate (conflict) deletes the held
+//     row. Any OTHER error is ambiguous (the key may have committed), so the
+//     held row is kept and delivered after the hold.
+//   - Success releases the hold (the row becomes due at its original time). If
+//     the release write fails the delivery is merely late by IdempotencyHold.
+//
+// A crash between the insert and the key leaves a held row with no key: it is
+// delivered after the hold and a retry may queue it again — at-least-once,
+// never lost.
+func (m *Manager) createWithIdempotency(ctx context.Context, delivery *Delivery, key, scope string) error {
+	if key == "" {
+		return m.repo.CreateDelivery(ctx, delivery)
+	}
+	due := time.Now()
+	if delivery.NextRetryAt != nil {
+		due = *delivery.NextRetryAt
+	}
+	hold := time.Now().Add(IdempotencyHold)
+	delivery.NextRetryAt = &hold
+	if err := m.repo.CreateDelivery(ctx, delivery); err != nil {
+		return err
+	}
+
+	expiresAt := time.Now().Add(time.Duration(m.config.IdempotencyTTLHours) * time.Hour)
+	if err := m.repo.StoreIdempotencyKey(ctx, key, scope, expiresAt); err != nil {
+		if !IsConflictError(err) {
+			// AMBIGUOUS (e.g. the connection dropped after the INSERT
+			// committed): the key may be live. Deleting the row could lose the
+			// delivery, so the held row is KEPT and becomes due after the hold —
+			// at worst a retry queues it twice (at-least-once), never lost.
+			m.logger.Warn(LogMsgIdempotencyStoreAmbiguous,
+				zap.String(LogFieldDeliveryID, delivery.ID),
+				zap.String(LogFieldErrorType, fmt.Sprintf("%T", err)),
+			)
+			return err
+		}
+		// A definite live duplicate: our held row must never be sent.
+		delCtx, delCancel := context.WithTimeout(context.WithoutCancel(ctx), DeliveryBookkeepingTimeout)
+		delErr := m.repo.DeleteDelivery(delCtx, delivery.ID)
+		delCancel()
+		if delErr != nil {
+			m.logger.Error(LogMsgIdempotencyHeldRowNotDeleted,
+				zap.String(LogFieldDeliveryID, delivery.ID),
+				zap.Error(delErr),
+			)
+		}
+		m.logger.Info("idempotent delivery request detected",
+			zap.String("idempotency_key", key),
+		)
+		return NewIdempotencyError(key)
+	}
+
+	delivery.NextRetryAt = &due
+	if err := m.repo.UpdateDelivery(ctx, delivery); err != nil {
+		m.logger.Warn(LogMsgIdempotencyHoldNotReleased,
+			zap.String(LogFieldDeliveryID, delivery.ID),
+			zap.Error(err),
+		)
+	}
+	return nil
 }

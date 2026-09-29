@@ -1429,7 +1429,10 @@ func TestE2E_DeadLetterQueueLifecycle(t *testing.T) {
 	retriedDelivery, err := manager.RetryDeadLetter(ctx, delivery.ID)
 	require.NoError(t, err)
 	assert.Equal(t, DeliveryStatusPending, retriedDelivery.Status)
-	assert.Equal(t, 0, retriedDelivery.AttemptCount)
+	// v0.11.1: attempts keep counting and the budget is renewed, so attempt
+	// numbers never repeat across a redrive.
+	assert.Equal(t, 2, retriedDelivery.AttemptCount)
+	assert.Equal(t, 2+delivery.MaxAttempts, retriedDelivery.MaxAttempts)
 	t.Log("RetryDeadLetter reset delivery to pending status")
 
 	// Step 5: Wait for retried delivery to succeed

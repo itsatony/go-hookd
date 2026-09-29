@@ -220,6 +220,10 @@ const (
 	// ClaimQueryTimeout bounds one claim query (ClaimPendingDeliveries).
 	ClaimQueryTimeout = 10 * time.Second
 
+	// IdempotencyHold is how long a keyed delivery is created NOT-yet-due while
+	// its idempotency key is being stored (see Manager.createWithIdempotency).
+	IdempotencyHold = 30 * time.Second
+
 	// ClaimRenewTimeout bounds the pre-send RenewDeliveryClaim. It is below
 	// MinClaimLeaseMarginMs, so a slow renewal can never push the attempt past
 	// its lease (the attempt deadline is measured from before the renewal).
@@ -507,6 +511,13 @@ const (
 	// 1-255 bytes of visible ASCII (it is sent as a header).
 	ErrMsgInvalidIdempotencyKey = "idempotency_key must be at most 255 printable ASCII characters"
 
+	// ErrMsgDuplicateIdempotencyKey: the key is still live in its scope.
+	ErrMsgDuplicateIdempotencyKey = "duplicate idempotency key"
+
+	// InlineIdempotencyScopePrefix prefixes the idempotency scope of an inline
+	// delivery (see inlineIdempotencyScope).
+	InlineIdempotencyScopePrefix = "inline:"
+
 	// MaxIdempotencyKeyLength is the longest accepted idempotency key.
 	MaxIdempotencyKeyLength = 255
 
@@ -652,7 +663,7 @@ const (
 	// the build carries no module version for go-hookd (tests, a replace
 	// directive, a local checkout). It must equal versions.yaml project.version;
 	// TestUserAgentVersionMatchesManifest fails the release otherwise.
-	UserAgentVersion = "0.11.0"
+	UserAgentVersion = "0.11.1"
 
 	// ModulePath is this module's import path, looked up in the build info.
 	ModulePath = "github.com/itsatony/go-hookd"
@@ -762,6 +773,18 @@ const (
 	// LogFieldConfiguredBatchSize / LogFieldEffectiveBatchSize accompany it.
 	LogFieldConfiguredBatchSize = "configured_batch_size"
 	LogFieldEffectiveBatchSize  = "effective_batch_size"
+
+	// LogMsgIdempotencyHeldRowNotDeleted: a duplicate's held row could not be
+	// removed and will be delivered after IdempotencyHold.
+	LogMsgIdempotencyHeldRowNotDeleted = "idempotent duplicate: held delivery could not be deleted"
+
+	// LogMsgIdempotencyStoreAmbiguous: storing the key failed ambiguously; the
+	// held row is kept (delivered after IdempotencyHold).
+	LogMsgIdempotencyStoreAmbiguous = "idempotency key store failed ambiguously; held delivery kept"
+
+	// LogMsgIdempotencyHoldNotReleased: the hold could not be lifted; the
+	// delivery is late by IdempotencyHold.
+	LogMsgIdempotencyHoldNotReleased = "idempotency hold not released; delivery delayed"
 
 	// LogFieldTenantID is the log field naming a tenant.
 	LogFieldTenantID = "tenant_id"

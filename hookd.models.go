@@ -63,6 +63,30 @@ type Delivery struct {
 	// delivery events. ⚠ It is visible to the receiver and to every EventBus
 	// subscriber: never put sensitive data in it.
 	IdempotencyKey string `json:"idempotency_key,omitempty" db:"idempotency_key"`
+	// AttemptBudget is the retry budget the delivery was queued with (0 = not
+	// recorded: MaxAttempts is the budget). RequeueDeadLetter renews exactly
+	// this many attempts, and backoff restarts within each budget (v0.11.1).
+	AttemptBudget int `json:"attempt_budget,omitempty" db:"attempt_budget"`
+}
+
+// attemptBudgetOrMax is the budget to record for a new delivery.
+func (d *Delivery) attemptBudgetOrMax() int {
+	if d.AttemptBudget > 0 {
+		return d.AttemptBudget
+	}
+	return d.MaxAttempts
+}
+
+// attemptInBudget is the 1-based attempt number within the current budget —
+// what the backoff schedule is computed from, so a redriven delivery starts a
+// fresh schedule instead of at MaxBackoff.
+func (d *Delivery) attemptInBudget() int {
+	budget := d.attemptBudgetOrMax()
+	n := d.AttemptCount - (d.MaxAttempts - budget)
+	if n < 1 {
+		return 1
+	}
+	return n
 }
 
 // DeliveryAttempt represents a single delivery attempt.

@@ -736,7 +736,7 @@ func TestManager_HTTPClientErrors(t *testing.T) {
 
 		// Create a test server that delays response
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			time.Sleep(100 * time.Millisecond) // Longer than timeout
+			time.Sleep(500 * time.Millisecond) // well past the 100ms client timeout
 			w.WriteHeader(http.StatusOK)
 		}))
 		defer server.Close()

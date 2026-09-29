@@ -482,7 +482,10 @@ func (r *TransactionalRepository) RenewDeliveryClaim(ctx context.Context, id str
 // RequeueDeadLetter re-queues a dead letter only if it is still dead-lettered.
 func (r *TransactionalRepository) RequeueDeadLetter(ctx context.Context, id string) (*hookd.Delivery, error) {
 	res, err := r.tx.ExecContext(ctx, fmt.Sprintf(`UPDATE %s
-		SET status = $2, attempt_count = 0, next_retry_at = NOW(), completed_at = NULL
+		SET status = $2,
+		    max_attempts = attempt_count + COALESCE(attempt_budget, max_attempts),
+		    attempt_budget = COALESCE(attempt_budget, max_attempts),
+		    next_retry_at = NOW(), completed_at = NULL
 		WHERE id = $1 AND status = $3`, r.schemaConfig.TableDeliveries()),
 		id, hookd.DeliveryStatusPending, hookd.DeliveryStatusDeadLetter)
 	if err != nil {

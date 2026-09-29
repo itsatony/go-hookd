@@ -127,6 +127,10 @@ CREATE TABLE {{.Prefix}}_hookd_deliveries (
     -- (v0.11.0; added to existing schemas additively by EnsureSchema)
     idempotency_key VARCHAR(255),
 
+    -- The retry budget the delivery was queued with; a dead-letter redrive
+    -- renews exactly this much (v0.11.1; added in place by EnsureSchema)
+    attempt_budget INTEGER,
+
     -- Constraints
     CONSTRAINT chk_{{.Prefix}}_hookd_deliveries_status CHECK (status IN ('pending', 'success', 'failed', 'dead_letter')),
     CONSTRAINT chk_{{.Prefix}}_hookd_deliveries_attempts CHECK (attempt_count >= 0),
@@ -232,14 +236,11 @@ CREATE TABLE {{.Prefix}}_hookd_idempotency_store (
     -- Timestamps
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
 
-    -- Primary key
-    PRIMARY KEY (idempotency_key, subscription_id),
-
-    -- Foreign keys
-    CONSTRAINT fk_{{.Prefix}}_hookd_idempotency_subscription
-        FOREIGN KEY (subscription_id)
-        REFERENCES {{.Prefix}}_hookd_subscriptions(id)
-        ON DELETE CASCADE
+    -- Primary key. subscription_id is the idempotency SCOPE: a subscription
+    -- id, or "inline:<sha256(tenant, url)>" for inline deliveries — so it has
+    -- no foreign key (v0.11.1: the former FK made every keyed inline delivery
+    -- fail). Rows expire via expires_at.
+    PRIMARY KEY (idempotency_key, subscription_id)
 );
 
 -- Indexes for idempotency store

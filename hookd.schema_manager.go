@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/itsatony/go-cuserr"
+	"github.com/lib/pq"
 )
 
 //go:embed schema.sql
@@ -449,14 +450,18 @@ type additiveColumn struct {
 var schemaAdditiveColumns = []additiveColumn{
 	// v0.11.0 (go-hookd#2): the queuer's key, sent as X-Webhook-Idempotency-Key.
 	{tableSuffix: TableSuffixDeliveries, column: "idempotency_key", sqlType: "VARCHAR(255)"},
+	// v0.11.1: the original retry budget, renewed (not compounded) by a redrive.
+	{tableSuffix: TableSuffixDeliveries, column: "attempt_budget", sqlType: "INTEGER"},
 }
 
 // Operation names and statements for additive schema changes.
 const (
-	sqlSetAdditiveLockTimeout = "SET lock_timeout = '5s'"
-	sqlResetLockTimeout       = "RESET lock_timeout"
-	opCheckAdditiveColumns    = "check_additive_columns"
-	opAddAdditiveColumn       = "add_additive_column"
+	sqlSetAdditiveLockTimeout  = "SET lock_timeout = '5s'"
+	sqlResetLockTimeout        = "RESET lock_timeout"
+	opCheckAdditiveColumns     = "check_additive_columns"
+	opAddAdditiveColumn        = "add_additive_column"
+	opDropObsoleteConstraint   = "drop_obsolete_constraint"
+	opCheckObsoleteConstraints = "check_obsolete_constraints"
 )
 
 // missingAdditiveColumns lists the additive columns the schema lacks.
@@ -488,11 +493,19 @@ func (m *SchemaManager) missingAdditiveColumns(ctx context.Context, q querier) (
 // schema lock and re-checks, so concurrent boots add each column once.
 func (m *SchemaManager) ensureAdditiveColumns(ctx context.Context) error {
 	missing, err := m.missingAdditiveColumns(ctx, m.db)
-	if err != nil || len(missing) == 0 {
+	if err != nil {
+		return err
+	}
+	obsolete, err := m.presentObsoleteConstraints(ctx, m.db)
+	if err != nil || (len(missing) == 0 && len(obsolete) == 0) {
 		return err
 	}
 	return m.withSchemaLock(ctx, func(conn *sql.Conn) error {
 		missing, err := m.missingAdditiveColumns(ctx, conn)
+		if err != nil {
+			return err
+		}
+		obsolete, err := m.presentObsoleteConstraints(ctx, conn)
 		if err != nil {
 			return err
 		}
@@ -515,6 +528,79 @@ func (m *SchemaManager) ensureAdditiveColumns(ctx context.Context) error {
 				)
 			}
 		}
+		for _, c := range obsolete {
+			stmt := fmt.Sprintf(`ALTER TABLE %s DROP CONSTRAINT IF EXISTS %s`,
+				c.table, pq.QuoteIdentifier(c.name))
+			if _, err := conn.ExecContext(ctx, stmt); err != nil {
+				return cuserr.NewExternalError("database", "postgres", err,
+					cuserr.WithMetadata("operation", opDropObsoleteConstraint),
+				)
+			}
+		}
 		return nil
 	})
+}
+
+// obsoleteForeignKey is a baseline foreign key later releases removed IN PLACE
+// (same no-version-bump rule as additiveColumn: dropping a constraint is
+// invisible to older binaries). It is identified by STRUCTURE — a foreign key
+// from tableSuffix to refTableSuffix — never by name: PostgreSQL truncates
+// identifiers to 63 bytes, so for long prefixes the stored name differs from
+// the one schema.sql spelled.
+type obsoleteForeignKey struct {
+	tableSuffix    string
+	refTableSuffix string
+}
+
+// schemaObsoleteForeignKeys are dropped from existing schemas by EnsureSchema.
+var schemaObsoleteForeignKeys = []obsoleteForeignKey{
+	// v0.11.1: an inline delivery's idempotency scope is not a subscription
+	// id, so this FK made every keyed QueueInlineDelivery fail.
+	{tableSuffix: TableSuffixIdempotencyStore, refTableSuffix: TableSuffixSubscriptions},
+}
+
+// presentObsoleteConstraint is one constraint to drop.
+type presentObsoleteConstraint struct {
+	table string
+	name  string
+}
+
+// presentObsoleteConstraints lists the obsolete foreign keys the schema still
+// has, by their stored names (tables resolved via to_regclass, like the DDL).
+func (m *SchemaManager) presentObsoleteConstraints(ctx context.Context, q querier) ([]presentObsoleteConstraint, error) {
+	rq, ok := q.(interface {
+		QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	})
+	if !ok {
+		return nil, cuserr.NewInternalError("schema_manager", nil,
+			cuserr.WithMetadata("operation", opCheckObsoleteConstraints))
+	}
+	var present []presentObsoleteConstraint
+	for _, fk := range schemaObsoleteForeignKeys {
+		table := m.schemaConfig.tableName(fk.tableSuffix)
+		rows, err := rq.QueryContext(ctx, `
+			SELECT conname FROM pg_constraint
+			WHERE contype = 'f' AND conrelid = to_regclass($1) AND confrelid = to_regclass($2)`,
+			table, m.schemaConfig.tableName(fk.refTableSuffix))
+		if err != nil {
+			return nil, cuserr.NewExternalError("database", "postgres", err,
+				cuserr.WithMetadata("operation", opCheckObsoleteConstraints))
+		}
+		for rows.Next() {
+			var name string
+			if err := rows.Scan(&name); err != nil {
+				_ = rows.Close()
+				return nil, cuserr.NewExternalError("database", "postgres", err,
+					cuserr.WithMetadata("operation", opCheckObsoleteConstraints))
+			}
+			present = append(present, presentObsoleteConstraint{table: table, name: name})
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, cuserr.NewExternalError("database", "postgres", err,
+				cuserr.WithMetadata("operation", opCheckObsoleteConstraints))
+		}
+		_ = rows.Close()
+	}
+	return present, nil
 }

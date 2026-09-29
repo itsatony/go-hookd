@@ -1,6 +1,8 @@
 package hookd
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -27,3 +29,18 @@ func claimForTest(t *testing.T, m *Manager, delivery *Delivery) *Delivery {
 
 // testClaimLease is the lease tests claim with directly through a repository.
 const testClaimLease = time.Minute
+
+// httptestServer starts a 200-OK receiver calling onRequest, returning its URL.
+func httptestServer(t *testing.T, onRequest func(*http.Request)) string {
+	t.Helper()
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		onRequest(r)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(s.Close)
+	return s.URL
+}
+
+func cuserrInternalForTest() error {
+	return NewConfigurationError("test", "injected create failure")
+}
