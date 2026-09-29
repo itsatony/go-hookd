@@ -84,7 +84,9 @@ Read these files IN FULL before starting any work:
 - Triggers: `trg_{prefix}_hookd_{table}_{event}`
 - Functions: `{prefix}_hookd_{name}()`
 - Constraints: `chk_{prefix}_hookd_{table}_{rule}` or `fk_{prefix}_hookd_{table}_{ref}`
+- Every derived identifier goes through `ShortenIdentifier` (v0.11.4, go-hookd#9): >63 bytes → first 54 + `_` + 8 hex of sha256; names that fit are UNCHANGED (prefixes ≤25 chars never shorten). schema.sql spells names only via the `obj`/`ident` template funcs (pinned by `TestSchemaTemplate_SpellsEveryIdentifierThroughTheHelpers`)
 - Schema managed via `SchemaManager.EnsureSchema(ctx)` - single baseline, no incremental migrations
+- `PostgresRepository` and `PostgresRepositoryTx` share ONE implementation (`pgStore` over `claimExecer`, v0.11.4, go-hookd#8); never add a query method to the tx type (pinned by `TestPostgresRepositoryTx_HasNoQueriesOfItsOwn`)
 
 **Separation of Concerns**:
 - Package provides webhook management logic ONLY

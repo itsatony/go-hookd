@@ -663,7 +663,7 @@ const (
 	// the build carries no module version for go-hookd (tests, a replace
 	// directive, a local checkout). It must equal versions.yaml project.version;
 	// TestUserAgentVersionMatchesManifest fails the release otherwise.
-	UserAgentVersion = "0.11.2"
+	UserAgentVersion = "0.11.4"
 
 	// ModulePath is this module's import path, looked up in the build info.
 	ModulePath = "github.com/itsatony/go-hookd"

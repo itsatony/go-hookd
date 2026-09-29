@@ -58,8 +58,8 @@ func cleanupRepos(t *testing.T) map[string]interface {
 		CountDeliveriesByFilter(ctx context.Context, filter *CleanupFilter) (int64, error)
 		DeleteDeliveriesByFilter(ctx context.Context, filter *CleanupFilter) (int64, error)
 	}{
-		"postgres":    &PostgresRepository{schemaConfig: schema},
-		"postgres_tx": &PostgresRepositoryTx{schemaConfig: schema},
+		"postgres":    &PostgresRepository{pgStore: pgStore{schemaConfig: schema}},
+		"postgres_tx": &PostgresRepositoryTx{pgStore: pgStore{schemaConfig: schema}},
 		"mock":        mock,
 		"mock_tx":     mockTx,
 	}

@@ -240,13 +240,8 @@ func pgRequeueDeadLetter(ctx context.Context, q claimExecer, table, id string) (
 }
 
 // RequeueDeadLetter re-queues a dead letter atomically (see Repository).
-func (r *PostgresRepository) RequeueDeadLetter(ctx context.Context, id string) (*Delivery, error) {
-	return pgRequeueDeadLetter(ctx, r.db, r.schemaConfig.TableDeliveries(), id)
-}
-
-// RequeueDeadLetter re-queues a dead letter atomically within the transaction.
-func (r *PostgresRepositoryTx) RequeueDeadLetter(ctx context.Context, id string) (*Delivery, error) {
-	return pgRequeueDeadLetter(ctx, r.tx, r.schemaConfig.TableDeliveries(), id)
+func (r *pgStore) RequeueDeadLetter(ctx context.Context, id string) (*Delivery, error) {
+	return pgRequeueDeadLetter(ctx, r.q, r.schemaConfig.TableDeliveries(), id)
 }
 
 // mockRequeue is RequeueDeadLetter over a mock's map; the caller holds the lock.
@@ -287,35 +282,18 @@ func (tx *MockRepositoryTx) RequeueDeadLetter(ctx context.Context, id string) (*
 }
 
 // ClaimPendingDeliveries claims up to limit due deliveries (see Repository).
-func (r *PostgresRepository) ClaimPendingDeliveries(ctx context.Context, limit int, lease time.Duration) ([]*Delivery, error) {
-	return pgClaimPendingDeliveries(ctx, r.db, r.schemaConfig.TableDeliveries(), limit, lease)
+func (r *pgStore) ClaimPendingDeliveries(ctx context.Context, limit int, lease time.Duration) ([]*Delivery, error) {
+	return pgClaimPendingDeliveries(ctx, r.q, r.schemaConfig.TableDeliveries(), limit, lease)
 }
 
 // RenewDeliveryClaim re-arms a held claim (see Repository).
-func (r *PostgresRepository) RenewDeliveryClaim(ctx context.Context, id string, claimedUntil time.Time, lease time.Duration) (time.Time, error) {
-	return pgRenewDeliveryClaim(ctx, r.db, r.schemaConfig.TableDeliveries(), id, claimedUntil, lease)
+func (r *pgStore) RenewDeliveryClaim(ctx context.Context, id string, claimedUntil time.Time, lease time.Duration) (time.Time, error) {
+	return pgRenewDeliveryClaim(ctx, r.q, r.schemaConfig.TableDeliveries(), id, claimedUntil, lease)
 }
 
 // ReleaseDeliveryClaim returns a held, unsent delivery to the queue (see Repository).
-func (r *PostgresRepository) ReleaseDeliveryClaim(ctx context.Context, id string, claimedUntil time.Time, retryAt *time.Time) error {
-	return pgReleaseDeliveryClaim(ctx, r.db, r.schemaConfig.TableDeliveries(), id, claimedUntil, retryAt)
-}
-
-// ClaimPendingDeliveries claims within the transaction; the claim becomes
-// visible to other claimers when the transaction commits (until then the rows
-// stay locked by it).
-func (r *PostgresRepositoryTx) ClaimPendingDeliveries(ctx context.Context, limit int, lease time.Duration) ([]*Delivery, error) {
-	return pgClaimPendingDeliveries(ctx, r.tx, r.schemaConfig.TableDeliveries(), limit, lease)
-}
-
-// RenewDeliveryClaim re-arms a held claim within the transaction.
-func (r *PostgresRepositoryTx) RenewDeliveryClaim(ctx context.Context, id string, claimedUntil time.Time, lease time.Duration) (time.Time, error) {
-	return pgRenewDeliveryClaim(ctx, r.tx, r.schemaConfig.TableDeliveries(), id, claimedUntil, lease)
-}
-
-// ReleaseDeliveryClaim returns a held, unsent delivery within the transaction.
-func (r *PostgresRepositoryTx) ReleaseDeliveryClaim(ctx context.Context, id string, claimedUntil time.Time, retryAt *time.Time) error {
-	return pgReleaseDeliveryClaim(ctx, r.tx, r.schemaConfig.TableDeliveries(), id, claimedUntil, retryAt)
+func (r *pgStore) ReleaseDeliveryClaim(ctx context.Context, id string, claimedUntil time.Time, retryAt *time.Time) error {
+	return pgReleaseDeliveryClaim(ctx, r.q, r.schemaConfig.TableDeliveries(), id, claimedUntil, retryAt)
 }
 
 // =============================================================================

@@ -25,6 +25,12 @@ import (
 //go:embed schema.sql
 var schemaTemplate string
 
+// Template functions schema.sql spells every identifier with (go-hookd#9).
+const (
+	schemaTemplateFuncObject = "obj"
+	schemaTemplateFuncIdent  = "ident"
+)
+
 // schemaVersionPattern extracts version from table comment.
 // Expected format: "go-hookd schema v0.6.0 - ..."
 var schemaVersionPattern = regexp.MustCompile(`go-hookd schema v(\d+\.\d+\.\d+)`)
@@ -333,7 +339,12 @@ func (m *SchemaManager) getSchemaVersion(ctx context.Context, q querier) (exists
 
 // processTemplate processes the schema.sql template with the configured prefix.
 func (m *SchemaManager) processTemplate() (string, error) {
-	tmpl, err := template.New("schema").Parse(schemaTemplate)
+	tmpl, err := template.New("schema").Funcs(template.FuncMap{
+		// {prefix}_hookd_{name}: tables and functions.
+		schemaTemplateFuncObject: m.schemaConfig.tableName,
+		// {kind}_{prefix}_hookd_{rest}: indexes, constraints, triggers.
+		schemaTemplateFuncIdent: m.schemaConfig.DerivedName,
+	}).Parse(schemaTemplate)
 	if err != nil {
 		return "", cuserr.NewInternalError("template", err,
 			cuserr.WithMetadata("operation", "parse_template"),
@@ -367,15 +378,17 @@ func (m *SchemaManager) buildDropSQL() string {
 			m.schemaConfig.TriggerName("subscriptions", "updated_at"),
 			m.schemaConfig.TableSubscriptions()),
 		fmt.Sprintf("DROP TRIGGER IF EXISTS %s ON %s",
-			m.schemaConfig.TriggerName("circuit_breaker_state", "updated_at"),
+			m.schemaConfig.TriggerName("circuit_breaker", "updated_at"),
 			m.schemaConfig.TableCircuitBreakerState()),
 	)
 
-	// Drop functions
-	statements = append(statements,
-		fmt.Sprintf("DROP FUNCTION IF EXISTS %s() CASCADE", m.schemaConfig.FuncUpdateUpdatedAt()),
-		fmt.Sprintf("DROP FUNCTION IF EXISTS %s() CASCADE", m.schemaConfig.FuncCleanupIdempotency()),
-	)
+	// Drop functions. A function name over 63 bytes is shortened since
+	// v0.11.4; a schema created before that holds the SERVER-truncated name
+	// instead (prefixes of 26-30 chars applied fine, silently truncated), so
+	// that legacy spelling is dropped too rather than left orphaned.
+	for _, fn := range m.schemaConfig.allFunctionNamesWithLegacy() {
+		statements = append(statements, fmt.Sprintf("DROP FUNCTION IF EXISTS %s() CASCADE", fn))
+	}
 
 	// Drop tables (in order respecting foreign keys)
 	for _, table := range []string{

@@ -3,6 +3,54 @@
 All notable changes to go-hookd. Earlier releases are described in their tag
 commit messages (`git log --tags`) and in README "Upgrading to vX" sections.
 
+## v0.11.4 — 2026-09-29
+
+The release below. **v0.11.3 is retracted:** its tag was created in error on
+the v0.11.2 commit (f782aaa), so `go get …@v0.11.3` resolves to v0.11.2's
+code. `go.mod` retracts it; use v0.11.4.
+
+
+### Fixed
+- **`BeginTx` was unusable on PostgreSQL (go-hookd#8).** Every CRUD method of
+  `PostgresRepositoryTx` still named the pre-v0.6.0 unprefixed tables and an
+  11-column delivery list (the tx insert also dropped `filters`, `url`,
+  `secret`, `idempotency_key`, `attempt_budget`, `duration_ms`), so any call
+  inside a transaction failed. The data operations now exist ONCE, on an
+  embedded `pgStore` bound to either the pool or the transaction, so the two
+  types run the same SQL. `DeleteDelivery` is a single statement (it no longer
+  opens its own transaction), so it too joins the caller's. Every
+  `RepositoryTx` method is tested inside a transaction on real PostgreSQL
+  (visible in the tx, invisible to other sessions until Commit, undone by
+  Rollback): `integration/hookd.tx_repository_integration_test.go`.
+- **Prefixes of 31-32 characters broke `EnsureSchema` (go-hookd#9).** Derived
+  names past PostgreSQL's 63-byte limit are truncated by the server, and from
+  31 characters two of them truncate to the same identifier
+  (`idx_…_subscriptions_tenant_id` / `…_tenant_url`: `relation … already
+  exists`). Every derived identifier now goes through the new
+  `ShortenIdentifier` (first 54 bytes + `_` + 8 hex of sha256(full name));
+  `SchemaConfig`'s name helpers return the real names.
+  - **≤25 characters (every current consumer): unchanged.** All names fit, and
+    the rendered DDL is byte-identical to v0.11.2 (pinned against a golden of
+    the released schema).
+  - **26-30 characters:** these applied before, with some names silently
+    server-truncated. An existing schema is left as it is (EnsureSchema does
+    not recreate a current schema), but the name helpers now return the
+    hashed spelling, and a recreate uses it. `DropSchema` also drops the
+    legacy truncated function name so it is not orphaned (schema.sql's own
+    drop-and-recreate, which only runs on a future `SchemaVersion` bump, does
+    not yet — add the legacy drop to the template with that bump).
+- `DropSchema` dropped a misspelled circuit-breaker trigger name (harmless:
+  the table drop cascaded it).
+
+### Changed
+- A too-long prefix is refused at construction with the offending length
+  (`ErrMsgPrefixTooLongDetail`). `MaxPrefixLength` stays 32.
+- The root package's stale `-tags=integration` tx test (it had not compiled
+  since v0.6.0) is replaced by the `./integration/` suite.
+
+### Added
+- `ShortenIdentifier`, `SchemaConfig.DerivedName` (+ `IdentKind*`), `PostgresMaxIdentifierLength`.
+
 ## v0.11.2 — 2026-09-29
 
 ### Fixed
