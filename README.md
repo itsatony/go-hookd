@@ -6,7 +6,7 @@ A webhook delivery management library for Go applications. Handles webhook subsc
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Test Coverage](https://img.shields.io/badge/coverage-60%25-yellow.svg)](https://github.com/itsatony/go-hookd)
 
-> **Status**: Production Ready (v0.11.1)
+> **Status**: Production Ready (v0.11.2)
 > Core functionality is implemented, tested, and production-ready. The API is stable with comprehensive test coverage.
 >
 > ⚠ **v0.8.0 BREAKING BEHAVIOUR — default-deny egress guard.** Deliveries and
@@ -1222,7 +1222,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for full guidelines.
 
 ## Project Status
 
-**Current Version**: v0.11.1 (Production Ready)
+**Current Version**: v0.11.2 (Production Ready)
 
 **What's Implemented:**
 - ✓ Core subscription and delivery management

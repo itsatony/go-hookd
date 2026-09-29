@@ -5,7 +5,11 @@ package integration_test
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -116,4 +120,54 @@ func TestEnsureSchema_DropsObsoleteFKWhateverItsName(t *testing.T) {
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM pg_constraint WHERE contype = 'f'
 		AND conrelid = to_regclass($1)`, claimPrefix+"_hookd_idempotency_store").Scan(&n))
 	assert.Equal(t, 0, n)
+}
+
+// TestDeadLetterRedrive_AttemptRowsKeepRisingOnPostgres: attempt rows [1,2]
+// across a dead letter and a redrive, never a collision (v0.11.2).
+func TestDeadLetterRedrive_AttemptRowsKeepRisingOnPostgres(t *testing.T) {
+	dsn := setupClaimSchema(t)
+	status := atomic.Int32{}
+	status.Store(http.StatusInternalServerError)
+	var mu sync.Mutex
+	var got []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		got = append(got, r.Header.Get(hookd.HeaderAttemptNumber))
+		mu.Unlock()
+		w.WriteHeader(int(status.Load()))
+	}))
+	t.Cleanup(srv.Close)
+	repo := newRepo(t, dsn)
+	ctx := context.Background()
+	id, err := hookd.GenerateDeliveryID()
+	require.NoError(t, err)
+	require.NoError(t, repo.CreateDelivery(ctx, &hookd.Delivery{ID: id, TenantID: e2eTenant, EventType: "e",
+		Payload: map[string]any{}, URL: srv.URL, Status: hookd.DeliveryStatusPending, MaxAttempts: 1}))
+	cfg := hookd.NewConfig(dsn)
+	cfg.QueuePollInterval = 10
+	cfg.QueueIdleMaxInterval = 50
+	m, err := hookd.NewManager(cfg, repo, hookd.WithAllowPrivateDestinations())
+	require.NoError(t, err)
+	require.NoError(t, m.Start(ctx))
+	t.Cleanup(func() { _ = m.Stop() })
+
+	require.Eventually(t, func() bool {
+		d, err := repo.GetDelivery(ctx, id)
+		return err == nil && d.Status == hookd.DeliveryStatusDeadLetter
+	}, 10*time.Second, 20*time.Millisecond)
+	status.Store(http.StatusOK)
+	_, err = m.RetryDeadLetter(ctx, id)
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		d, err := repo.GetDelivery(ctx, id)
+		return err == nil && d.Status == hookd.DeliveryStatusSuccess
+	}, 10*time.Second, 20*time.Millisecond)
+	attempts, err := repo.GetDeliveryAttempts(ctx, id)
+	require.NoError(t, err)
+	require.Len(t, attempts, 2)
+	assert.Equal(t, 1, attempts[0].AttemptNumber)
+	assert.Equal(t, 2, attempts[1].AttemptNumber)
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, []string{"1", "2"}, got)
 }

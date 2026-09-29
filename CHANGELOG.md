@@ -3,6 +3,19 @@
 All notable changes to go-hookd. Earlier releases are described in their tag
 commit messages (`git log --tags`) and in README "Upgrading to vX" sections.
 
+## v0.11.2 — 2026-09-29
+
+### Fixed
+- **The dead-letter path lost the exhausting attempt's count.** The Manager
+  moved a delivery to the dead letter queue with `MoveToDeadLetter`, which sets
+  only status and completed_at, so the incremented `attempt_count` was never
+  written. With v0.11.1's "keep counting on redrive" a redriven delivery then
+  re-sent `X-Webhook-Attempt: 1` and its attempt record collided with the
+  first and was lost. The dead-letter transition is now one `UpdateDelivery`
+  that persists status, completed_at and the attempt count (found by
+  vAudience/agora#28's integration suite). `Repository.MoveToDeadLetter` is
+  unchanged for direct callers.
+
 ## v0.11.1 — 2026-09-29
 
 Fixes found while converging agora onto go-hookd (vAudience/agora#28).
