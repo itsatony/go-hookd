@@ -105,3 +105,30 @@ func TestTruncateAndStorableText_ValidUTF8(t *testing.T) {
 	assert.True(t, utf8.ValidString(cut), cut)
 	assert.True(t, utf8.ValidString(storableText("ok\xff\xfebinary")))
 }
+
+func TestEgress_ORCHIDRefused(t *testing.T) {
+	strict := egressPolicy{}
+	for _, a := range []string{"2001:10::1", "2001:20::1", "2001:2f:ffff::1"} {
+		assert.False(t, strict.AdmitsIP(netip.MustParseAddr(a)), a)
+	}
+}
+
+func TestInlineIdempotencyScope(t *testing.T) {
+	a := inlineIdempotencyScope("t1", "https://example.com/h")
+	assert.True(t, strings.HasPrefix(a, InlineIdempotencyScopePrefix))
+	assert.Len(t, a, len(InlineIdempotencyScopePrefix)+64)
+	assert.NotEqual(t, a, inlineIdempotencyScope("t2", "https://example.com/h"), "tenant-separated")
+	assert.NotEqual(t, a, inlineIdempotencyScope("t1", "https://example.com/i"))
+	assert.Equal(t, a, inlineIdempotencyScope("t1", "https://example.com/h"))
+}
+
+func TestWithoutCircuitBreaker_WritesNoBreakerState(t *testing.T) {
+	rc := newReceiver(t, "stored-secret-value-123", http.StatusInternalServerError)
+	m, repo := newEgressTestManager(t, WithAllowPrivateDestinations(), WithoutCircuitBreaker())
+	d := seedSubscriptionDelivery(t, m, repo, rc.server.URL, "stored-secret-value-123")
+	m.processDelivery(context.Background(), claimForTest(t, m, d))
+	assert.Equal(t, int32(1), rc.hits.Load())
+	repo.mu.RLock()
+	defer repo.mu.RUnlock()
+	assert.Empty(t, repo.circuitBreakerState, "no breaker row may be written")
+}

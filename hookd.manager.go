@@ -52,6 +52,7 @@ type Manager struct {
 	// the default transport) by buildHTTPClient, never used as-is.
 	customHTTPClient  *http.Client
 	secretResolver    SecretResolver // v0.11.0, hookd.secret.go; never nil
+	circuitBreakerOff bool           // v0.11.1 WithoutCircuitBreaker
 	egressRefusalHook func(cause string)
 	egressResolver    egressHostResolver
 	workerSem         chan struct{}
@@ -510,7 +511,11 @@ func (m *Manager) processDelivery(parent context.Context, delivery *Delivery) {
 	}
 
 	// Check circuit breaker (using target URL)
-	cbState, err := m.repo.GetCircuitBreakerState(ctx, targetURL)
+	var cbState *CircuitBreakerState
+	var err error
+	if !m.circuitBreakerOff {
+		cbState, err = m.repo.GetCircuitBreakerState(ctx, targetURL)
+	}
 	if err != nil {
 		m.logger.Error("failed to get circuit breaker state",
 			zap.String("delivery_id", delivery.ID),
@@ -931,6 +936,9 @@ func (m *Manager) handleDeliveryFailure(ctx context.Context, delivery *Delivery,
 
 // updateCircuitBreakerSuccess records a successful delivery for circuit breaker.
 func (m *Manager) updateCircuitBreakerSuccess(ctx context.Context, endpoint string) {
+	if m.circuitBreakerOff {
+		return
+	}
 	state, err := m.repo.GetCircuitBreakerState(ctx, endpoint)
 	if err != nil {
 		m.logger.Error("failed to get circuit breaker state",
@@ -977,6 +985,9 @@ func (m *Manager) updateCircuitBreakerSuccess(ctx context.Context, endpoint stri
 
 // updateCircuitBreakerFailure records a failed delivery for circuit breaker.
 func (m *Manager) updateCircuitBreakerFailure(ctx context.Context, endpoint string) {
+	if m.circuitBreakerOff {
+		return
+	}
 	state, err := m.repo.GetCircuitBreakerState(ctx, endpoint)
 	if err != nil {
 		m.logger.Error("failed to get circuit breaker state",
@@ -1100,4 +1111,16 @@ func (n *noOpEventBus) Publish(topic string, data any) {}
 // Subscribe is a no-op.
 func (n *noOpEventBus) Subscribe(topic string, handler func(any)) func() {
 	return func() {}
+}
+
+// WithoutCircuitBreaker switches hookd's per-endpoint circuit breaker off
+// entirely (v0.11.1): no breaker state is read or WRITTEN. For a consumer that
+// runs its own breaker (e.g. per subscription), and must not accumulate
+// breaker rows keyed by endpoint URL — rows that carry no tenant and so escape
+// tenant-scoped erasure and retention.
+func WithoutCircuitBreaker() ManagerOption {
+	return func(m *Manager) error {
+		m.circuitBreakerOff = true
+		return nil
+	}
 }

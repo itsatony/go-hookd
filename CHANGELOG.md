@@ -3,6 +3,42 @@
 All notable changes to go-hookd. Earlier releases are described in their tag
 commit messages (`git log --tags`) and in README "Upgrading to vX" sections.
 
+## v0.11.1 — 2026-09-29
+
+Fixes found while converging agora onto go-hookd (vAudience/agora#28).
+
+### Fixed
+- **Idempotency never deduplicated on PostgreSQL.** `StoreIdempotencyKey` was an
+  unconditional upsert, so `QueueDelivery`/`QueueInlineDelivery` with a repeated
+  key queued a second delivery (only the mock refused). It now refuses a key
+  that is still live (conflict → `NewIdempotencyError`) and takes over an
+  expired one.
+- **Every keyed `QueueInlineDelivery` failed on PostgreSQL.** The idempotency
+  scope had a foreign key to subscriptions, and an inline delivery's scope is
+  not a subscription. `EnsureSchema` drops that FK **in place** (no version
+  bump; `schemaObsoleteConstraints`), and the inline scope is now
+  `inline:` + sha256(tenant, URL) — fixed length (a URL could exceed the column)
+  and tenant-separated (one tenant's key no longer suppresses another's).
+- **A redrive re-used attempt numbers.** `RequeueDeadLetter` reset
+  `attempt_count` to 0, so the next attempt collided with the unique
+  (delivery, attempt_number) index (its record was lost) and
+  `X-Webhook-Attempt` repeated. The count now keeps rising and the budget is
+  renewed (`max_attempts += original`).
+
+### Added
+- `WithoutCircuitBreaker()`: no breaker state is read or written — for a
+  consumer with its own breaker; hookd's breaker rows are keyed by endpoint URL
+  and carry no tenant.
+
+### Security
+- Egress refuses ORCHID `2001:10::/28` and ORCHIDv2 `2001:20::/28`.
+
+### ⚠ Behaviour changes
+- A repeated live idempotency key is now refused on PostgreSQL (as documented
+  all along) — callers that relied on duplicates being accepted will see
+  `IsIdempotencyError`.
+- `RetryDeadLetter` no longer zeroes `AttemptCount`.
+
 ## v0.11.0 — 2026-09-28
 
 Correctness and security. **Consumer action is required only as listed under

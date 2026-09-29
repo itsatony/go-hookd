@@ -1231,29 +1231,7 @@ func (r *PostgresRepository) CheckIdempotency(ctx context.Context, key string, s
 // StoreIdempotencyKey stores an idempotency key with an expiration time.
 // Automatically cleans up expired keys on query.
 func (r *PostgresRepository) StoreIdempotencyKey(ctx context.Context, key string, subscriptionID string, expiresAt time.Time) error {
-	query := fmt.Sprintf(`
-		INSERT INTO %s (
-			idempotency_key, subscription_id, expires_at, created_at
-		) VALUES (
-			$1, $2, $3, $4
-		)
-		ON CONFLICT (idempotency_key, subscription_id) DO UPDATE
-		SET expires_at = EXCLUDED.expires_at`, r.schemaConfig.TableIdempotencyStore())
-
-	_, err := r.db.ExecContext(ctx, query,
-		key,
-		subscriptionID,
-		expiresAt,
-		time.Now(),
-	)
-
-	if err != nil {
-		return cuserr.NewExternalError("database", "postgres", err,
-			cuserr.WithMetadata("operation", "store_idempotency_key"),
-		)
-	}
-
-	return nil
+	return pgStoreIdempotencyKey(ctx, r.db, r.schemaConfig.TableIdempotencyStore(), key, subscriptionID, expiresAt)
 }
 
 // =============================================================================

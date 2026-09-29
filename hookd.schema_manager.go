@@ -457,6 +457,7 @@ const (
 	sqlResetLockTimeout       = "RESET lock_timeout"
 	opCheckAdditiveColumns    = "check_additive_columns"
 	opAddAdditiveColumn       = "add_additive_column"
+	opDropObsoleteConstraint  = "drop_obsolete_constraint"
 )
 
 // missingAdditiveColumns lists the additive columns the schema lacks.
@@ -488,11 +489,19 @@ func (m *SchemaManager) missingAdditiveColumns(ctx context.Context, q querier) (
 // schema lock and re-checks, so concurrent boots add each column once.
 func (m *SchemaManager) ensureAdditiveColumns(ctx context.Context) error {
 	missing, err := m.missingAdditiveColumns(ctx, m.db)
-	if err != nil || len(missing) == 0 {
+	if err != nil {
+		return err
+	}
+	obsolete, err := m.presentObsoleteConstraints(ctx, m.db)
+	if err != nil || (len(missing) == 0 && len(obsolete) == 0) {
 		return err
 	}
 	return m.withSchemaLock(ctx, func(conn *sql.Conn) error {
 		missing, err := m.missingAdditiveColumns(ctx, conn)
+		if err != nil {
+			return err
+		}
+		obsolete, err := m.presentObsoleteConstraints(ctx, conn)
 		if err != nil {
 			return err
 		}
@@ -515,6 +524,58 @@ func (m *SchemaManager) ensureAdditiveColumns(ctx context.Context) error {
 				)
 			}
 		}
+		for _, c := range obsolete {
+			stmt := fmt.Sprintf(`ALTER TABLE %s DROP CONSTRAINT IF EXISTS %s`,
+				m.schemaConfig.tableName(c.tableSuffix), m.obsoleteConstraintName(c))
+			if _, err := conn.ExecContext(ctx, stmt); err != nil {
+				return cuserr.NewExternalError("database", "postgres", err,
+					cuserr.WithMetadata("operation", opDropObsoleteConstraint),
+				)
+			}
+		}
 		return nil
 	})
+}
+
+// obsoleteConstraint is a baseline constraint later releases removed IN PLACE
+// (same no-version-bump rule as additiveColumn: dropping a constraint is
+// invisible to older binaries).
+type obsoleteConstraint struct {
+	tableSuffix string
+	// nameFormat takes the prefix, e.g. "fk_%s_hookd_idempotency_subscription".
+	nameFormat string
+}
+
+// schemaObsoleteConstraints are dropped from existing schemas by EnsureSchema.
+var schemaObsoleteConstraints = []obsoleteConstraint{
+	// v0.11.1: the idempotency scope of an inline delivery is not a
+	// subscription id, so this FK made every keyed QueueInlineDelivery fail.
+	{tableSuffix: TableSuffixIdempotencyStore, nameFormat: "fk_%s_hookd_idempotency_subscription"},
+}
+
+func (m *SchemaManager) obsoleteConstraintName(c obsoleteConstraint) string {
+	return fmt.Sprintf(c.nameFormat, m.schemaConfig.Prefix())
+}
+
+// presentObsoleteConstraints lists the obsolete constraints the schema still has
+// (resolved through search_path via to_regclass, like the DDL).
+func (m *SchemaManager) presentObsoleteConstraints(ctx context.Context, q querier) ([]obsoleteConstraint, error) {
+	var present []obsoleteConstraint
+	for _, c := range schemaObsoleteConstraints {
+		var found bool
+		err := q.QueryRowContext(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM pg_constraint
+				WHERE conrelid = to_regclass($1) AND conname = $2
+			)`, m.schemaConfig.tableName(c.tableSuffix), m.obsoleteConstraintName(c)).Scan(&found)
+		if err != nil {
+			return nil, cuserr.NewExternalError("database", "postgres", err,
+				cuserr.WithMetadata("operation", opCheckAdditiveColumns),
+			)
+		}
+		if found {
+			present = append(present, c)
+		}
+	}
+	return present, nil
 }

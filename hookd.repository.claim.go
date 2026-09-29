@@ -63,6 +63,7 @@ const (
 	opRenewDeliveryClaim     = "renew_delivery_claim"
 	opReleaseDeliveryClaim   = "release_delivery_claim"
 	opRequeueDeadLetter      = "requeue_dead_letter"
+	opStoreIdempotencyKey    = "store_idempotency_key"
 	opRowsAffected           = "rows_affected"
 	metaKeyOperation         = "operation"
 	errSourceDatabase        = "database"
@@ -213,7 +214,8 @@ func pgReleaseDeliveryClaim(ctx context.Context, q claimExecer, table, id string
 func pgRequeueDeadLetter(ctx context.Context, q claimExecer, table, id string) (*Delivery, error) {
 	query := fmt.Sprintf(`
 		UPDATE %s
-		SET status = $2, attempt_count = 0, next_retry_at = NOW(), completed_at = NULL
+		SET status = $2, max_attempts = attempt_count + max_attempts,
+		    next_retry_at = NOW(), completed_at = NULL
 		WHERE id = $1 AND status = $3
 		RETURNING id, subscription_id, tenant_id, event_type, payload,
 		          url, secret, status, attempt_count, max_attempts,
@@ -256,7 +258,7 @@ func mockRequeue(deliveries map[string]*Delivery, id string) (*Delivery, error) 
 	}
 	now := mockClaimTime()
 	d.Status = DeliveryStatusPending
-	d.AttemptCount = 0
+	d.MaxAttempts = d.AttemptCount + d.MaxAttempts
 	d.NextRetryAt = &now
 	d.CompletedAt = nil
 	return copyDelivery(d), nil
@@ -451,4 +453,30 @@ func (tx *MockRepositoryTx) ReleaseDeliveryClaim(ctx context.Context, id string,
 	tx.mu.Lock()
 	defer tx.mu.Unlock()
 	return mockRelease(tx.deliveries, id, claimedUntil, retryAt)
+}
+
+// pgStoreIdempotencyKey records key within scope, REFUSING a key that is still
+// live (a cuserr conflict — what QueueDelivery / QueueInlineDelivery treat as a
+// duplicate) and taking over an expired one. Until v0.11.1 this was an
+// unconditional upsert, so on PostgreSQL no duplicate was ever detected (only
+// the mock refused one).
+func pgStoreIdempotencyKey(ctx context.Context, q claimExecer, table, key, scope string, expiresAt time.Time) error {
+	query := fmt.Sprintf(`
+		INSERT INTO %[1]s AS t (idempotency_key, subscription_id, expires_at, created_at)
+		VALUES ($1, $2, $3, NOW())
+		ON CONFLICT (idempotency_key, subscription_id) DO UPDATE
+		SET expires_at = EXCLUDED.expires_at, created_at = EXCLUDED.created_at
+		WHERE t.expires_at <= NOW()`, table)
+	res, err := q.ExecContext(ctx, query, key, scope, expiresAt)
+	if err != nil {
+		return claimDB(err, opStoreIdempotencyKey)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return claimDB(err, opRowsAffected)
+	}
+	if n == 0 {
+		return cuserr.NewConflictError("idempotency_key", key, ErrMsgDuplicateIdempotencyKey)
+	}
+	return nil
 }

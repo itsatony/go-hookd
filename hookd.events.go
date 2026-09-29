@@ -6,6 +6,8 @@ package hookd
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"time"
 
 	"github.com/itsatony/go-cuserr"
@@ -220,8 +222,10 @@ func (m *Manager) QueueInlineDelivery(ctx context.Context, req *QueueInlineDeliv
 	// Handle idempotency
 	if req.IdempotencyKey != "" {
 		expiresAt := time.Now().Add(time.Duration(m.config.IdempotencyTTLHours) * time.Hour)
-		// Use URL as "subscription_id" substitute for idempotency scope
-		err := m.repo.StoreIdempotencyKey(ctx, req.IdempotencyKey, req.URL, expiresAt)
+		// Scope: tenant + URL, hashed — never the bare URL, which is longer
+		// than the scope column allows and would let one tenant's key suppress
+		// another tenant's delivery to the same URL.
+		err := m.repo.StoreIdempotencyKey(ctx, req.IdempotencyKey, inlineIdempotencyScope(req.TenantID, normalizeURL(req.URL)), expiresAt)
 		if err != nil {
 			if IsConflictError(err) {
 				m.logger.Info("idempotent inline delivery request detected",
@@ -495,4 +499,11 @@ func (m *Manager) ListDeliveries(ctx context.Context, filter *DeliveryFilter) ([
 	}
 
 	return deliveries, nil
+}
+
+// inlineIdempotencyScope is the idempotency scope of an inline delivery:
+// "inline:" + hex(sha256(tenantID NUL url)) — fixed length, tenant-separated.
+func inlineIdempotencyScope(tenantID, url string) string {
+	sum := sha256.Sum256([]byte(tenantID + "\x00" + url))
+	return InlineIdempotencyScopePrefix + hex.EncodeToString(sum[:])
 }

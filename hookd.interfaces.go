@@ -84,7 +84,9 @@ type Repository interface {
 	RenewDeliveryClaim(ctx context.Context, id string, claimedUntil time.Time, lease time.Duration) (time.Time, error)
 
 	// RequeueDeadLetter atomically moves a dead-lettered delivery back to the
-	// queue (status pending, attempt_count 0, due now, completed_at cleared) ONLY
+	// queue (status pending, due now, completed_at cleared, and a FRESH retry
+	// budget: max_attempts += its original value while attempt_count keeps
+	// counting, so attempt numbers — and X-Webhook-Attempt — never repeat) ONLY
 	// IF it is still dead_letter, and returns the updated row (v0.11.0). A
 	// read-modify-write redrive let two concurrent redrives re-queue a row a
 	// worker had already claimed — a duplicate send. ErrDeliveryNotFound if

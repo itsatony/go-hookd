@@ -101,6 +101,8 @@ var egressReservedPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("2001::/32"),       // RFC 4380 Teredo (embeds an obfuscated IPv4)
 	netip.MustParsePrefix("::ffff:0:0:0/96"), // RFC 6145 / 7915 IPv4-translated (SIIT)
 	netip.MustParsePrefix("5f00::/16"),       // RFC 9602 SRv6 SIDs
+	netip.MustParsePrefix("2001:10::/28"),    // RFC 4843 ORCHID (deprecated)
+	netip.MustParsePrefix("2001:20::/28"),    // RFC 7343 ORCHIDv2
 	netip.MustParsePrefix("3fff::/20"),       // RFC 9637 documentation
 }
 

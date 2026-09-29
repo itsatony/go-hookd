@@ -150,3 +150,26 @@ func TestCleanupByFilter_AllTenantsAloneRefusedAtRepo(t *testing.T) {
 		assert.Error(t, err, name)
 	}
 }
+
+// A redrive keeps counting attempts (fresh budget), so attempt numbers and
+// X-Webhook-Attempt never repeat and no attempt row collides (v0.11.1).
+func TestRequeueDeadLetter_AttemptNumbersKeepRising(t *testing.T) {
+	var got []string
+	m, repo := newEgressTestManager(t, WithAllowPrivateDestinations())
+	srv := httptestServer(t, func(r *http.Request) { got = append(got, r.Header.Get(HeaderAttemptNumber)) })
+	d := seedSubscriptionDelivery(t, m, repo, srv, "stored-secret-value-123")
+	ctx := context.Background()
+	stored, err := repo.GetDelivery(ctx, d.ID)
+	require.NoError(t, err)
+	stored.AttemptCount, stored.MaxAttempts = 3, 3
+	require.NoError(t, repo.UpdateDelivery(ctx, stored))
+	require.NoError(t, repo.MoveToDeadLetter(ctx, d.ID, "test"))
+
+	again, err := repo.RequeueDeadLetter(ctx, d.ID)
+	require.NoError(t, err)
+	assert.Equal(t, 3, again.AttemptCount)
+	assert.Equal(t, 6, again.MaxAttempts, "a fresh budget of the original size")
+
+	m.processDelivery(ctx, claimForTest(t, m, again))
+	assert.Equal(t, []string{"4"}, got)
+}
