@@ -564,11 +564,9 @@ func (r *MockRepository) CreateDeliveryAttempt(ctx context.Context, attempt *Del
 		copyDeliveryAttempt(attempt),
 	)
 
-	// Update delivery's attempt count (mirrors PostgreSQL trigger behavior)
-	if delivery, exists := r.deliveries[attempt.DeliveryID]; exists {
-		delivery.AttemptCount = len(r.deliveryAttempts[attempt.DeliveryID])
-	}
-
+	// ⚠ No attempt_count side effect: PostgreSQL has no trigger that updates
+	// the delivery here (v0.11.2 removed a mock-only one that hid a lost
+	// attempt count on the dead-letter path).
 	return nil
 }
 

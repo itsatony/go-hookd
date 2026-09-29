@@ -14,7 +14,13 @@ commit messages (`git log --tags`) and in README "Upgrading to vX" sections.
   first and was lost. The dead-letter transition is now one `UpdateDelivery`
   that persists status, completed_at and the attempt count (found by
   vAudience/agora#28's integration suite). `Repository.MoveToDeadLetter` is
-  unchanged for direct callers.
+  unchanged for direct callers (and documented as not persisting the count).
+- The mock repository no longer sets `AttemptCount` from `CreateDeliveryAttempt`
+  (it claimed to mirror a PostgreSQL trigger that does not exist — and hid this bug).
+
+### Changed
+- `delivery.dead_letter` / `delivery.failed` events for a dead-lettered delivery
+  now carry `Status: dead_letter` (they reported the stale `pending`).
 
 ## v0.11.1 — 2026-09-29
 
