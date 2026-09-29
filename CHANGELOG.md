@@ -31,7 +31,9 @@ commit messages (`git log --tags`) and in README "Upgrading to vX" sections.
     server-truncated. An existing schema is left as it is (EnsureSchema does
     not recreate a current schema), but the name helpers now return the
     hashed spelling, and a recreate uses it. `DropSchema` also drops the
-    legacy truncated function name so it is not orphaned.
+    legacy truncated function name so it is not orphaned (schema.sql's own
+    drop-and-recreate, which only runs on a future `SchemaVersion` bump, does
+    not yet — add the legacy drop to the template with that bump).
 - `DropSchema` dropped a misspelled circuit-breaker trigger name (harmless:
   the table drop cascaded it).
 
