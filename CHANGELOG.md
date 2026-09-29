@@ -3,6 +3,22 @@
 All notable changes to go-hookd. Earlier releases are described in their tag
 commit messages (`git log --tags`) and in README "Upgrading to vX" sections.
 
+## Unreleased
+
+### Tests
+- `TestE2E_LargePayload` failed under load ("pending"). The cause is that the
+  receiver records a request before it answers, and the delivery status is
+  written only after that answer, so a status read immediately after
+  `WaitForRequests` raced it. It now waits on the status itself
+  (`requireDeliveryStatus`). Every E2E read of a success status that
+  followed a request or a fixed sleep now uses it: SuccessfulDelivery,
+  RetryOnFailure, MultipleDeliveries, EventFiltering, InlineDelivery,
+  CircuitBreakerOpensAndRecovers and SubscriptionLifecycle. The sleeps that
+  gate a NEGATIVE ("still not delivered while paused", "exactly one request")
+  stay, because nothing can be waited on for an absence. The failure
+  reproduced in 7 of 8 concurrent `GOMAXPROCS=1 -race` runs before the fix and
+  in 0 of 8 after.
+
 ## v0.11.4 — 2026-09-29
 
 The release below. **v0.11.3 is retracted:** its tag was created in error on
