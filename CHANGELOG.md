@@ -10,10 +10,14 @@ commit messages (`git log --tags`) and in README "Upgrading to vX" sections.
   receiver records a request before it answers, and the delivery status is
   written only after that answer, so a status read immediately after
   `WaitForRequests` raced it. It now waits on the status itself
-  (`requireDeliveryStatus`). Four sibling E2E tests had the same race: one
-  read the status without waiting, three hid it behind fixed sleeps. They use
-  the same helper. The failure reproduced in 7 of 8 concurrent
-  `GOMAXPROCS=1 -race` runs before the fix and 0 of 8 after.
+  (`requireDeliveryStatus`). Every E2E read of a success status that
+  followed a request or a fixed sleep now uses it: SuccessfulDelivery,
+  RetryOnFailure, MultipleDeliveries, EventFiltering, InlineDelivery,
+  CircuitBreakerOpensAndRecovers and SubscriptionLifecycle. The sleeps that
+  gate a NEGATIVE ("still not delivered while paused", "exactly one request")
+  stay, because nothing can be waited on for an absence. The failure
+  reproduced in 7 of 8 concurrent `GOMAXPROCS=1 -race` runs before the fix and
+  in 0 of 8 after.
 
 ## v0.11.4 — 2026-09-29
 

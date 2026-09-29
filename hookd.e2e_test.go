@@ -871,8 +871,8 @@ func TestE2E_CircuitBreakerOpensAndRecovers(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Wait for delivery to succeed
-	time.Sleep(2 * time.Second)
+	// Wait for delivery to succeed (the breaker is updated before the status)
+	finalDelivery := requireDeliveryStatus(t, repo, recoveryDelivery.ID, DeliveryStatusSuccess)
 
 	// Verify circuit breaker recovered (half_open or closed are both valid)
 	cbState, err = repo.GetCircuitBreakerState(ctx, webhookServer.WebhookURL())
@@ -882,8 +882,6 @@ func TestE2E_CircuitBreakerOpensAndRecovers(t *testing.T) {
 		"Circuit breaker should be in half_open or closed state after successful delivery")
 
 	// Verify recovery delivery succeeded
-	finalDelivery, err := repo.GetDelivery(ctx, recoveryDelivery.ID)
-	require.NoError(t, err)
 	assert.Equal(t, DeliveryStatusSuccess, finalDelivery.Status)
 
 	t.Logf("✓ E2E circuit breaker test passed: opened after failures, recovered after success")
@@ -929,13 +927,8 @@ func TestE2E_SubscriptionLifecycle(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Wait for delivery
-	time.Sleep(1 * time.Second)
-
-	// Verify delivery succeeded
-	finalDelivery1, err := repo.GetDelivery(ctx, delivery1.ID)
-	require.NoError(t, err)
-	assert.Equal(t, DeliveryStatusSuccess, finalDelivery1.Status)
+	// Wait for the delivery to succeed
+	requireDeliveryStatus(t, repo, delivery1.ID, DeliveryStatusSuccess)
 
 	// Pause subscription
 	updatedSub, err := manager.PauseSubscription(ctx, sub.ID)
@@ -970,11 +963,7 @@ func TestE2E_SubscriptionLifecycle(t *testing.T) {
 
 	// If delivery2 was queued during pause, it should now be processed
 	if delivery2 != nil {
-		time.Sleep(1 * time.Second)
-		finalDelivery2, err := repo.GetDelivery(ctx, delivery2.ID)
-		require.NoError(t, err)
-		assert.Equal(t, DeliveryStatusSuccess, finalDelivery2.Status,
-			"Paused delivery should succeed after subscription resumed")
+		requireDeliveryStatus(t, repo, delivery2.ID, DeliveryStatusSuccess)
 	} else {
 		// If delivery was rejected during pause, queue a new one now
 		delivery3, err := manager.QueueDelivery(ctx, &QueueDeliveryRequest{
@@ -983,11 +972,7 @@ func TestE2E_SubscriptionLifecycle(t *testing.T) {
 			Payload:        map[string]any{"test": "resumed"},
 		})
 		require.NoError(t, err)
-		time.Sleep(1 * time.Second)
-		finalDelivery3, err := repo.GetDelivery(ctx, delivery3.ID)
-		require.NoError(t, err)
-		assert.Equal(t, DeliveryStatusSuccess, finalDelivery3.Status,
-			"New delivery should succeed after subscription resumed")
+		requireDeliveryStatus(t, repo, delivery3.ID, DeliveryStatusSuccess)
 	}
 
 	// Disable subscription
@@ -1739,9 +1724,7 @@ func TestE2E_InlineDelivery(t *testing.T) {
 		require.True(t, success, "Should receive inline delivery")
 
 		// Verify delivery status
-		updated, err := manager.GetDelivery(ctx, delivery.ID)
-		require.NoError(t, err)
-		assert.Equal(t, DeliveryStatusSuccess, updated.Status)
+		updated := requireDeliveryStatus(t, repo, delivery.ID, DeliveryStatusSuccess)
 		t.Logf("Inline delivery succeeded: %s", updated.Status)
 
 		// Verify request headers (should have signature but empty subscription_id)
@@ -1982,7 +1965,7 @@ func requireDeliveryStatus(t *testing.T, repo Repository, id, status string) *De
 	t.Helper()
 	var got *Delivery
 	require.Eventually(t, func() bool {
-		d, err := repo.GetDelivery(context.Background(), id)
+		d, err := repo.GetDelivery(t.Context(), id)
 		if err != nil {
 			return false
 		}
