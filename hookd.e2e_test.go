@@ -871,7 +871,8 @@ func TestE2E_CircuitBreakerOpensAndRecovers(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Wait for delivery to succeed (the breaker is updated before the status)
+	// Wait for the delivery to succeed. The breaker went half_open before the
+	// send; its success update follows the status, so either state is valid.
 	finalDelivery := requireDeliveryStatus(t, repo, recoveryDelivery.ID, DeliveryStatusSuccess)
 
 	// Verify circuit breaker recovered (half_open or closed are both valid)
