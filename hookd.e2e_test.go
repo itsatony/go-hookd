@@ -84,10 +84,7 @@ func TestE2E_SuccessfulDelivery(t *testing.T) {
 	assert.Equal(t, 99.99, receivedReq.PayloadJSON["amount"])
 
 	// Verify delivery marked as success
-	time.Sleep(500 * time.Millisecond) // Give manager time to update status
-	finalDelivery, err := repo.GetDelivery(ctx, delivery.ID)
-	require.NoError(t, err)
-	assert.Equal(t, DeliveryStatusSuccess, finalDelivery.Status)
+	finalDelivery := requireDeliveryStatus(t, repo, delivery.ID, DeliveryStatusSuccess)
 	assert.NotNil(t, finalDelivery.CompletedAt)
 
 	t.Logf("✓ E2E test passed: delivery %s completed successfully", delivery.ID)
@@ -526,9 +523,7 @@ func TestE2E_RetryOnFailure(t *testing.T) {
 	assert.True(t, success, "Should receive 3 attempts (2 failures + 1 success)")
 
 	// Verify final delivery status
-	time.Sleep(1 * time.Second)
-	finalDelivery, _ := repo.GetDelivery(ctx, delivery.ID)
-	assert.Equal(t, DeliveryStatusSuccess, finalDelivery.Status)
+	finalDelivery := requireDeliveryStatus(t, repo, delivery.ID, DeliveryStatusSuccess)
 	assert.GreaterOrEqual(t, finalDelivery.AttemptCount, 1, "Should have at least 1 attempt")
 
 	// Verify webhook server received the requests
@@ -597,11 +592,8 @@ func TestE2E_MultipleDeliveries(t *testing.T) {
 	assert.Len(t, requests, deliveryCount, "Should receive exactly %d webhooks", deliveryCount)
 
 	// Verify each delivery completed
-	time.Sleep(1 * time.Second)
-	for i, deliveryID := range deliveryIDs {
-		delivery, err := repo.GetDelivery(ctx, deliveryID)
-		require.NoError(t, err, "Delivery %d should exist", i)
-		assert.Equal(t, DeliveryStatusSuccess, delivery.Status, "Delivery %d should be successful", i)
+	for _, deliveryID := range deliveryIDs {
+		requireDeliveryStatus(t, repo, deliveryID, DeliveryStatusSuccess)
 	}
 
 	t.Logf("✓ E2E multiple deliveries test passed: all %d deliveries completed", deliveryCount)
@@ -1119,13 +1111,8 @@ func TestE2E_EventFiltering(t *testing.T) {
 	assert.True(t, success, "Should receive 2 matching events")
 
 	// Verify both deliveries succeeded
-	finalDelivery1, err := repo.GetDelivery(ctx, delivery1.ID)
-	require.NoError(t, err)
-	assert.Equal(t, DeliveryStatusSuccess, finalDelivery1.Status)
-
-	finalDelivery2, err := repo.GetDelivery(ctx, delivery2.ID)
-	require.NoError(t, err)
-	assert.Equal(t, DeliveryStatusSuccess, finalDelivery2.Status)
+	requireDeliveryStatus(t, repo, delivery1.ID, DeliveryStatusSuccess)
+	requireDeliveryStatus(t, repo, delivery2.ID, DeliveryStatusSuccess)
 
 	// Verify correct number of requests
 	assert.Equal(t, 2, webhookServer.GetRequestCount())
@@ -1258,9 +1245,7 @@ func TestE2E_LargePayload(t *testing.T) {
 	assert.True(t, success)
 
 	// Verify delivery succeeded
-	finalDelivery, err := repo.GetDelivery(ctx, delivery.ID)
-	require.NoError(t, err)
-	assert.Equal(t, DeliveryStatusSuccess, finalDelivery.Status)
+	requireDeliveryStatus(t, repo, delivery.ID, DeliveryStatusSuccess)
 
 	// Verify payload was received correctly
 	receivedReq := webhookServer.GetLastRequest()
@@ -1984,3 +1969,30 @@ func TestE2E_InlineDelivery(t *testing.T) {
 
 	t.Log("✓ E2E inline delivery test passed: full lifecycle works without subscription")
 }
+
+// requireDeliveryStatus waits until the delivery reaches status and returns it.
+//
+// The receiver records a request BEFORE it answers, and the worker marks the
+// delivery only AFTER it reads the answer, so "the server saw the request"
+// does not mean "the status is written". Reading the status straight after
+// WaitForRequests raced that window: TestE2E_LargePayload failed under load
+// with "pending", and its siblings hid the same race behind fixed sleeps.
+// This waits on the state itself.
+func requireDeliveryStatus(t *testing.T, repo Repository, id, status string) *Delivery {
+	t.Helper()
+	var got *Delivery
+	require.Eventually(t, func() bool {
+		d, err := repo.GetDelivery(context.Background(), id)
+		if err != nil {
+			return false
+		}
+		got = d
+		return d.Status == status
+	}, e2eStatusTimeout, e2eStatusPoll, "delivery %s never reached %q", id, status)
+	return got
+}
+
+const (
+	e2eStatusTimeout = 10 * time.Second
+	e2eStatusPoll    = 5 * time.Millisecond
+)
