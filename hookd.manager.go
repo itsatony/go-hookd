@@ -904,7 +904,7 @@ func (m *Manager) handleDeliveryFailure(ctx context.Context, delivery *Delivery,
 			retryPolicy = DefaultRetryPolicy()
 		}
 
-		backoff := CalculateBackoff(delivery.AttemptCount, retryPolicy)
+		backoff := CalculateBackoff(delivery.attemptInBudget(), retryPolicy)
 		nextRetryAt := time.Now().Add(backoff)
 		delivery.Status = DeliveryStatusPending // Keep as pending so it gets picked up for retry
 		delivery.NextRetryAt = &nextRetryAt

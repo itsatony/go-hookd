@@ -127,6 +127,10 @@ CREATE TABLE {{.Prefix}}_hookd_deliveries (
     -- (v0.11.0; added to existing schemas additively by EnsureSchema)
     idempotency_key VARCHAR(255),
 
+    -- The retry budget the delivery was queued with; a dead-letter redrive
+    -- renews exactly this much (v0.11.1; added in place by EnsureSchema)
+    attempt_budget INTEGER,
+
     -- Constraints
     CONSTRAINT chk_{{.Prefix}}_hookd_deliveries_status CHECK (status IN ('pending', 'success', 'failed', 'dead_letter')),
     CONSTRAINT chk_{{.Prefix}}_hookd_deliveries_attempts CHECK (attempt_count >= 0),

@@ -25,6 +25,19 @@ Fixes found while converging agora onto go-hookd (vAudience/agora#28).
   `X-Webhook-Attempt` repeated. The count now keeps rising and the budget is
   renewed (`max_attempts += original`).
 
+- **A failed delivery insert stranded its idempotency key.** The key was stored
+  before the row; if the insert failed the key stayed live and the caller's
+  retry was refused as a duplicate — the delivery silently lost. Keyed
+  deliveries are now created first, HELD (not yet due), then the key is stored;
+  a duplicate or error deletes the held row, success releases it.
+- **Redrive budgets compounded.** `max_attempts` now renews by the ORIGINAL
+  budget, persisted in the new nullable `deliveries.attempt_budget` column
+  (added in place), and backoff restarts within each budget.
+- `DeleteSubscription` deletes the subscription's idempotency keys in the same
+  statement (the dropped FK used to cascade them). Inline scopes expire by TTL.
+- The obsolete FK is found by structure (foreign key idempotency → subscriptions),
+  not by name.
+
 ### Added
 - `WithoutCircuitBreaker()`: no breaker state is read or written — for a
   consumer with its own breaker; hookd's breaker rows are keyed by endpoint URL
@@ -38,6 +51,13 @@ Fixes found while converging agora onto go-hookd (vAudience/agora#28).
   all along) — callers that relied on duplicates being accepted will see
   `IsIdempotencyError`.
 - `RetryDeadLetter` no longer zeroes `AttemptCount`.
+- **Mixed v0.11.0/v0.11.1 fleets give no dedupe guarantee** during the rollout
+  (v0.11.0 still upserts, and uses the bare-URL inline scope). Schema changes
+  are safe both ways.
+
+### Known limits
+- Table prefixes above ~20 characters can make generated index names collide
+  after PostgreSQL's 63-byte truncation (pre-existing; tracked separately).
 
 ## v0.11.0 — 2026-09-28
 

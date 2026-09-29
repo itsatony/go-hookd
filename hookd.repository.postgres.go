@@ -346,6 +346,7 @@ func scanDelivery(scanner interface {
 	var url sql.NullString
 	var secret sql.NullString
 	var idempotencyKey sql.NullString
+	var attemptBudget sql.NullInt64
 
 	err := scanner.Scan(
 		&dlv.ID,
@@ -362,11 +363,13 @@ func scanDelivery(scanner interface {
 		&completedAt,
 		&dlv.CreatedAt,
 		&idempotencyKey,
+		&attemptBudget,
 	)
 	if err != nil {
 		return nil, err
 	}
 	dlv.IdempotencyKey = idempotencyKey.String
+	dlv.AttemptBudget = int(attemptBudget.Int64)
 
 	// Handle nullable subscription ID (for inline deliveries)
 	if subscriptionID.Valid {
@@ -669,7 +672,10 @@ func (r *PostgresRepository) UpdateSubscription(ctx context.Context, sub *Subscr
 // Returns ErrSubscriptionNotFound if the subscription does not exist.
 // Cascades to delete all related deliveries and attempts.
 func (r *PostgresRepository) DeleteSubscription(ctx context.Context, id string) error {
-	query := fmt.Sprintf(`DELETE FROM %s WHERE id = $1`, r.schemaConfig.TableSubscriptions())
+	// The subscription's idempotency keys go with it, in the same statement
+	// (the FK that used to cascade them is gone since v0.11.1).
+	query := fmt.Sprintf(`WITH keys AS (DELETE FROM %s WHERE subscription_id = $1)
+		DELETE FROM %s WHERE id = $1`, r.schemaConfig.TableIdempotencyStore(), r.schemaConfig.TableSubscriptions())
 
 	result, err := r.db.ExecContext(ctx, query, id)
 	if err != nil {
@@ -804,9 +810,9 @@ func (r *PostgresRepository) CreateDelivery(ctx context.Context, delivery *Deliv
 		INSERT INTO %s (
 			id, subscription_id, tenant_id, event_type, payload,
 			url, secret, status, attempt_count, max_attempts,
-			next_retry_at, completed_at, created_at, idempotency_key
+			next_retry_at, completed_at, created_at, idempotency_key, attempt_budget
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
 		)`, r.schemaConfig.TableDeliveries())
 
 	_, err = r.db.ExecContext(ctx, query,
@@ -824,6 +830,7 @@ func (r *PostgresRepository) CreateDelivery(ctx context.Context, delivery *Deliv
 		delivery.CompletedAt,
 		delivery.CreatedAt,
 		nullableString(delivery.IdempotencyKey),
+		delivery.attemptBudgetOrMax(),
 	)
 
 	if err != nil {
@@ -841,7 +848,7 @@ func (r *PostgresRepository) GetDelivery(ctx context.Context, id string) (*Deliv
 	query := fmt.Sprintf(`
 		SELECT id, subscription_id, tenant_id, event_type, payload,
 		       url, secret, status, attempt_count, max_attempts,
-		       next_retry_at, completed_at, created_at, idempotency_key
+		       next_retry_at, completed_at, created_at, idempotency_key, attempt_budget
 		FROM %s
 		WHERE id = $1`, r.schemaConfig.TableDeliveries())
 
@@ -946,7 +953,7 @@ func (r *PostgresRepository) ListDeliveries(ctx context.Context, filter *Deliver
 	query := fmt.Sprintf(`
 		SELECT id, subscription_id, tenant_id, event_type, payload,
 		       url, secret, status, attempt_count, max_attempts,
-		       next_retry_at, completed_at, created_at, idempotency_key
+		       next_retry_at, completed_at, created_at, idempotency_key, attempt_budget
 		FROM %s
 		WHERE 1=1`, r.schemaConfig.TableDeliveries())
 

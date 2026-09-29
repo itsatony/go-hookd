@@ -73,3 +73,47 @@ func TestStoreIdempotencyKey_RefusesLiveTakesOverExpired(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, ok)
 }
+
+func TestRedriveBudgetAndSubscriptionKeyErasureOnPostgres(t *testing.T) {
+	dsn := setupClaimSchema(t)
+	repo := newRepo(t, dsn)
+	ctx := context.Background()
+	ids := seedInline(t, repo, 1, "https://example.invalid/h", e2eTenant)
+	for i := 1; i <= 3; i++ {
+		cur, err := repo.GetDelivery(ctx, ids[0])
+		require.NoError(t, err)
+		cur.AttemptCount = cur.MaxAttempts
+		require.NoError(t, repo.UpdateDelivery(ctx, cur))
+		require.NoError(t, repo.MoveToDeadLetter(ctx, ids[0], "t"))
+		again, err := repo.RequeueDeadLetter(ctx, ids[0])
+		require.NoError(t, err)
+		assert.Equal(t, 3*i+3, again.MaxAttempts, "redrive %d renews the original 3", i)
+		assert.Equal(t, 3, again.AttemptBudget)
+	}
+
+	sub := &hookd.Subscription{ID: "sub_erase", TenantID: e2eTenant, URL: "https://example.invalid/s",
+		Secret: "s3cr3t-s3cr3t-s3cr3t", EventTypes: []string{"e"}, Status: hookd.SubscriptionStatusActive,
+		RetryPolicy: hookd.DefaultRetryPolicy()}
+	require.NoError(t, repo.CreateSubscription(ctx, sub))
+	require.NoError(t, repo.StoreIdempotencyKey(ctx, "k-sub", sub.ID, time.Now().Add(time.Hour)))
+	require.NoError(t, repo.DeleteSubscription(ctx, sub.ID))
+	live, err := repo.CheckIdempotency(ctx, "k-sub", sub.ID)
+	require.NoError(t, err)
+	assert.False(t, live, "a deleted subscription's keys go with it")
+}
+
+// The obsolete FK is found by STRUCTURE, not by its spelled name (identifiers
+// can be truncated or renamed): a renamed FK is dropped too.
+func TestEnsureSchema_DropsObsoleteFKWhateverItsName(t *testing.T) {
+	dsn := setupClaimSchema(t)
+	db := openDB(t, dsn)
+	_, err := db.Exec(fmt.Sprintf(`ALTER TABLE %[1]s_hookd_idempotency_store
+		ADD CONSTRAINT "some other name" FOREIGN KEY (subscription_id)
+		REFERENCES %[1]s_hookd_subscriptions(id)`, claimPrefix))
+	require.NoError(t, err)
+	require.NoError(t, ensureConcurrently(t, dsn, claimPrefix, 1)[0])
+	var n int
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM pg_constraint WHERE contype = 'f'
+		AND conrelid = to_regclass($1)`, claimPrefix+"_hookd_idempotency_store").Scan(&n))
+	assert.Equal(t, 0, n)
+}

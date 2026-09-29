@@ -152,6 +152,7 @@ func copyDelivery(dlv *Delivery) *Delivery {
 		URL:            dlv.URL,
 		Secret:         dlv.Secret,
 		IdempotencyKey: dlv.IdempotencyKey,
+		AttemptBudget:  dlv.AttemptBudget,
 	}
 
 	if dlv.Payload != nil {
@@ -647,7 +648,7 @@ func (r *MockRepository) StoreIdempotencyKey(ctx context.Context, key string, su
 			return cuserr.NewConflictError(
 				"idempotency_key",
 				key,
-				fmt.Sprintf("duplicate idempotency key for subscription %s", subscriptionID),
+				ErrMsgDuplicateIdempotencyKey,
 			)
 		}
 	}
@@ -1350,7 +1351,7 @@ func (tx *MockRepositoryTx) StoreIdempotencyKey(ctx context.Context, key string,
 			return cuserr.NewConflictError(
 				"idempotency_key",
 				key,
-				fmt.Sprintf("duplicate idempotency key for subscription %s", subscriptionID),
+				ErrMsgDuplicateIdempotencyKey,
 			)
 		}
 	}

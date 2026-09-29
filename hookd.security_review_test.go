@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
@@ -131,4 +132,76 @@ func TestWithoutCircuitBreaker_WritesNoBreakerState(t *testing.T) {
 	repo.mu.RLock()
 	defer repo.mu.RUnlock()
 	assert.Empty(t, repo.circuitBreakerState, "no breaker row may be written")
+}
+
+func TestInlineIdempotencyScope_HostCaseInsensitive(t *testing.T) {
+	assert.Equal(t, inlineIdempotencyScope("t", "https://Example.COM/h"), inlineIdempotencyScope("t", "https://example.com/h"))
+	assert.NotEqual(t, inlineIdempotencyScope("t", "https://example.com/H"), inlineIdempotencyScope("t", "https://example.com/h"), "path stays case-sensitive")
+}
+
+// Three redrives renew the ORIGINAL budget each time (never compounding), and
+// backoff restarts within each budget.
+func TestRequeueDeadLetter_BudgetRenewsNotCompounds(t *testing.T) {
+	m, repo := newEgressTestManager(t)
+	ctx := context.Background()
+	d := createTestDelivery(t, "dlv_budget", "", "tenant_b")
+	d.MaxAttempts = 5
+	require.NoError(t, repo.CreateDelivery(ctx, d))
+	_ = m
+	for i := 1; i <= 3; i++ {
+		cur, err := repo.GetDelivery(ctx, d.ID)
+		require.NoError(t, err)
+		cur.AttemptCount = cur.MaxAttempts
+		require.NoError(t, repo.UpdateDelivery(ctx, cur))
+		require.NoError(t, repo.MoveToDeadLetter(ctx, d.ID, "test"))
+		again, err := repo.RequeueDeadLetter(ctx, d.ID)
+		require.NoError(t, err)
+		assert.Equal(t, 5*i, again.AttemptCount)
+		assert.Equal(t, 5*i+5, again.MaxAttempts, "redrive %d renews exactly 5", i)
+		again.AttemptCount++
+		assert.Equal(t, 1, again.attemptInBudget(), "backoff restarts")
+	}
+}
+
+// failCreateOnce fails the first CreateDelivery.
+type failCreateOnce struct {
+	*MockRepository
+	failed bool
+}
+
+func (f *failCreateOnce) CreateDelivery(ctx context.Context, d *Delivery) error {
+	if !f.failed {
+		f.failed = true
+		return cuserrInternalForTest()
+	}
+	return f.MockRepository.CreateDelivery(ctx, d)
+}
+
+// A failed insert must not strand a live idempotency key: the caller's retry
+// queues the delivery instead of being told it is a duplicate (v0.11.1).
+func TestQueueDelivery_FailedInsertDoesNotStrandKey(t *testing.T) {
+	repo := &failCreateOnce{MockRepository: NewMockRepository()}
+	m, err := NewManager(NewConfig("postgres://test"), repo)
+	require.NoError(t, err)
+	ctx := context.Background()
+	require.NoError(t, m.Start(ctx))
+	defer func() { _ = m.Stop() }()
+	sub := createTestSubscription(t, "sub_k", "tenant_k", "https://example.com/h")
+	require.NoError(t, repo.CreateSubscription(ctx, sub))
+	req := &QueueDeliveryRequest{SubscriptionID: sub.ID, EventType: sub.EventTypes[0], Payload: map[string]any{"a": 1}, IdempotencyKey: "key-1"}
+
+	_, err = m.QueueDelivery(ctx, req)
+	require.Error(t, err)
+	assert.False(t, IsIdempotencyError(err))
+	d, err := m.QueueDelivery(ctx, req)
+	require.NoError(t, err, "the retry must succeed")
+	stored, err := repo.GetDelivery(ctx, d.ID)
+	require.NoError(t, err)
+	assert.False(t, stored.NextRetryAt.After(time.Now().Add(time.Second)), "hold released")
+
+	_, err = m.QueueDelivery(ctx, req)
+	assert.True(t, IsIdempotencyError(err), "now it is a duplicate")
+	all, err := repo.ListDeliveries(ctx, &DeliveryFilter{AllTenants: true})
+	require.NoError(t, err)
+	assert.Len(t, all, 1, "the duplicate's held row was deleted")
 }

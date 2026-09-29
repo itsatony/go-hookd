@@ -40,3 +40,7 @@ func httptestServer(t *testing.T, onRequest func(*http.Request)) string {
 	t.Cleanup(s.Close)
 	return s.URL
 }
+
+func cuserrInternalForTest() error {
+	return NewConfigurationError("test", "injected create failure")
+}

@@ -220,7 +220,8 @@ func (r *PostgresRepositoryTx) UpdateSubscription(ctx context.Context, sub *Subs
 
 // DeleteSubscription deletes a subscription within the transaction.
 func (r *PostgresRepositoryTx) DeleteSubscription(ctx context.Context, id string) error {
-	query := `DELETE FROM subscriptions WHERE id = $1`
+	query := fmt.Sprintf(`WITH keys AS (DELETE FROM %s WHERE subscription_id = $1)
+		DELETE FROM %s WHERE id = $1`, r.schemaConfig.TableIdempotencyStore(), r.schemaConfig.TableSubscriptions())
 
 	result, err := r.tx.ExecContext(ctx, query, id)
 	if err != nil {

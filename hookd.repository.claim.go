@@ -114,7 +114,7 @@ func pgClaimPendingDeliveries(ctx context.Context, q claimExecer, table string, 
 		WHERE d.id = due.id
 		RETURNING d.id, d.subscription_id, d.tenant_id, d.event_type, d.payload,
 		          d.url, d.secret, d.status, d.attempt_count, d.max_attempts,
-		          d.next_retry_at, d.completed_at, d.created_at, d.idempotency_key, due.due_at`, table)
+		          d.next_retry_at, d.completed_at, d.created_at, d.idempotency_key, d.attempt_budget, due.due_at`, table)
 
 	rows, err := q.QueryContext(ctx, query, DeliveryStatusPending, limit, lease.Microseconds())
 	if err != nil {
@@ -214,12 +214,14 @@ func pgReleaseDeliveryClaim(ctx context.Context, q claimExecer, table, id string
 func pgRequeueDeadLetter(ctx context.Context, q claimExecer, table, id string) (*Delivery, error) {
 	query := fmt.Sprintf(`
 		UPDATE %s
-		SET status = $2, max_attempts = attempt_count + max_attempts,
+		SET status = $2,
+		    max_attempts = attempt_count + COALESCE(attempt_budget, max_attempts),
+		    attempt_budget = COALESCE(attempt_budget, max_attempts),
 		    next_retry_at = NOW(), completed_at = NULL
 		WHERE id = $1 AND status = $3
 		RETURNING id, subscription_id, tenant_id, event_type, payload,
 		          url, secret, status, attempt_count, max_attempts,
-		          next_retry_at, completed_at, created_at, idempotency_key`, table)
+		          next_retry_at, completed_at, created_at, idempotency_key, attempt_budget`, table)
 	delivery, err := scanDelivery(q.QueryRowContext(ctx, query, id, DeliveryStatusPending, DeliveryStatusDeadLetter))
 	if err == nil {
 		return delivery, nil
@@ -258,7 +260,10 @@ func mockRequeue(deliveries map[string]*Delivery, id string) (*Delivery, error) 
 	}
 	now := mockClaimTime()
 	d.Status = DeliveryStatusPending
-	d.MaxAttempts = d.AttemptCount + d.MaxAttempts
+	if d.AttemptBudget == 0 {
+		d.AttemptBudget = d.MaxAttempts
+	}
+	d.MaxAttempts = d.AttemptCount + d.AttemptBudget
 	d.NextRetryAt = &now
 	d.CompletedAt = nil
 	return copyDelivery(d), nil
