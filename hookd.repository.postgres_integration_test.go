@@ -914,52 +914,13 @@ func TestPostgresRepository_CheckIdempotency_Integration(t *testing.T) {
 	require.False(t, exists)
 }
 
-func TestPostgresRepository_StoreIdempotencyKey_Integration(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping integration test in short mode")
-	}
-
-	// Setup
-	pgContainer := SetupPostgresContainer(t)
-	defer pgContainer.Cleanup(t)
-
-	repo, err := NewPostgresRepository(pgContainer.connStr, WithTablePrefix("test"))
-	require.NoError(t, err)
-	defer repo.Close()
-
-	ctx := context.Background()
-
-	// Create subscription first (foreign key requirement)
-	sub := &Subscription{
-		ID:         "sub_store_test",
-		TenantID:   "tenant_1",
-		URL:        "https://example.com/webhook",
-		Secret:     "secret",
-		EventTypes: []string{"test.event"},
-		Status:     SubscriptionStatusActive,
-	}
-	err = repo.CreateSubscription(ctx, sub)
-	require.NoError(t, err)
-
-	subscriptionID := sub.ID
-
-	// Store new key
-	key := "idem_store_test"
-	expiresAt := time.Now().Add(24 * time.Hour)
-	err = repo.StoreIdempotencyKey(ctx, key, subscriptionID, expiresAt)
-	require.NoError(t, err)
-
-	// Verify key was stored
-	exists, err := repo.CheckIdempotency(ctx, key, subscriptionID)
-	require.NoError(t, err)
-	require.True(t, exists)
-
-	// Try to store duplicate key (may succeed with UPSERT or fail with unique constraint)
-	// The implementation might use ON CONFLICT DO UPDATE
-	err = repo.StoreIdempotencyKey(ctx, key, subscriptionID, expiresAt)
-	// Either succeeds (UPSERT) or fails (unique constraint) - both are valid
-	_ = err // Allow either outcome
-}
+// TestPostgresRepository_StoreIdempotencyKey_Integration lived here and ended
+// `_ = err // Allow either outcome`, accepting the upsert that made dedupe
+// impossible on PostgreSQL (go-hookd#10). This file has not compiled since the
+// v0.6.0 prefix change, so the test never ran. Its contract — a live key is
+// refused with a conflict, an expired key is taken over — is now asserted on
+// real PostgreSQL (and, identically, on the mock) by
+// integration/hookd.queue_idempotency_integration_test.go.
 
 // =============================================================================
 // INTEGRATION TESTS - CIRCUIT BREAKER

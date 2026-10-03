@@ -3,9 +3,41 @@
 All notable changes to go-hookd. Earlier releases are described in their tag
 commit messages (`git log --tags`) and in README "Upgrading to vX" sections.
 
-## Unreleased
+## v0.11.5 — 2026-10-03
+
+**No library code changes**: tests only. A consumer on v0.11.1–v0.11.4 gets
+identical runtime behaviour; v0.11.0 consumers must upgrade to get the
+PostgreSQL idempotency fix below (go-hookd#10).
 
 ### Tests
+- **Idempotency dedupe is now pinned on real PostgreSQL at the level a
+  consumer sees it (go-hookd#10).** The defect itself — `StoreIdempotencyKey`
+  was an unconditional upsert, so on PostgreSQL `QueueDelivery` /
+  `QueueInlineDelivery` never refused a repeated key and delivered it again —
+  was fixed in v0.11.1 (see below); go-hookd#10 reported it against v0.11.0.
+  What stayed unpinned was the Manager path on the real store: the dedupe
+  tests ran against `MockRepository`, which always refused, and the one
+  real-PostgreSQL duplicate test ended `_ = err // Allow either outcome` — in
+  a root-package `-tags=integration` file that has not compiled since the
+  v0.6.0 prefix change, so it never ran at all. New in
+  `integration/hookd.queue_idempotency_integration_test.go`, each run against
+  BOTH the mock and PostgreSQL so the two cannot drift again:
+  - the same key queued three times → one delivery row, two
+    `IsIdempotencyError` refusals, exactly one request received (a different
+    key still queues);
+  - 16 concurrent queuers of one key → exactly one wins, 15 refused, one row,
+    one request (every loser's held row is removed);
+  - an expired key is taken over and queues + delivers again, and is live
+    afterwards (PostgreSQL);
+  - one `StoreIdempotencyKey` contract (live → conflict, other scope
+    independent, expired → taken over) on the mock, the mock tx, the
+    PostgreSQL repository and the PostgreSQL tx.
+  Revert-verified: restoring the upsert fails every PostgreSQL arm (mock arms
+  stay green); `DO NOTHING` (expired keys never reusable) fails the expiry
+  arms; skipping the held-row delete fails the row-count arms on both
+  backends; a mock that upserts fails every mock arm.
+  The dead `_ = err` test is removed from the non-compiling file with a
+  pointer to its replacement.
 - `TestE2E_LargePayload` failed under load ("pending"). The cause is that the
   receiver records a request before it answers, and the delivery status is
   written only after that answer, so a status read immediately after
